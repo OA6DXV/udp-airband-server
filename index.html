@@ -127,7 +127,7 @@
 
     .meters {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       gap: 12px;
     }
 
@@ -163,6 +163,39 @@
       background: #090b0f;
     }
 
+    .level {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 12px;
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    .level span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .level-track {
+      position: relative;
+      height: 14px;
+      overflow: hidden;
+      border-radius: 8px;
+      background: linear-gradient(90deg, #4fb477 0%, #4fb477 70%, #e2a84b 70%, #e2a84b 88%, #e15f5f 88%, #e15f5f 100%);
+    }
+
+    .level-mask {
+      position: absolute;
+      inset: 0 0 0 auto;
+      width: 100%;
+      background: rgb(9 11 15 / 82%);
+      transition: width 120ms linear;
+    }
+
     @media (max-width: 720px) {
       header,
       .controls {
@@ -172,7 +205,11 @@
       }
 
       .meters {
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: 1fr;
+      }
+
+      .level {
+        grid-template-columns: 1fr;
       }
 
       button,
@@ -198,13 +235,17 @@
     </section>
 
     <section class="meters">
-      <div class="meter"><span>Format</span><strong id="format">waiting</strong></div>
       <div class="meter"><span>Buffered</span><strong id="buffered">0 ms</strong></div>
-      <div class="meter"><span>Packets</span><strong id="packets">0</strong></div>
-      <div class="meter"><span>Peak</span><strong id="peak">0.000</strong></div>
+      <div class="meter"><span>UDP Bandwidth</span><strong id="udpBandwidth">0 bps</strong></div>
+      <div class="meter"><span>Browser Bandwidth</span><strong id="browserBandwidth">0 bps</strong></div>
     </section>
 
     <canvas id="scope" width="1200" height="240" aria-label="waveform scope"></canvas>
+    <section class="level" aria-label="audio level">
+      <span>Level</span>
+      <div class="level-track"><div id="levelMask" class="level-mask"></div></div>
+      <span id="levelValue">-∞ dB</span>
+    </section>
   </main>
 
   <script>
@@ -213,10 +254,11 @@
     const gainValue = document.getElementById('gainValue');
     const statusEl = document.getElementById('status');
     const statusText = document.getElementById('statusText');
-    const formatEl = document.getElementById('format');
     const bufferedEl = document.getElementById('buffered');
-    const packetsEl = document.getElementById('packets');
-    const peakEl = document.getElementById('peak');
+    const udpBandwidthEl = document.getElementById('udpBandwidth');
+    const browserBandwidthEl = document.getElementById('browserBandwidth');
+    const levelMaskEl = document.getElementById('levelMask');
+    const levelValueEl = document.getElementById('levelValue');
     const canvas = document.getElementById('scope');
     const ctx = canvas.getContext('2d');
 
@@ -226,10 +268,14 @@
     let queuedFrames = 0;
     const targetLatencySeconds = 0.25;
     let nextPlayTime = 0;
-    let packets = 0;
     let gain = Number(gainInput.value);
     let lastPeak = 0;
     let latestWave = new Float32Array(0);
+    let browserBytes = 0;
+    let lastBrowserBytes = 0;
+    let lastUdpBytes = null;
+    let lastStatsAt = null;
+    let wsGeneration = 0;
     let ws;
     const streamName = location.pathname.replace(/^\/+|\/+$/g, '');
 
@@ -258,13 +304,18 @@
     function connectWebSocket() {
       if (ws && ws.readyState <= 1) return;
 
+      const generation = ++wsGeneration;
       ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/${encodeURIComponent(streamName)}/audio`);
       ws.binaryType = 'arraybuffer';
 
-      ws.addEventListener('open', () => setStatus('ready', 'Connected'));
+      ws.addEventListener('open', () => {
+        if (generation === wsGeneration) setStatus('ready', 'Connected');
+      });
       ws.addEventListener('close', () => {
-        setStatus('', 'Disconnected');
-        setTimeout(connectWebSocket, 1000);
+        if (generation === wsGeneration) {
+          setStatus('', 'Disconnected');
+          setTimeout(connectWebSocket, 1000);
+        }
       });
       ws.addEventListener('message', (event) => {
         if (typeof event.data === 'string') {
@@ -273,21 +324,18 @@
             config = message;
             document.title = `${message.label} - UDP Airband Monitor`;
             document.getElementById('title').textContent = message.label;
-            formatEl.textContent = `${message.channels === 1 ? 'mono' : 'stereo'} ${message.sampleRate} Hz`;
           }
           return;
         }
 
+        browserBytes += event.data.byteLength;
         const samples = new Float32Array(event.data);
         const frames = samples.length / config.channels;
         if (!Number.isInteger(frames)) return;
 
         scheduleAudio(samples, frames);
-        packets += 1;
-        packetsEl.textContent = String(packets);
         latestWave = samples;
         lastPeak = Math.max(lastPeak * 0.92, peakOf(samples));
-        peakEl.textContent = lastPeak.toFixed(3);
         setStatus('live', 'Live');
       });
     }
@@ -325,6 +373,47 @@
       return peak;
     }
 
+    async function updateBandwidth() {
+      const now = performance.now();
+      const elapsedSeconds = Math.max(0.001, ((lastStatsAt === null ? now : now - lastStatsAt)) / 1000);
+
+      try {
+        const response = await fetch(`/status/${encodeURIComponent(streamName)}`, { cache: 'no-store' });
+        if (response.ok) {
+          const status = await response.json();
+          if (lastUdpBytes === null || lastStatsAt === null) {
+            lastUdpBytes = status.byteCount;
+            lastStatsAt = now;
+            return;
+          }
+          const udpBitsPerSecond = Math.max(0, (status.byteCount - lastUdpBytes) * 8 / elapsedSeconds);
+          udpBandwidthEl.textContent = formatBandwidth(udpBitsPerSecond);
+          lastUdpBytes = status.byteCount;
+        }
+      } catch {
+        udpBandwidthEl.textContent = 'offline';
+      }
+
+      const browserBitsPerSecond = Math.max(0, (browserBytes - lastBrowserBytes) * 8 / elapsedSeconds);
+      browserBandwidthEl.textContent = formatBandwidth(browserBitsPerSecond);
+      lastBrowserBytes = browserBytes;
+      lastStatsAt = now;
+    }
+
+    function formatBandwidth(bitsPerSecond) {
+      if (bitsPerSecond >= 1_000_000) return `${(bitsPerSecond / 1_000_000).toFixed(2)} Mbps`;
+      if (bitsPerSecond >= 1_000) return `${(bitsPerSecond / 1_000).toFixed(1)} kbps`;
+      return `${Math.round(bitsPerSecond)} bps`;
+    }
+
+    function updateLevelMeter() {
+      const db = lastPeak > 0 ? 20 * Math.log10(lastPeak) : -60;
+      const clamped = Math.max(-60, Math.min(0, db));
+      const percent = (clamped + 60) / 60 * 100;
+      levelMaskEl.style.width = `${100 - percent}%`;
+      levelValueEl.textContent = db <= -60 ? '-∞ dB' : `${db.toFixed(1)} dB`;
+    }
+
     function setStatus(state, text) {
       statusEl.className = `status ${state}`;
       statusText.textContent = text;
@@ -352,9 +441,12 @@
 
       const bufferedMs = config.sampleRate ? Math.round(queuedFrames / config.sampleRate * 1000) : 0;
       bufferedEl.textContent = `${bufferedMs} ms`;
+      lastPeak *= 0.985;
+      updateLevelMeter();
       requestAnimationFrame(draw);
     }
     draw();
+    setInterval(updateBandwidth, 1000);
   </script>
 </body>
 </html>
