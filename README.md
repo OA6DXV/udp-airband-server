@@ -67,6 +67,44 @@ You can also use a custom config path:
 npm start -- --config /etc/udp-airband-server/streams.json
 ```
 
+## HTTPS / TLS
+
+The server can listen with HTTPS directly when you provide a certificate and private key:
+
+```bash
+npm start -- \
+  --tls-key /etc/letsencrypt/live/example.com/privkey.pem \
+  --tls-cert /etc/letsencrypt/live/example.com/fullchain.pem \
+  --https-port 8443
+```
+
+Then open:
+
+```text
+https://SERVER_IP:8443/main
+```
+
+Useful TLS flags:
+
+- `--tls-key`: path to the private key file.
+- `--tls-cert`: path to the certificate/fullchain file.
+- `--https-host`: HTTPS bind address, defaults to `--http-host`.
+- `--https-port`: HTTPS bind port, defaults to the HTTP port.
+- `--redirect-http-to-https true`: keep HTTP open only to redirect browsers to HTTPS.
+
+The plain HTTP listener is still started by default so existing deployments do not break. Use firewall or reverse-proxy rules if you want HTTPS only exposed publicly.
+
+## Status API
+
+The server exposes JSON status endpoints:
+
+```text
+http://SERVER_IP:8585/status
+http://SERVER_IP:8585/status/main
+```
+
+Status includes UDP counters, RAW/OPUS client counts, active listener count, per-listener modes, last activity time, and whether TLS/OPUS are available.
+
 ## RTLSDR-Airband output config
 
 Each Airband output should send to the UDP port assigned to that stream.
