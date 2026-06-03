@@ -344,8 +344,10 @@
     let wsGeneration = 0;
     let controlWs;
     let rawWs;
+    let suppressRawReconnect = false;
     let opusAudio;
     let opusWs;
+    let suppressOpusReconnect = false;
     let opusMediaSource;
     let opusSourceBuffer;
     let opusObjectUrl;
@@ -479,6 +481,10 @@
       rawWs = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/${encodeURIComponent(streamName)}/audio?clientId=${encodeURIComponent(clientId)}`);
       rawWs.binaryType = 'arraybuffer';
       rawWs.addEventListener('close', () => {
+        if (suppressRawReconnect) {
+          suppressRawReconnect = false;
+          return;
+        }
         if (currentMode === 'raw') setTimeout(startRaw, 1000);
       });
       rawWs.addEventListener('message', (event) => {
@@ -531,6 +537,10 @@
           updateConnectionState();
         });
         opusWs.addEventListener('close', () => {
+          if (suppressOpusReconnect) {
+            suppressOpusReconnect = false;
+            return;
+          }
           if (currentMode === 'opus' && audioStarted) setTimeout(startOpus, 1000);
         });
         opusWs.addEventListener('error', () => setStatus('', 'OPUS unavailable'));
@@ -594,7 +604,7 @@
 
     function stopRaw() {
       if (rawWs) {
-        rawWs.onclose = null;
+        suppressRawReconnect = true;
         rawWs.close();
         rawWs = null;
       }
@@ -602,7 +612,7 @@
 
     function stopOpus() {
       if (opusWs) {
-        opusWs.onclose = null;
+        suppressOpusReconnect = true;
         opusWs.close();
         opusWs = null;
       }
