@@ -168,7 +168,7 @@ function handleHttpRequest(req, res) {
 function attachUpgradeHandler(server) {
   server.on('upgrade', (req, socket) => {
     const requestUrl = new URL(req.url, `${socket.encrypted ? 'https' : 'http'}://${req.headers.host || 'localhost'}`);
-    const match = normalizePath(requestUrl.pathname).match(/^\/([^/]+)\/(audio|control)$/);
+    const match = normalizePath(requestUrl.pathname).match(/^\/([^/]+)\/(audio|control|opus)$/);
     if (!match) {
       socket.destroy();
       return;
@@ -208,6 +208,8 @@ function attachUpgradeHandler(server) {
       stream.controlClients.set(socket, clientId);
       addListenerMode(stream, clientId, 'control');
       sendWsJson(socket, streamConfig(stream));
+    } else if (socketType === 'opus') {
+      serveOpusWebSocket(stream, clientId, socket);
     } else {
       stream.rawClients.set(socket, clientId);
       addListenerMode(stream, clientId, 'raw');
@@ -467,7 +469,7 @@ function broadcastStreamStats() {
 }
 
 function sendWsBinary(socket, buffer) {
-  sendFrame(socket, buffer, 0x2);
+  return sendFrame(socket, buffer, 0x2);
 }
 
 function serveOpus(stream, requestUrl, res) {
@@ -534,6 +536,59 @@ function serveOpus(stream, requestUrl, res) {
   res.on('close', () => cleanupOpusClient(stream, opusClient));
 }
 
+function serveOpusWebSocket(stream, clientId, socket) {
+  if (!opusAvailable) {
+    socket.destroy();
+    return;
+  }
+
+  addListenerMode(stream, clientId, 'opus');
+  const ffmpeg = spawn(ffmpegPath, [
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-fflags', 'nobuffer',
+    '-f', 'f32le',
+    '-ar', String(stream.sampleRate),
+    '-ac', String(stream.channels),
+    '-i', 'pipe:0',
+    '-vn',
+    '-c:a', 'libopus',
+    '-application', 'lowdelay',
+    '-b:a', opusBitrate,
+    '-vbr', 'on',
+    '-frame_duration', '20',
+    '-compression_level', '0',
+    '-flush_packets', '1',
+    '-max_delay', '0',
+    '-cluster_time_limit', '40',
+    '-cluster_size_limit', '4096',
+    '-f', 'webm',
+    'pipe:1',
+  ], { stdio: ['pipe', 'pipe', 'ignore'] });
+
+  const opusClient = { clientId, ffmpeg, socket, backpressured: false, droppedBytes: 0 };
+  stream.opusClients.add(opusClient);
+
+  ffmpeg.stdout.on('data', (chunk) => {
+    if (socket.destroyed) {
+      cleanupOpusClient(stream, opusClient);
+      return;
+    }
+    if (!sendWsBinary(socket, chunk)) {
+      ffmpeg.stdout.pause();
+      socket.once('drain', () => ffmpeg.stdout.resume());
+    }
+    addListenerBytes(stream, clientId, 'opus', chunk.length);
+  });
+
+  ffmpeg.stdin.on('drain', () => {
+    opusClient.backpressured = false;
+  });
+  ffmpeg.on('close', () => cleanupOpusClient(stream, opusClient));
+  socket.on('close', () => cleanupOpusClient(stream, opusClient));
+  socket.on('error', () => cleanupOpusClient(stream, opusClient));
+}
+
 function cleanupOpusClient(stream, opusClient) {
   if (!stream.opusClients.has(opusClient)) return;
   stream.opusClients.delete(opusClient);
@@ -541,13 +596,17 @@ function cleanupOpusClient(stream, opusClient) {
   if (!opusClient.ffmpeg.killed) {
     opusClient.ffmpeg.kill('SIGTERM');
   }
-  if (!opusClient.res.destroyed) {
+  if (opusClient.res && !opusClient.res.destroyed) {
     opusClient.res.end();
+  }
+  if (opusClient.socket && !opusClient.socket.destroyed) {
+    opusClient.socket.destroy();
   }
 }
 
 function isWritableOpusClient(opusClient) {
-  return !opusClient.res.destroyed
+  const outputWritable = opusClient.res ? !opusClient.res.destroyed : !opusClient.socket.destroyed;
+  return outputWritable
     && !opusClient.ffmpeg.killed
     && opusClient.ffmpeg.stdin.writable
     && opusClient.ffmpeg.stdin.writableLength <= MAX_OPUS_STDIN_BUFFER_BYTES;
@@ -716,7 +775,7 @@ function sendFrame(socket, payload, opcode) {
     header.writeBigUInt64BE(BigInt(len), 2);
   }
 
-  socket.write(Buffer.concat([header, payload]));
+  return socket.write(Buffer.concat([header, payload]));
 }
 
 function loadTlsOptions() {
