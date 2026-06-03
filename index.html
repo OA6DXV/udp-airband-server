@@ -76,6 +76,11 @@
       background: var(--warn);
     }
 
+    .status.idle .dot {
+      background: var(--warn);
+      box-shadow: 0 0 0 4px rgb(226 168 75 / 16%);
+    }
+
     .status.live .dot {
       background: var(--accent);
       box-shadow: 0 0 0 4px rgb(79 180 119 / 18%);
@@ -127,7 +132,7 @@
 
     .meters {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(4, 1fr);
       gap: 12px;
     }
 
@@ -238,6 +243,7 @@
       <div class="meter"><span>Buffered</span><strong id="buffered">0 ms</strong></div>
       <div class="meter"><span>UDP Bandwidth</span><strong id="udpBandwidth">0 bps</strong></div>
       <div class="meter"><span>Browser Bandwidth</span><strong id="browserBandwidth">0 bps</strong></div>
+      <div class="meter"><span>Last Heard</span><strong id="lastHeard">never</strong></div>
     </section>
 
     <canvas id="scope" width="1200" height="240" aria-label="waveform scope"></canvas>
@@ -257,6 +263,7 @@
     const bufferedEl = document.getElementById('buffered');
     const udpBandwidthEl = document.getElementById('udpBandwidth');
     const browserBandwidthEl = document.getElementById('browserBandwidth');
+    const lastHeardEl = document.getElementById('lastHeard');
     const levelMaskEl = document.getElementById('levelMask');
     const levelValueEl = document.getElementById('levelValue');
     const canvas = document.getElementById('scope');
@@ -274,6 +281,8 @@
     let browserBytes = 0;
     let lastBrowserBytes = 0;
     let lastBrowserStatsAt = performance.now();
+    let lastUdpAt = 0;
+    let lastAudioAt = 0;
     let wsGeneration = 0;
     let ws;
     const streamName = location.pathname.replace(/^\/+|\/+$/g, '');
@@ -325,6 +334,7 @@
             document.getElementById('title').textContent = message.label;
           } else if (message.type === 'stats') {
             udpBandwidthEl.textContent = formatBandwidth(message.udpBitsPerSecond);
+            lastUdpAt = message.lastUdpAt || 0;
           }
           return;
         }
@@ -337,6 +347,7 @@
         scheduleAudio(samples, frames);
         latestWave = samples;
         lastPeak = Math.max(lastPeak * 0.92, peakOf(samples));
+        lastAudioAt = Date.now();
         setStatus('live', 'Live');
       });
     }
@@ -358,11 +369,25 @@
       }
 
       const source = audioContext.createBufferSource();
+      const sourceGain = audioContext.createGain();
       source.buffer = buffer;
-      source.connect(gainNode);
+      source.connect(sourceGain);
+      sourceGain.connect(gainNode);
+      applyResumeFade(sourceGain, nextPlayTime);
       source.start(nextPlayTime);
       nextPlayTime += buffer.duration;
       queuedFrames = Math.max(0, Math.round((nextPlayTime - now) * config.sampleRate));
+    }
+
+    function applyResumeFade(sourceGain, startTime) {
+      const idleMs = Date.now() - lastAudioAt;
+      if (!lastAudioAt || idleMs < 900) {
+        sourceGain.gain.setValueAtTime(1, startTime);
+        return;
+      }
+
+      sourceGain.gain.setValueAtTime(0, startTime);
+      sourceGain.gain.linearRampToValueAtTime(1, startTime + 0.08);
     }
 
     function peakOf(samples) {
@@ -387,6 +412,26 @@
       if (bitsPerSecond >= 1_000_000) return `${(bitsPerSecond / 1_000_000).toFixed(2)} Mbps`;
       if (bitsPerSecond >= 1_000) return `${(bitsPerSecond / 1_000).toFixed(1)} kbps`;
       return `${Math.round(bitsPerSecond)} bps`;
+    }
+
+    function updateLastHeard() {
+      if (!lastUdpAt) {
+        lastHeardEl.textContent = 'never';
+        return;
+      }
+
+      const elapsedMs = Math.max(0, Date.now() - lastUdpAt);
+      if (elapsedMs < 1500) {
+        lastHeardEl.textContent = 'now';
+      } else if (elapsedMs < 60000) {
+        lastHeardEl.textContent = `${Math.round(elapsedMs / 1000)}s ago`;
+      } else {
+        lastHeardEl.textContent = `${Math.round(elapsedMs / 60000)}m ago`;
+      }
+
+      if (ws && ws.readyState === WebSocket.OPEN && elapsedMs > 1200) {
+        setStatus('idle', 'Idle');
+      }
     }
 
     function updateLevelMeter() {
@@ -422,14 +467,21 @@
       }
       ctx.stroke();
 
+      if (audioContext) {
+        queuedFrames = Math.max(0, Math.round((nextPlayTime - audioContext.currentTime) * config.sampleRate));
+      }
       const bufferedMs = config.sampleRate ? Math.round(queuedFrames / config.sampleRate * 1000) : 0;
       bufferedEl.textContent = `${bufferedMs} ms`;
+      if (bufferedMs === 0 && ws && ws.readyState === WebSocket.OPEN && lastUdpAt && Date.now() - lastUdpAt > 1200) {
+        setStatus('idle', 'Idle');
+      }
       lastPeak *= 0.985;
       updateLevelMeter();
       requestAnimationFrame(draw);
     }
     draw();
     setInterval(updateBrowserBandwidth, 1000);
+    setInterval(updateLastHeard, 500);
   </script>
 </body>
 </html>
