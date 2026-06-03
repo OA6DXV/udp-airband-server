@@ -5,6 +5,7 @@ const dgram = require('dgram');
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
@@ -52,6 +53,7 @@ const tlsOptions = tlsEnabled ? loadTlsOptions() : null;
 const streams = loadStreams();
 validateStreams(streams);
 const streamsByName = new Map(streams.map((stream) => [stream.name, stream]));
+const hlsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-hls-'));
 
 const httpServer = http.createServer((req, res) => {
   if (tlsEnabled && redirectHttpToHttps) {
@@ -143,6 +145,17 @@ function handleHttpRequest(req, res) {
       return;
     }
     sendJsonResponse(res, publicStreamStatus(stream));
+    return;
+  }
+
+  const hlsMatch = pathname.match(/^\/([^/]+)\/hls\/([^/]+)\/([^/]+)$/);
+  if (hlsMatch) {
+    const stream = streamsByName.get(hlsMatch[1]);
+    if (!stream) {
+      sendNotFound(res);
+      return;
+    }
+    serveHls(stream, hlsMatch[2], hlsMatch[3], res);
     return;
   }
 
@@ -296,6 +309,7 @@ function normalizeStream(raw) {
     controlClients: new Map(),
     rawClients: new Map(),
     opusClients: new Set(),
+    hlsClients: new Map(),
     listenerStats: new Map(),
     packetCount: 0,
     byteCount: 0,
@@ -338,6 +352,7 @@ function publicStreamStatus(stream) {
     controlClients: stream.controlClients.size,
     rawClients: stream.rawClients.size,
     opusClients: stream.opusClients.size,
+    hlsClients: stream.hlsClients.size,
     activeListeners: activeListeners.length,
     listeners: activeListeners,
     packetCount: stream.packetCount,
@@ -350,6 +365,7 @@ function publicStreamStatus(stream) {
     url: `/${stream.name}`,
     opusAvailable,
     aacAvailable: opusAvailable,
+    hlsAvailable: opusAvailable,
     tlsEnabled,
     softwareVersion: SOFTWARE_VERSION,
   };
@@ -425,6 +441,7 @@ function streamConfig(stream) {
     opusBitrate,
     aacAvailable: opusAvailable,
     aacBitrate,
+    hlsAvailable: opusAvailable,
     tlsEnabled,
     softwareVersion: SOFTWARE_VERSION,
   };
@@ -434,6 +451,7 @@ function broadcastStreamStats() {
   const now = Date.now();
   for (const stream of streams) {
     pruneInactiveListeners(stream, now);
+    pruneInactiveHlsClients(stream, now);
     const lastHeard = getLastHeard(stream, now);
     const elapsedSeconds = Math.max(0.001, (now - stream.lastStatsAt) / 1000);
     const udpBitsPerSecond = Math.max(0, (stream.byteCount - stream.lastStatsByteCount) * 8 / elapsedSeconds);
@@ -474,6 +492,119 @@ function broadcastStreamStats() {
 
 function sendWsBinary(socket, buffer) {
   return sendFrame(socket, buffer, 0x2);
+}
+
+function serveHls(stream, rawClientId, fileName, res) {
+  if (!opusAvailable) {
+    res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('Compressed audio unavailable: ffmpeg not found\n');
+    return;
+  }
+
+  const clientId = normalizeClientId(rawClientId);
+  const hlsClient = ensureHlsClient(stream, clientId);
+  hlsClient.lastRequestAt = Date.now();
+  addListenerMode(stream, clientId, 'hls');
+
+  if (fileName === 'playlist.m3u8') {
+    serveHlsPlaylist(hlsClient, res);
+    return;
+  }
+
+  if (!/^segment-\d+\.ts$/.test(fileName)) {
+    sendNotFound(res);
+    return;
+  }
+
+  const segmentPath = path.join(hlsClient.dir, fileName);
+  fs.readFile(segmentPath, (err, data) => {
+    if (err) {
+      sendNotFound(res);
+      return;
+    }
+    res.writeHead(200, {
+      'content-type': 'video/mp2t',
+      'cache-control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      'pragma': 'no-cache',
+      'expires': '0',
+      'x-content-type-options': 'nosniff',
+    });
+    res.end(data);
+    addListenerBytes(stream, clientId, 'hls', data.length);
+  });
+}
+
+function serveHlsPlaylist(hlsClient, res) {
+  fs.readFile(hlsClient.playlistPath, 'utf8', (err, data) => {
+    const playlist = err ? [
+      '#EXTM3U',
+      '#EXT-X-VERSION:3',
+      '#EXT-X-TARGETDURATION:1',
+      '#EXT-X-MEDIA-SEQUENCE:0',
+      '',
+    ].join('\n') : data;
+
+    res.writeHead(200, {
+      'content-type': 'application/vnd.apple.mpegurl',
+      'cache-control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      'pragma': 'no-cache',
+      'expires': '0',
+      'x-accel-buffering': 'no',
+      'x-content-type-options': 'nosniff',
+    });
+    res.end(playlist);
+  });
+}
+
+function ensureHlsClient(stream, clientId) {
+  const existing = stream.hlsClients.get(clientId);
+  if (existing) return existing;
+
+  const dir = fs.mkdtempSync(path.join(hlsRoot, `${stream.name}-${clientId}-`));
+  const playlistPath = path.join(dir, 'playlist.m3u8');
+  const ffmpeg = spawn(ffmpegPath, hlsArgs(stream), { cwd: dir, stdio: ['pipe', 'ignore', 'ignore'] });
+  const hlsClient = {
+    clientId,
+    mode: 'hls',
+    ffmpeg,
+    dir,
+    playlistPath,
+    backpressured: false,
+    droppedBytes: 0,
+    lastRequestAt: Date.now(),
+  };
+
+  stream.hlsClients.set(clientId, hlsClient);
+  stream.opusClients.add(hlsClient);
+  ffmpeg.stdin.on('drain', () => {
+    hlsClient.backpressured = false;
+  });
+  ffmpeg.on('close', () => cleanupOpusClient(stream, hlsClient));
+  return hlsClient;
+}
+
+function hlsArgs(stream) {
+  return [
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-fflags', 'nobuffer',
+    '-f', 'f32le',
+    '-ar', String(stream.sampleRate),
+    '-ac', String(stream.channels),
+    '-i', 'pipe:0',
+    '-vn',
+    '-c:a', 'aac',
+    '-b:a', aacBitrate,
+    '-ar', '16000',
+    '-flush_packets', '1',
+    '-f', 'hls',
+    '-hls_time', '1',
+    '-hls_list_size', '4',
+    '-hls_flags', 'delete_segments+omit_endlist+independent_segments',
+    '-hls_segment_type', 'mpegts',
+    '-hls_segment_filename', 'segment-%05d.ts',
+    'playlist.m3u8',
+  ];
 }
 
 function serveOpus(stream, requestUrl, res) {
@@ -618,6 +749,9 @@ function compressedWebSocketArgs(stream, mode) {
 function cleanupOpusClient(stream, opusClient) {
   if (!stream.opusClients.has(opusClient)) return;
   stream.opusClients.delete(opusClient);
+  if (opusClient.mode === 'hls') {
+    stream.hlsClients.delete(opusClient.clientId);
+  }
   removeListenerMode(stream, opusClient.clientId, opusClient.mode || 'opus');
   if (!opusClient.ffmpeg.killed) {
     opusClient.ffmpeg.kill('SIGTERM');
@@ -627,6 +761,9 @@ function cleanupOpusClient(stream, opusClient) {
   }
   if (opusClient.socket && !opusClient.socket.destroyed) {
     opusClient.socket.destroy();
+  }
+  if (opusClient.dir) {
+    fs.rm(opusClient.dir, { recursive: true, force: true }, () => {});
   }
 }
 
@@ -737,7 +874,7 @@ function addListenerBytes(stream, clientId, mode, bytes) {
   stats.lastSeenAt = Date.now();
   if (mode === 'raw') stats.rawBytes += bytes;
   if (mode === 'opus') stats.opusBytes += bytes;
-  if (mode === 'aac') stats.aacBytes += bytes;
+  if (mode === 'aac' || mode === 'hls') stats.aacBytes += bytes;
 }
 
 function getActiveListeners(stream) {
@@ -763,6 +900,14 @@ function pruneInactiveListeners(stream, now) {
   for (const [clientId, stats] of stream.listenerStats) {
     if (stats.modes.size === 0 || now - stats.lastSeenAt > 5 * 60 * 1000) {
       stream.listenerStats.delete(clientId);
+    }
+  }
+}
+
+function pruneInactiveHlsClients(stream, now) {
+  for (const hlsClient of stream.hlsClients.values()) {
+    if (now - hlsClient.lastRequestAt > 15000) {
+      cleanupOpusClient(stream, hlsClient);
     }
   }
 }

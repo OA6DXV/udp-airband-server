@@ -705,6 +705,11 @@
         return;
       }
 
+      if (transport.hls) {
+        startHlsCompressed();
+        return;
+      }
+
       if (transport.httpFallback) {
         startHttpOpus();
         return;
@@ -756,6 +761,17 @@
       setupOpusAudioGraph();
       applyOutputGain();
       opusAudio.src = `/${encodeURIComponent(streamName)}/opus?clientId=${encodeURIComponent(clientId)}&t=${Date.now()}`;
+      opusAudio.play().catch(() => setStatus('', 'opusUnavailable'));
+      currentMode = 'opus';
+    }
+
+    function startHlsCompressed() {
+      if (!opusAudio) {
+        ensureOpusAudio();
+      }
+      setupOpusAudioGraph();
+      applyOutputGain();
+      opusAudio.src = `/${encodeURIComponent(streamName)}/hls/${encodeURIComponent(clientId)}/playlist.m3u8?t=${Date.now()}`;
       opusAudio.play().catch(() => setStatus('', 'opusUnavailable'));
       currentMode = 'opus';
     }
@@ -1058,8 +1074,8 @@
       const supportsAac = isMediaSourceTypeSupported(aacMimeType);
       const supportsOpus = isMediaSourceTypeSupported(opusMimeType);
 
-      if (isAppleMobileDevice() && supportsAac) {
-        return { endpoint: 'aac', mimeType: aacMimeType };
+      if (isAppleMobileDevice()) {
+        return { hls: true };
       }
       if (supportsOpus) {
         return { endpoint: 'opus', mimeType: opusMimeType };
