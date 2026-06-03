@@ -11,13 +11,13 @@ The expected stream is raw 32-bit little-endian floating-point PCM:
 ## Run
 
 ```bash
-npm start -- --udp-port 7355 --http-port 8080 --sample-rate 8000 --channels 1
+npm start -- --sample-rate 8000 --channels 1
 ```
 
 Then open:
 
 ```text
-http://127.0.0.1:8080/
+http://SERVER_IP:8585/
 ```
 
 Click `Start Audio`. Browsers require a user gesture before audio playback starts.
@@ -31,7 +31,7 @@ outputs: (
   {
     type = "udp_stream";
     dest_address = "127.0.0.1";
-    dest_port = 7355;
+    dest_port = 8686;
     continuous = true;
   }
 );
@@ -40,7 +40,7 @@ outputs: (
 For stereo channels, run the bridge with:
 
 ```bash
-npm start -- --udp-port 7355 --http-port 8080 --sample-rate 8000 --channels 2
+npm start -- --sample-rate 8000 --channels 2
 ```
 
 If RTLSDR-Airband was built with `NFM`, use `--sample-rate 16000`.
@@ -56,7 +56,7 @@ rate = 8000
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 while True:
     samples = [0.2 * math.sin(2 * math.pi * 1000 * n / rate) for n in range(rate // 8)]
-    sock.sendto(struct.pack('<%df' % len(samples), *samples), ('127.0.0.1', 7355))
+    sock.sendto(struct.pack('<%df' % len(samples), *samples), ('127.0.0.1', 8686))
     time.sleep(0.125)
 PY
 ```

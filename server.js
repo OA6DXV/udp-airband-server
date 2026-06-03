@@ -9,9 +9,9 @@ const crypto = require('crypto');
 
 const args = parseArgs(process.argv.slice(2));
 const udpHost = args.udpHost || '0.0.0.0';
-const udpPort = Number(args.udpPort || args.udp || 7355);
-const httpHost = args.httpHost || '127.0.0.1';
-const httpPort = Number(args.httpPort || args.http || 8080);
+const udpPort = Number(args.udpPort || args.udp || 8686);
+const httpHost = args.httpHost || '0.0.0.0';
+const httpPort = Number(args.httpPort || args.http || 8585);
 const sampleRate = Number(args.sampleRate || 8000);
 const channels = Number(args.channels || 1);
 
