@@ -3,10 +3,14 @@
 
 const dgram = require('dgram');
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
+
+const MAX_SOCKET_BUFFER_BYTES = 1024 * 1024;
+const MAX_OPUS_STDIN_BUFFER_BYTES = 512 * 1024;
 
 const args = parseArgs(process.argv.slice(2));
 const defaultUdpHost = args.udpHost || '0.0.0.0';
@@ -19,23 +23,98 @@ const configPath = args.config || 'streams.json';
 const opusBitrate = args.opusBitrate || '24k';
 const opusKeepaliveMs = Number(args.opusKeepaliveMs || 100);
 const ffmpegPath = args.ffmpeg || 'ffmpeg';
+const tlsKeyPath = args.tlsKey || args.httpsKey || '';
+const tlsCertPath = args.tlsCert || args.httpsCert || '';
+const tlsEnabled = Boolean(tlsKeyPath || tlsCertPath);
+const httpsHost = args.httpsHost || httpHost;
+const httpsPort = Number(args.httpsPort || httpPort);
+const redirectHttpToHttps = parseBoolean(args.redirectHttpToHttps || false);
 const opusAvailable = hasFfmpeg();
 
 if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) {
   fatal('--http-port must be a valid port');
 }
+if (!Number.isInteger(httpsPort) || httpsPort < 1 || httpsPort > 65535) {
+  fatal('--https-port must be a valid port');
+}
 if (!Number.isInteger(opusKeepaliveMs) || opusKeepaliveMs < 20 || opusKeepaliveMs > 1000) {
   fatal('--opus-keepalive-ms must be between 20 and 1000');
+}
+if (tlsEnabled && (!tlsKeyPath || !tlsCertPath)) {
+  fatal('TLS requires both --tls-key and --tls-cert');
 }
 
 const publicDir = __dirname;
 const indexHtml = fs.readFileSync(path.join(publicDir, 'index.html'));
+const tlsOptions = tlsEnabled ? loadTlsOptions() : null;
 const streams = loadStreams();
 validateStreams(streams);
 const streamsByName = new Map(streams.map((stream) => [stream.name, stream]));
 
 const httpServer = http.createServer((req, res) => {
-  const requestUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  if (tlsEnabled && redirectHttpToHttps) {
+    redirectToHttps(req, res);
+    return;
+  }
+  handleHttpRequest(req, res);
+});
+const httpsServer = tlsEnabled ? https.createServer(tlsOptions, handleHttpRequest) : null;
+
+attachUpgradeHandler(httpServer);
+if (httpsServer) attachUpgradeHandler(httpsServer);
+
+for (const stream of streams) {
+  const udpServer = dgram.createSocket('udp4');
+  stream.udpServer = udpServer;
+
+  udpServer.on('message', (msg) => {
+    if (msg.length === 0 || msg.length % 4 !== 0) {
+      return;
+    }
+
+    stream.packetCount += 1;
+    stream.byteCount += msg.length;
+    stream.lastUdpAt = Date.now();
+
+    for (const [client, clientId] of stream.rawClients) {
+      if (client.destroyed || client.writableLength > MAX_SOCKET_BUFFER_BYTES) {
+        client.destroy();
+        removeWsClient(stream, client);
+        continue;
+      }
+      sendWsBinary(client, msg);
+      addListenerBytes(stream, clientId, 'raw', msg.length);
+    }
+
+    for (const opusClient of stream.opusClients) {
+      if (!isWritableOpusClient(opusClient)) {
+        cleanupOpusClient(stream, opusClient);
+        continue;
+      }
+      if (opusClient.backpressured) {
+        opusClient.droppedBytes += msg.length;
+        continue;
+      }
+      writeOpusInput(stream, opusClient, msg);
+    }
+  });
+
+  udpServer.on('error', (err) => fatal(`UDP error on ${stream.name}: ${err.message}`));
+}
+
+let pendingUdpBinds = streams.length;
+for (const stream of streams) {
+  stream.udpServer.bind(stream.udpPort, stream.udpHost, () => {
+    console.log(`UDP input:  ${stream.name} -> ${stream.udpHost}:${stream.udpPort}`);
+    pendingUdpBinds -= 1;
+    if (pendingUdpBinds === 0) {
+      startWebServers();
+    }
+  });
+}
+
+function handleHttpRequest(req, res) {
+  const requestUrl = new URL(req.url, `${isTlsRequest(req) ? 'https' : 'http'}://${req.headers.host || 'localhost'}`);
   const pathname = normalizePath(requestUrl.pathname);
 
   if (pathname === '/') {
@@ -83,116 +162,80 @@ const httpServer = http.createServer((req, res) => {
   }
 
   sendNotFound(res);
-});
+}
 
-httpServer.on('upgrade', (req, socket) => {
-  const requestUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  const match = normalizePath(requestUrl.pathname).match(/^\/([^/]+)\/(audio|control)$/);
-  if (!match) {
-    socket.destroy();
-    return;
-  }
-
-  const stream = streamsByName.get(match[1]);
-  const socketType = match[2];
-  if (!stream) {
-    socket.destroy();
-    return;
-  }
-
-  const key = req.headers['sec-websocket-key'];
-  if (!key) {
-    socket.destroy();
-    return;
-  }
-
-  const accept = crypto
-    .createHash('sha1')
-    .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
-    .digest('base64');
-
-  socket.write([
-    'HTTP/1.1 101 Switching Protocols',
-    'Upgrade: websocket',
-    'Connection: Upgrade',
-    `Sec-WebSocket-Accept: ${accept}`,
-    '',
-    '',
-  ].join('\r\n'));
-
-  socket.setNoDelay(true);
-  const clientId = normalizeClientId(requestUrl.searchParams.get('clientId'));
-
-  if (socketType === 'control') {
-    stream.controlClients.set(socket, clientId);
-    ensureListenerStats(stream, clientId);
-    sendWsJson(socket, streamConfig(stream));
-  } else {
-    stream.rawClients.set(socket, clientId);
-    ensureListenerStats(stream, clientId);
-  }
-
-  socket.on('error', () => removeWsClient(stream, socket));
-  socket.on('close', () => removeWsClient(stream, socket));
-  socket.on('data', () => {
-    // Browser messages are not needed. Drain them so TCP backpressure stays sane.
-  });
-});
-
-for (const stream of streams) {
-  const udpServer = dgram.createSocket('udp4');
-  stream.udpServer = udpServer;
-
-  udpServer.on('message', (msg) => {
-    if (msg.length === 0 || msg.length % 4 !== 0) {
+function attachUpgradeHandler(server) {
+  server.on('upgrade', (req, socket) => {
+    const requestUrl = new URL(req.url, `${socket.encrypted ? 'https' : 'http'}://${req.headers.host || 'localhost'}`);
+    const match = normalizePath(requestUrl.pathname).match(/^\/([^/]+)\/(audio|control)$/);
+    if (!match) {
+      socket.destroy();
       return;
     }
 
-    stream.packetCount += 1;
-    stream.byteCount += msg.length;
-    stream.lastUdpAt = Date.now();
-
-    for (const [client, clientId] of stream.rawClients) {
-      if (client.destroyed || client.writableLength > 1024 * 1024) {
-        client.destroy();
-        stream.rawClients.delete(client);
-        continue;
-      }
-      sendWsBinary(client, msg);
-      addListenerBytes(stream, clientId, msg.length);
+    const stream = streamsByName.get(match[1]);
+    const socketType = match[2];
+    if (!stream) {
+      socket.destroy();
+      return;
     }
 
-    for (const opusClient of stream.opusClients) {
-      if (opusClient.res.destroyed || opusClient.ffmpeg.killed || !opusClient.ffmpeg.stdin.writable) {
-        cleanupOpusClient(stream, opusClient);
-        continue;
-      }
-      opusClient.ffmpeg.stdin.write(msg);
+    const key = req.headers['sec-websocket-key'];
+    if (!key) {
+      socket.destroy();
+      return;
     }
+
+    const accept = crypto
+      .createHash('sha1')
+      .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest('base64');
+
+    socket.write([
+      'HTTP/1.1 101 Switching Protocols',
+      'Upgrade: websocket',
+      'Connection: Upgrade',
+      `Sec-WebSocket-Accept: ${accept}`,
+      '',
+      '',
+    ].join('\r\n'));
+
+    socket.setNoDelay(true);
+    const clientId = normalizeClientId(requestUrl.searchParams.get('clientId'));
+
+    if (socketType === 'control') {
+      stream.controlClients.set(socket, clientId);
+      addListenerMode(stream, clientId, 'control');
+      sendWsJson(socket, streamConfig(stream));
+    } else {
+      stream.rawClients.set(socket, clientId);
+      addListenerMode(stream, clientId, 'raw');
+    }
+
+    socket.on('error', () => removeWsClient(stream, socket));
+    socket.on('close', () => removeWsClient(stream, socket));
+    socket.on('data', () => {
+      // Browser messages are not needed. Drain them so TCP backpressure stays sane.
+    });
   });
-
-  udpServer.on('error', (err) => fatal(`UDP error on ${stream.name}: ${err.message}`));
 }
 
-let pendingUdpBinds = streams.length;
-for (const stream of streams) {
-  stream.udpServer.bind(stream.udpPort, stream.udpHost, () => {
-    console.log(`UDP input:  ${stream.name} -> ${stream.udpHost}:${stream.udpPort}`);
-    pendingUdpBinds -= 1;
-    if (pendingUdpBinds === 0) {
-      startHttpServer();
-    }
-  });
-}
-
-function startHttpServer() {
+function startWebServers() {
   httpServer.listen(httpPort, httpHost, () => {
-    console.log(`Web player: http://${httpHost}:${httpPort}/`);
-    for (const stream of streams) {
-      console.log(`Stream:     /${stream.name} (${stream.label}) ${stream.channels === 1 ? 'mono' : 'stereo'} @ ${stream.sampleRate} Hz`);
-    }
-    console.log(`OPUS:       ${opusAvailable ? `enabled via ${ffmpegPath}` : 'unavailable (ffmpeg not found)'}`);
+    const mode = tlsEnabled && redirectHttpToHttps ? 'HTTP redirect' : 'Web player';
+    console.log(`${mode}: ${formatUrl('http', httpHost, httpPort)}/`);
   });
+
+  if (httpsServer) {
+    httpsServer.listen(httpsPort, httpsHost, () => {
+      console.log(`TLS player: ${formatUrl('https', httpsHost, httpsPort)}/`);
+    });
+  }
+
+  for (const stream of streams) {
+    console.log(`Stream:     /${stream.name} (${stream.label}) ${stream.channels === 1 ? 'mono' : 'stereo'} @ ${stream.sampleRate} Hz`);
+  }
+  console.log(`OPUS:       ${opusAvailable ? `enabled via ${ffmpegPath}` : 'unavailable (ffmpeg not found)'}`);
   setInterval(broadcastStreamStats, 1000);
   setInterval(writeOpusSilenceKeepalive, opusKeepaliveMs);
 }
@@ -278,6 +321,7 @@ function validateStreams(items) {
 }
 
 function publicStreamStatus(stream) {
+  const activeListeners = getActiveListeners(stream);
   return {
     name: stream.name,
     label: stream.label,
@@ -286,11 +330,17 @@ function publicStreamStatus(stream) {
     sampleRate: stream.sampleRate,
     channels: stream.channels,
     clients: stream.rawClients.size + stream.opusClients.size,
+    controlClients: stream.controlClients.size,
+    rawClients: stream.rawClients.size,
+    opusClients: stream.opusClients.size,
+    activeListeners: activeListeners.length,
+    listeners: activeListeners,
     packetCount: stream.packetCount,
     byteCount: stream.byteCount,
     lastUdpAt: stream.lastUdpAt,
     url: `/${stream.name}`,
     opusAvailable,
+    tlsEnabled,
   };
 }
 
@@ -298,7 +348,7 @@ function renderStreamList() {
   const items = streams.map((stream) => `
     <a class="stream" href="/${escapeHtml(stream.name)}">
       <strong>${escapeHtml(stream.label)}</strong>
-      <span>/${escapeHtml(stream.name)} · UDP ${escapeHtml(String(stream.udpPort))} · ${stream.channels === 1 ? 'mono' : 'stereo'} ${stream.sampleRate} Hz</span>
+      <span>/${escapeHtml(stream.name)} &middot; UDP ${escapeHtml(String(stream.udpPort))} &middot; ${stream.channels === 1 ? 'mono' : 'stereo'} ${stream.sampleRate} Hz</span>
     </a>
   `).join('');
 
@@ -362,12 +412,14 @@ function streamConfig(stream) {
     format: 'f32le',
     opusAvailable,
     opusBitrate,
+    tlsEnabled,
   };
 }
 
 function broadcastStreamStats() {
   const now = Date.now();
   for (const stream of streams) {
+    pruneInactiveListeners(stream, now);
     const elapsedSeconds = Math.max(0.001, (now - stream.lastStatsAt) / 1000);
     const udpBitsPerSecond = Math.max(0, (stream.byteCount - stream.lastStatsByteCount) * 8 / elapsedSeconds);
     stream.lastStatsByteCount = stream.byteCount;
@@ -378,9 +430,9 @@ function broadcastStreamStats() {
     }
 
     for (const [client, clientId] of stream.controlClients) {
-      if (client.destroyed || client.writableLength > 1024 * 1024) {
+      if (client.destroyed || client.writableLength > MAX_SOCKET_BUFFER_BYTES) {
         client.destroy();
-        stream.controlClients.delete(client);
+        removeWsClient(stream, client);
         continue;
       }
       const listenerStats = ensureListenerStats(stream, clientId);
@@ -394,6 +446,7 @@ function broadcastStreamStats() {
         byteCount: stream.byteCount,
         lastUdpAt: stream.lastUdpAt,
         clients: stream.rawClients.size + stream.opusClients.size,
+        activeListeners: getActiveListeners(stream).length,
       });
     }
   }
@@ -411,7 +464,7 @@ function serveOpus(stream, requestUrl, res) {
   }
 
   const clientId = normalizeClientId(requestUrl.searchParams.get('clientId'));
-  ensureListenerStats(stream, clientId);
+  addListenerMode(stream, clientId, 'opus');
 
   res.writeHead(200, {
     'content-type': 'audio/ogg; codecs=opus',
@@ -435,7 +488,7 @@ function serveOpus(stream, requestUrl, res) {
     'pipe:1',
   ], { stdio: ['pipe', 'pipe', 'ignore'] });
 
-  const opusClient = { clientId, ffmpeg, res };
+  const opusClient = { clientId, ffmpeg, res, backpressured: false, droppedBytes: 0 };
   stream.opusClients.add(opusClient);
 
   ffmpeg.stdout.on('data', (chunk) => {
@@ -443,10 +496,16 @@ function serveOpus(stream, requestUrl, res) {
       cleanupOpusClient(stream, opusClient);
       return;
     }
-    res.write(chunk);
-    addListenerBytes(stream, clientId, chunk.length);
+    if (!res.write(chunk)) {
+      ffmpeg.stdout.pause();
+      res.once('drain', () => ffmpeg.stdout.resume());
+    }
+    addListenerBytes(stream, clientId, 'opus', chunk.length);
   });
 
+  ffmpeg.stdin.on('drain', () => {
+    opusClient.backpressured = false;
+  });
   ffmpeg.on('close', () => cleanupOpusClient(stream, opusClient));
   res.on('close', () => cleanupOpusClient(stream, opusClient));
 }
@@ -454,12 +513,30 @@ function serveOpus(stream, requestUrl, res) {
 function cleanupOpusClient(stream, opusClient) {
   if (!stream.opusClients.has(opusClient)) return;
   stream.opusClients.delete(opusClient);
+  removeListenerMode(stream, opusClient.clientId, 'opus');
   if (!opusClient.ffmpeg.killed) {
     opusClient.ffmpeg.kill('SIGTERM');
   }
   if (!opusClient.res.destroyed) {
     opusClient.res.end();
   }
+}
+
+function isWritableOpusClient(opusClient) {
+  return !opusClient.res.destroyed
+    && !opusClient.ffmpeg.killed
+    && opusClient.ffmpeg.stdin.writable
+    && opusClient.ffmpeg.stdin.writableLength <= MAX_OPUS_STDIN_BUFFER_BYTES;
+}
+
+function writeOpusInput(stream, opusClient, buffer) {
+  const ok = opusClient.ffmpeg.stdin.write(buffer);
+  if (!ok) {
+    opusClient.backpressured = true;
+  }
+  const stats = ensureListenerStats(stream, opusClient.clientId);
+  stats.opusInputBytes += buffer.length;
+  stats.lastSeenAt = Date.now();
 }
 
 function writeOpusSilenceKeepalive() {
@@ -472,30 +549,90 @@ function writeOpusSilenceKeepalive() {
     }
 
     for (const opusClient of stream.opusClients) {
-      if (opusClient.res.destroyed || opusClient.ffmpeg.killed || !opusClient.ffmpeg.stdin.writable) {
+      if (!isWritableOpusClient(opusClient)) {
         cleanupOpusClient(stream, opusClient);
         continue;
       }
-      opusClient.ffmpeg.stdin.write(stream.silenceBuffer);
+      if (!opusClient.backpressured) {
+        writeOpusInput(stream, opusClient, stream.silenceBuffer);
+      }
     }
   }
 }
 
 function ensureListenerStats(stream, clientId) {
   if (!stream.listenerStats.has(clientId)) {
-    stream.listenerStats.set(clientId, { bytes: 0, lastBytes: 0 });
+    stream.listenerStats.set(clientId, {
+      bytes: 0,
+      lastBytes: 0,
+      rawBytes: 0,
+      opusBytes: 0,
+      opusInputBytes: 0,
+      modes: new Set(),
+      connectedAt: Date.now(),
+      lastSeenAt: Date.now(),
+    });
   }
   return stream.listenerStats.get(clientId);
 }
 
-function addListenerBytes(stream, clientId, bytes) {
+function addListenerMode(stream, clientId, mode) {
+  const stats = ensureListenerStats(stream, clientId);
+  stats.modes.add(mode);
+  stats.lastSeenAt = Date.now();
+}
+
+function removeListenerMode(stream, clientId, mode) {
+  const stats = stream.listenerStats.get(clientId);
+  if (!stats) return;
+  stats.modes.delete(mode);
+  stats.lastSeenAt = Date.now();
+  if (stats.modes.size === 0) {
+    stream.listenerStats.delete(clientId);
+  }
+}
+
+function addListenerBytes(stream, clientId, mode, bytes) {
   const stats = ensureListenerStats(stream, clientId);
   stats.bytes += bytes;
+  stats.lastSeenAt = Date.now();
+  if (mode === 'raw') stats.rawBytes += bytes;
+  if (mode === 'opus') stats.opusBytes += bytes;
+}
+
+function getActiveListeners(stream) {
+  const listeners = [];
+  for (const [clientId, stats] of stream.listenerStats) {
+    if (!stats.modes.size) continue;
+    listeners.push({
+      clientId,
+      modes: Array.from(stats.modes).sort(),
+      connectedAt: stats.connectedAt,
+      lastSeenAt: stats.lastSeenAt,
+      bytes: stats.bytes,
+      rawBytes: stats.rawBytes,
+      opusBytes: stats.opusBytes,
+      opusInputBytes: stats.opusInputBytes,
+    });
+  }
+  return listeners.sort((a, b) => a.connectedAt - b.connectedAt);
+}
+
+function pruneInactiveListeners(stream, now) {
+  for (const [clientId, stats] of stream.listenerStats) {
+    if (stats.modes.size === 0 || now - stats.lastSeenAt > 5 * 60 * 1000) {
+      stream.listenerStats.delete(clientId);
+    }
+  }
 }
 
 function removeWsClient(stream, socket) {
+  const controlClientId = stream.controlClients.get(socket);
+  const rawClientId = stream.rawClients.get(socket);
   stream.controlClients.delete(socket);
   stream.rawClients.delete(socket);
+  if (controlClientId) removeListenerMode(stream, controlClientId, 'control');
+  if (rawClientId) removeListenerMode(stream, rawClientId, 'raw');
 }
 
 function normalizeClientId(value) {
@@ -532,6 +669,31 @@ function sendFrame(socket, payload, opcode) {
   socket.write(Buffer.concat([header, payload]));
 }
 
+function loadTlsOptions() {
+  return {
+    key: fs.readFileSync(path.resolve(tlsKeyPath)),
+    cert: fs.readFileSync(path.resolve(tlsCertPath)),
+  };
+}
+
+function redirectToHttps(req, res) {
+  const hostHeader = req.headers.host || `localhost:${httpsPort}`;
+  const hostname = hostHeader.replace(/:\d+$/, '');
+  const host = httpsPort === 443 ? hostname : `${hostname}:${httpsPort}`;
+  res.writeHead(308, { location: `https://${host}${req.url}` });
+  res.end();
+}
+
+function isTlsRequest(req) {
+  return Boolean(req.socket && req.socket.encrypted);
+}
+
+function formatUrl(protocol, host, port) {
+  const displayHost = host === '0.0.0.0' ? 'localhost' : host;
+  const defaultPort = protocol === 'https' ? 443 : 80;
+  return `${protocol}://${displayHost}${port === defaultPort ? '' : `:${port}`}`;
+}
+
 function normalizePath(value) {
   const pathOnly = decodeURIComponent(value.split('?')[0]);
   if (pathOnly.length > 1 && pathOnly.endsWith('/')) {
@@ -549,8 +711,14 @@ function parseArgs(argv) {
     if (eq !== -1) {
       out[toCamel(raw.slice(2, eq))] = raw.slice(eq + 1);
     } else {
-      out[toCamel(raw.slice(2))] = argv[i + 1];
-      i += 1;
+      const key = toCamel(raw.slice(2));
+      const next = argv[i + 1];
+      if (next === undefined || next.startsWith('--')) {
+        out[key] = true;
+      } else {
+        out[key] = next;
+        i += 1;
+      }
     }
   }
   return out;
@@ -558,6 +726,11 @@ function parseArgs(argv) {
 
 function toCamel(name) {
   return name.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+}
+
+function parseBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
 }
 
 function escapeHtml(value) {
