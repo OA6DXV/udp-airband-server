@@ -345,6 +345,12 @@
     let controlWs;
     let rawWs;
     let opusAudio;
+    let opusWs;
+    let opusMediaSource;
+    let opusSourceBuffer;
+    let opusObjectUrl;
+    let opusQueue = [];
+    const opusMimeType = 'audio/webm; codecs="opus"';
     let currentMode = 'raw';
     let preferredMode = isMobileDevice() ? 'opus' : 'raw';
     let opusAvailable = false;
@@ -492,18 +498,98 @@
 
     function startOpus() {
       stopRaw();
+      stopOpus();
+
+      if (!window.MediaSource || !MediaSource.isTypeSupported(opusMimeType)) {
+        startHttpOpus();
+        return;
+      }
+
+      ensureOpusAudio();
+      opusQueue = [];
+      opusMediaSource = new MediaSource();
+      opusObjectUrl = URL.createObjectURL(opusMediaSource);
+      opusAudio.src = opusObjectUrl;
+      opusAudio.play().catch(() => setStatus('', 'OPUS unavailable'));
+      currentMode = 'opus';
+
+      opusMediaSource.addEventListener('sourceopen', () => {
+        if (!opusMediaSource || opusMediaSource.readyState !== 'open') return;
+
+        opusSourceBuffer = opusMediaSource.addSourceBuffer(opusMimeType);
+        opusSourceBuffer.mode = 'sequence';
+        opusSourceBuffer.addEventListener('updateend', () => {
+          trimOpusBuffer();
+          drainOpusQueue();
+        });
+
+        opusWs = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/${encodeURIComponent(streamName)}/opus?clientId=${encodeURIComponent(clientId)}`);
+        opusWs.binaryType = 'arraybuffer';
+        opusWs.addEventListener('message', (event) => {
+          streamConfirmed = true;
+          enqueueOpusChunk(event.data);
+          updateConnectionState();
+        });
+        opusWs.addEventListener('close', () => {
+          if (currentMode === 'opus' && audioStarted) setTimeout(startOpus, 1000);
+        });
+        opusWs.addEventListener('error', () => setStatus('', 'OPUS unavailable'));
+      }, { once: true });
+    }
+
+    function startHttpOpus() {
       if (!opusAudio) {
-        opusAudio = new Audio();
-        opusAudio.preload = 'none';
-        opusAudio.muted = muted;
-        opusAudio.addEventListener('playing', updateConnectionState);
-        opusAudio.addEventListener('waiting', updateConnectionState);
-        opusAudio.addEventListener('error', () => setStatus('', 'OPUS unavailable'));
+        ensureOpusAudio();
       }
       opusAudio.muted = muted;
       opusAudio.src = `/${encodeURIComponent(streamName)}/opus?clientId=${encodeURIComponent(clientId)}&t=${Date.now()}`;
       opusAudio.play().catch(() => setStatus('', 'OPUS unavailable'));
       currentMode = 'opus';
+    }
+
+    function ensureOpusAudio() {
+      if (opusAudio) return;
+      opusAudio = new Audio();
+      opusAudio.preload = 'none';
+      opusAudio.muted = muted;
+      opusAudio.addEventListener('playing', updateConnectionState);
+      opusAudio.addEventListener('waiting', updateConnectionState);
+      opusAudio.addEventListener('error', () => setStatus('', 'OPUS unavailable'));
+    }
+
+    function enqueueOpusChunk(chunk) {
+      opusQueue.push(chunk);
+      if (opusQueue.length > 120) {
+        opusQueue.splice(1, opusQueue.length - 120);
+      }
+      drainOpusQueue();
+    }
+
+    function drainOpusQueue() {
+      if (!opusSourceBuffer || opusSourceBuffer.updating || !opusQueue.length) return;
+      try {
+        opusSourceBuffer.appendBuffer(opusQueue.shift());
+      } catch {
+        setStatus('', 'OPUS unavailable');
+      }
+    }
+
+    function trimOpusBuffer() {
+      if (!opusAudio || !opusSourceBuffer || opusSourceBuffer.updating || opusAudio.buffered.length === 0) return;
+
+      const liveEdge = opusAudio.buffered.end(opusAudio.buffered.length - 1);
+      if (liveEdge - opusAudio.currentTime > 2.5) {
+        opusAudio.currentTime = Math.max(0, liveEdge - 0.8);
+      }
+
+      const removeEnd = liveEdge - 6;
+      if (removeEnd > 0 && opusAudio.buffered.start(0) < removeEnd) {
+        try {
+          opusSourceBuffer.remove(0, removeEnd);
+        } catch {
+          // Ignore transient MediaSource states while the browser is updating.
+        }
+      }
     }
 
     function stopRaw() {
@@ -515,10 +601,29 @@
     }
 
     function stopOpus() {
+      if (opusWs) {
+        opusWs.onclose = null;
+        opusWs.close();
+        opusWs = null;
+      }
+      opusQueue = [];
       if (opusAudio) {
         opusAudio.pause();
         opusAudio.removeAttribute('src');
         opusAudio.load();
+      }
+      opusSourceBuffer = null;
+      if (opusMediaSource && opusMediaSource.readyState === 'open') {
+        try {
+          opusMediaSource.endOfStream();
+        } catch {
+          // The stream may already be closing.
+        }
+      }
+      opusMediaSource = null;
+      if (opusObjectUrl) {
+        URL.revokeObjectURL(opusObjectUrl);
+        opusObjectUrl = null;
       }
     }
 
