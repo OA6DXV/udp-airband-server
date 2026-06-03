@@ -99,8 +99,8 @@
     }
 
     .status.ready .dot {
-      background: var(--accent);
-      box-shadow: 0 0 0 4px rgb(79 180 119 / 18%);
+      background: var(--warn);
+      box-shadow: 0 0 0 4px rgb(226 168 75 / 18%);
     }
 
     .status.live .dot {
@@ -244,6 +244,37 @@
       transition: width 120ms linear;
     }
 
+    .time-footer {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 18px;
+      flex-wrap: wrap;
+    }
+
+    .time-box {
+      min-width: 170px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 10px 14px;
+      text-align: center;
+    }
+
+    .time-box span {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .time-box strong {
+      display: block;
+      color: var(--text);
+      font-size: 18px;
+      font-variant-numeric: tabular-nums;
+    }
+
     @media (max-width: 820px) {
       .meters {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -310,6 +341,11 @@
       <div class="level-track"><div id="levelMask" class="level-mask"></div></div>
       <span id="levelValue">-&infin; dB</span>
     </section>
+
+    <footer class="time-footer" aria-label="current time">
+      <div class="time-box"><span>Local Time</span><strong id="localTime">--:--:--</strong></div>
+      <div class="time-box"><span>UTC</span><strong id="utcTime">--:--:--</strong></div>
+    </footer>
   </main>
 
   <script>
@@ -326,6 +362,8 @@
     const modeButton = document.getElementById('mode');
     const levelMaskEl = document.getElementById('levelMask');
     const levelValueEl = document.getElementById('levelValue');
+    const localTimeEl = document.getElementById('localTime');
+    const utcTimeEl = document.getElementById('utcTime');
     const canvas = document.getElementById('scope');
     const ctx = canvas.getContext('2d');
 
@@ -771,6 +809,8 @@
     draw();
     setInterval(updateBuffered, 500);
     setInterval(updateLastHeard, 500);
+    updateClocks();
+    setInterval(updateClocks, 1000);
 
     function updateBuffered() {
       updateBrowserBandwidth();
@@ -798,6 +838,24 @@
       if (!opusAudio || opusAudio.buffered.length === 0) return 0;
       const liveEdge = opusAudio.buffered.end(opusAudio.buffered.length - 1);
       return Math.max(0, Math.round((liveEdge - opusAudio.currentTime) * 1000));
+    }
+
+    function updateClocks() {
+      const now = new Date();
+      localTimeEl.textContent = new Intl.DateTimeFormat(undefined, {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }).format(now);
+      utcTimeEl.textContent = new Intl.DateTimeFormat(undefined, {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+        timeZone: 'UTC',
+        timeZoneName: 'short',
+      }).format(now);
     }
 
     function isMobileDevice() {
