@@ -11,6 +11,7 @@ const { spawn, spawnSync } = require('child_process');
 
 const MAX_SOCKET_BUFFER_BYTES = 1024 * 1024;
 const MAX_OPUS_STDIN_BUFFER_BYTES = 512 * 1024;
+const SOFTWARE_VERSION = '1.0.1';
 
 const args = parseArgs(process.argv.slice(2));
 const defaultUdpHost = args.udpHost || '0.0.0.0';
@@ -322,6 +323,7 @@ function validateStreams(items) {
 
 function publicStreamStatus(stream) {
   const activeListeners = getActiveListeners(stream);
+  const lastHeard = getLastHeard(stream, Date.now());
   return {
     name: stream.name,
     label: stream.label,
@@ -338,9 +340,14 @@ function publicStreamStatus(stream) {
     packetCount: stream.packetCount,
     byteCount: stream.byteCount,
     lastUdpAt: stream.lastUdpAt,
+    lastHeardAt: lastHeard.at,
+    lastHeardLabel: lastHeard.label,
+    secondsSinceLastHeard: lastHeard.secondsSince,
+    hasUdp: stream.packetCount > 0,
     url: `/${stream.name}`,
     opusAvailable,
     tlsEnabled,
+    softwareVersion: SOFTWARE_VERSION,
   };
 }
 
@@ -413,6 +420,7 @@ function streamConfig(stream) {
     opusAvailable,
     opusBitrate,
     tlsEnabled,
+    softwareVersion: SOFTWARE_VERSION,
   };
 }
 
@@ -420,6 +428,7 @@ function broadcastStreamStats() {
   const now = Date.now();
   for (const stream of streams) {
     pruneInactiveListeners(stream, now);
+    const lastHeard = getLastHeard(stream, now);
     const elapsedSeconds = Math.max(0.001, (now - stream.lastStatsAt) / 1000);
     const udpBitsPerSecond = Math.max(0, (stream.byteCount - stream.lastStatsByteCount) * 8 / elapsedSeconds);
     stream.lastStatsByteCount = stream.byteCount;
@@ -445,8 +454,13 @@ function broadcastStreamStats() {
         packetCount: stream.packetCount,
         byteCount: stream.byteCount,
         lastUdpAt: stream.lastUdpAt,
+        lastHeardAt: lastHeard.at,
+        lastHeardLabel: lastHeard.label,
+        secondsSinceLastHeard: lastHeard.secondsSince,
+        hasUdp: stream.packetCount > 0,
         clients: stream.rawClients.size + stream.opusClients.size,
         activeListeners: getActiveListeners(stream).length,
+        softwareVersion: SOFTWARE_VERSION,
       });
     }
   }
@@ -558,6 +572,32 @@ function writeOpusSilenceKeepalive() {
       }
     }
   }
+}
+
+function getLastHeard(stream, now) {
+  if (!stream.lastUdpAt) {
+    return { at: 0, label: 'never', secondsSince: null };
+  }
+
+  const secondsSince = Math.max(0, Math.floor((now - stream.lastUdpAt) / 1000));
+  if (secondsSince < 3) {
+    return { at: stream.lastUdpAt, label: 'Now', secondsSince };
+  }
+
+  return {
+    at: stream.lastUdpAt,
+    label: formatServerTime(stream.lastUdpAt),
+    secondsSince,
+  };
+}
+
+function formatServerTime(timestamp) {
+  const date = new Date(timestamp);
+  return [
+    String(date.getHours()).padStart(2, '0'),
+    String(date.getMinutes()).padStart(2, '0'),
+    String(date.getSeconds()).padStart(2, '0'),
+  ].join(':');
 }
 
 function ensureListenerStats(stream, clientId) {
