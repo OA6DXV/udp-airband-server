@@ -51,6 +51,97 @@
       gap: 10px;
     }
 
+    .language-switch {
+      position: relative;
+    }
+
+    .language-button {
+      min-width: 66px;
+      height: 36px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 0 10px;
+      font-size: 14px;
+    }
+
+    .caret {
+      width: 0;
+      height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-top: 5px solid var(--muted);
+    }
+
+    .language-menu {
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      z-index: 5;
+      width: 190px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+      color: #1f2933;
+      box-shadow: 0 14px 28px rgb(0 0 0 / 32%);
+      overflow: visible;
+    }
+
+    .language-menu::before {
+      content: "";
+      position: absolute;
+      top: -7px;
+      right: 18px;
+      width: 12px;
+      height: 12px;
+      background: #f8fafc;
+      border-left: 1px solid var(--line);
+      border-top: 1px solid var(--line);
+      transform: rotate(45deg);
+    }
+
+    .language-option {
+      position: relative;
+      width: 100%;
+      min-width: 0;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 12px;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      color: inherit;
+      padding: 0 16px;
+      font-weight: 600;
+      text-align: left;
+    }
+
+    .language-option + .language-option {
+      border-top: 1px solid #e2e8f0;
+    }
+
+    .language-option:hover {
+      border-color: transparent;
+      background: #eef5ff;
+    }
+
+    .language-radio {
+      width: 18px;
+      height: 18px;
+      border: 2px solid #b7c0cc;
+      border-radius: 50%;
+      flex: 0 0 auto;
+    }
+
+    .language-option.active .language-radio {
+      border-color: var(--accent);
+      box-shadow: inset 0 0 0 4px #f8fafc;
+      background: var(--accent);
+    }
+
     h1 {
       margin: 0;
       font-size: clamp(24px, 4vw, 36px);
@@ -292,7 +383,7 @@
       .header-status {
         width: 100%;
         display: grid;
-        grid-template-columns: auto 1fr;
+        grid-template-columns: auto 1fr auto;
       }
 
       .meters {
@@ -315,35 +406,44 @@
     <header>
       <h1 id="title">UDP Airband Monitor</h1>
       <div class="header-status">
-        <div class="active-users"><span>Users</span><strong id="activeUsers">0</strong></div>
+        <div class="active-users"><span data-i18n="users">Users</span><strong id="activeUsers">0</strong></div>
         <div id="status" class="status"><span class="dot"></span><span id="statusText">Disconnected</span></div>
+        <div class="language-switch">
+          <button id="languageToggle" class="language-button" type="button" aria-haspopup="true" aria-expanded="false">
+            <span id="languageCode">EN</span><span class="caret"></span>
+          </button>
+          <div id="languageMenu" class="language-menu" hidden>
+            <button class="language-option" type="button" data-lang="en"><span class="language-radio"></span><span>English - EN</span></button>
+            <button class="language-option" type="button" data-lang="es"><span class="language-radio"></span><span>Espanol - ES</span></button>
+          </div>
+        </div>
       </div>
     </header>
 
     <section class="controls">
       <label id="gainLabel">
-        Gain <output id="gainValue">100%</output>
+        <span><span data-i18n="gain">Gain</span> <output id="gainValue">100%</output></span>
         <input id="gain" type="range" min="0" max="1.5" step="0.01" value="1">
       </label>
       <button id="start">Start Audio</button>
     </section>
 
     <section class="meters">
-      <div class="meter"><span>Buffered</span><strong id="buffered">0 ms</strong></div>
-      <div class="meter"><span>Bandwidth</span><strong id="browserBandwidth">0 bps</strong></div>
-      <div class="meter"><span>Last Heard Time</span><strong id="lastHeard">never</strong></div>
-      <div class="meter"><span>Mode</span><button id="mode" class="mode-button" type="button">Uncompressed</button></div>
+      <div class="meter"><span data-i18n="buffered">Buffered</span><strong id="buffered">0 ms</strong></div>
+      <div class="meter"><span data-i18n="bandwidth">Bandwidth</span><strong id="browserBandwidth">0 bps</strong></div>
+      <div class="meter"><span data-i18n="lastHeardTime">Last Heard Time</span><strong id="lastHeard">never</strong></div>
+      <div class="meter"><span data-i18n="mode">Mode</span><button id="mode" class="mode-button" type="button">Uncompressed</button></div>
     </section>
 
     <canvas id="scope" width="1200" height="240" aria-label="waveform scope"></canvas>
     <section class="level" aria-label="audio level">
-      <span>Level</span>
+      <span data-i18n="level">Level</span>
       <div class="level-track"><div id="levelMask" class="level-mask"></div></div>
       <span id="levelValue">-&infin; dB</span>
     </section>
 
     <footer class="time-footer" aria-label="current time">
-      <div class="time-box"><span>Local Time</span><strong id="localTime">--:--:--</strong></div>
+      <div class="time-box"><span data-i18n="localTime">Local Time</span><strong id="localTime">--:--:--</strong></div>
       <div class="time-box"><span>UTC</span><strong id="utcTime">--:--:--</strong></div>
     </footer>
   </main>
@@ -364,8 +464,26 @@
     const levelValueEl = document.getElementById('levelValue');
     const localTimeEl = document.getElementById('localTime');
     const utcTimeEl = document.getElementById('utcTime');
+    const languageToggle = document.getElementById('languageToggle');
+    const languageCode = document.getElementById('languageCode');
+    const languageMenu = document.getElementById('languageMenu');
+    const languageOptions = Array.from(document.querySelectorAll('.language-option'));
     const canvas = document.getElementById('scope');
     const ctx = canvas.getContext('2d');
+
+    const translations = {
+      en: {
+        users: 'Users', gain: 'Gain', startAudio: 'Start Audio', mute: 'Mute', unmute: 'Unmute', buffered: 'Buffered', bandwidth: 'Bandwidth', lastHeardTime: 'Last Heard Time', mode: 'Mode', level: 'Level', localTime: 'Local Time', disconnected: 'Disconnected', waitingUdp: 'Waiting for UDP', connected: 'Connected', opusUnavailable: 'OPUS unavailable', compressed: 'Compressed', uncompressed: 'Uncompressed', switchMode: 'Switch compressed/uncompressed audio', opusNeedsFfmpeg: 'Compressed mode needs ffmpeg on the server', never: 'never', now: 'Now',
+      },
+      es: {
+        users: 'Usuarios', gain: 'Ganancia', startAudio: 'Iniciar audio', mute: 'Silenciar', unmute: 'Activar audio', buffered: 'Buffer', bandwidth: 'Ancho de banda', lastHeardTime: 'Ultima transmision', mode: 'Modo', level: 'Nivel', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP', connected: 'Conectado', opusUnavailable: 'OPUS no disponible', compressed: 'Comprimido', uncompressed: 'Sin comprimir', switchMode: 'Cambiar audio comprimido/sin comprimir', opusNeedsFfmpeg: 'El modo comprimido necesita ffmpeg en el servidor', never: 'nunca', now: 'Ahora',
+      },
+    };
+
+    let language = localStorage.getItem('udp-airband-language') || 'en';
+    if (!translations[language]) language = 'en';
+    let currentStatusKey = 'disconnected';
+    let lastHeardLabel = 'never';
 
     let audioContext;
     let gainNode;
@@ -406,7 +524,31 @@
     const targetOpusLiveBufferSeconds = 0.35;
     const clientId = getClientId();
     const streamName = location.pathname.replace(/^\/+|\/+$/g, '');
+    applyLanguage();
     connectControlWebSocket();
+
+    languageToggle.addEventListener('click', () => {
+      const open = languageMenu.hidden;
+      languageMenu.hidden = !open;
+      languageToggle.setAttribute('aria-expanded', String(open));
+    });
+
+    languageOptions.forEach((option) => {
+      option.addEventListener('click', () => {
+        language = option.dataset.lang;
+        localStorage.setItem('udp-airband-language', language);
+        languageMenu.hidden = true;
+        languageToggle.setAttribute('aria-expanded', 'false');
+        applyLanguage();
+      });
+    });
+
+    document.addEventListener('click', (event) => {
+      if (!languageMenu.hidden && !event.target.closest('.language-switch')) {
+        languageMenu.hidden = true;
+        languageToggle.setAttribute('aria-expanded', 'false');
+      }
+    });
 
     gainInput.addEventListener('input', () => {
       gain = Number(gainInput.value);
@@ -452,7 +594,7 @@
     }
 
     function updateAudioButton() {
-      startButton.textContent = muted ? 'Unmute' : 'Mute';
+      startButton.textContent = audioStarted ? (muted ? t('unmute') : t('mute')) : t('startAudio');
       startButton.disabled = false;
     }
 
@@ -472,7 +614,7 @@
       });
       controlWs.addEventListener('close', () => {
         if (generation === wsGeneration) {
-          setStatus('', 'Disconnected');
+          setStatus('', 'disconnected');
           setTimeout(connectControlWebSocket, 1000);
         }
       });
@@ -493,7 +635,8 @@
             browserBandwidthEl.textContent = formatBandwidth(message.listenerBitsPerSecond || 0);
             activeUsersEl.textContent = String(message.activeListeners || message.clients || 0);
             lastUdpAt = message.lastHeardAt || message.lastUdpAt || 0;
-            lastHeardEl.textContent = message.lastHeardLabel || 'never';
+            lastHeardLabel = message.lastHeardLabel || 'never';
+            lastHeardEl.textContent = localizeLastHeard(lastHeardLabel);
             if (message.hasUdp || lastUdpAt || message.packetCount > 0) {
               streamConfirmed = true;
             }
@@ -505,10 +648,10 @@
 
     function updateConnectionState() {
       if (!controlWs || controlWs.readyState !== WebSocket.OPEN) {
-        setStatus('', 'Disconnected');
+        setStatus('', 'disconnected');
         return;
       }
-      setStatus(streamConfirmed ? 'live' : 'ready', streamConfirmed ? 'Connected' : 'Waiting for UDP');
+      setStatus(streamConfirmed ? 'live' : 'ready', streamConfirmed ? 'connected' : 'waitingUdp');
     }
 
     function startSelectedMode() {
@@ -564,7 +707,7 @@
       opusMediaSource = new MediaSource();
       opusObjectUrl = URL.createObjectURL(opusMediaSource);
       opusAudio.src = opusObjectUrl;
-      opusAudio.play().catch(() => setStatus('', 'OPUS unavailable'));
+      opusAudio.play().catch(() => setStatus('', 'opusUnavailable'));
       currentMode = 'opus';
 
       opusMediaSource.addEventListener('sourceopen', () => {
@@ -592,7 +735,7 @@
           }
           if (currentMode === 'opus' && audioStarted) setTimeout(startOpus, 1000);
         });
-        opusWs.addEventListener('error', () => setStatus('', 'OPUS unavailable'));
+        opusWs.addEventListener('error', () => setStatus('', 'opusUnavailable'));
       }, { once: true });
     }
 
@@ -603,7 +746,7 @@
       setupOpusAudioGraph();
       applyOutputGain();
       opusAudio.src = `/${encodeURIComponent(streamName)}/opus?clientId=${encodeURIComponent(clientId)}&t=${Date.now()}`;
-      opusAudio.play().catch(() => setStatus('', 'OPUS unavailable'));
+      opusAudio.play().catch(() => setStatus('', 'opusUnavailable'));
       currentMode = 'opus';
     }
 
@@ -614,7 +757,7 @@
       opusAudio.muted = muted;
       opusAudio.addEventListener('playing', updateConnectionState);
       opusAudio.addEventListener('waiting', updateConnectionState);
-      opusAudio.addEventListener('error', () => setStatus('', 'OPUS unavailable'));
+      opusAudio.addEventListener('error', () => setStatus('', 'opusUnavailable'));
     }
 
     function setupOpusAudioGraph() {
@@ -641,7 +784,7 @@
       try {
         opusSourceBuffer.appendBuffer(opusQueue.shift());
       } catch {
-        setStatus('', 'OPUS unavailable');
+        setStatus('', 'opusUnavailable');
       }
     }
 
@@ -709,11 +852,11 @@
 
     function updateModeButton() {
       const visibleMode = audioStarted ? currentMode : preferredMode;
-      modeButton.textContent = visibleMode === 'opus' ? 'Compressed' : 'Uncompressed';
+      modeButton.textContent = visibleMode === 'opus' ? t('compressed') : t('uncompressed');
       modeButton.disabled = !opusAvailable;
-      modeButton.title = opusAvailable ? 'Switch compressed/uncompressed audio' : 'Compressed mode needs ffmpeg on the server';
+      modeButton.title = opusAvailable ? t('switchMode') : t('opusNeedsFfmpeg');
       if (!opusAvailable && visibleMode === 'raw') {
-        modeButton.textContent = 'Uncompressed';
+        modeButton.textContent = t('uncompressed');
       }
     }
 
@@ -771,7 +914,7 @@
     }
 
     function updateLastHeard() {
-      if (!lastUdpAt) lastHeardEl.textContent = 'never';
+      if (!lastUdpAt) lastHeardEl.textContent = t('never');
     }
 
     function updateLevelMeter() {
@@ -782,9 +925,10 @@
       levelValueEl.textContent = db <= -60 ? '-\u221e dB' : `${db.toFixed(1)} dB`;
     }
 
-    function setStatus(state, text) {
+    function setStatus(state, textKey) {
       statusEl.className = `status ${state}`;
-      statusText.textContent = text;
+      currentStatusKey = textKey;
+      statusText.textContent = t(textKey);
     }
 
     function draw() {
@@ -858,19 +1002,40 @@
     function updateClocks() {
       const now = new Date();
       localTimeEl.textContent = new Intl.DateTimeFormat(undefined, {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
       }).format(now);
       utcTimeEl.textContent = new Intl.DateTimeFormat(undefined, {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-        timeZone: 'UTC',
-        timeZoneName: 'short',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'UTC',
       }).format(now);
+    }
+
+    function t(key) {
+      return translations[language][key] || translations.en[key] || key;
+    }
+
+    function applyLanguage() {
+      document.documentElement.lang = language;
+      languageCode.textContent = language.toUpperCase();
+      document.querySelectorAll('[data-i18n]').forEach((element) => {
+        element.textContent = t(element.dataset.i18n);
+      });
+      languageOptions.forEach((option) => {
+        option.classList.toggle('active', option.dataset.lang === language);
+      });
+      updateAudioButton();
+      updateModeButton();
+      statusText.textContent = t(currentStatusKey);
+      lastHeardEl.textContent = localizeLastHeard(lastHeardLabel);
+    }
+
+    function localizeLastHeard(label) {
+      if (!label || label === 'never') return t('never');
+      if (label === 'Now') return t('now');
+      if (language === 'es') {
+        const seconds = label.match(/^(\d+)s ago$/);
+        if (seconds) return `hace ${seconds[1]} s`;
+      }
+      return label;
     }
 
     function isMobileDevice() {
