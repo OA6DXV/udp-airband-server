@@ -163,6 +163,7 @@ function startHttpServer() {
       console.log(`Stream:     /${stream.name} (${stream.label}) ${stream.channels === 1 ? 'mono' : 'stereo'} @ ${stream.sampleRate} Hz`);
     }
   });
+  setInterval(broadcastStreamStats, 1000);
 }
 
 function loadStreams() {
@@ -216,6 +217,8 @@ function normalizeStream(raw) {
     clients: new Set(),
     packetCount: 0,
     byteCount: 0,
+    lastStatsByteCount: 0,
+    lastStatsAt: Date.now(),
     lastUdpAt: 0,
     udpServer: null,
   };
@@ -310,6 +313,38 @@ function sendNotFound(res) {
 
 function sendWsJson(socket, value) {
   sendFrame(socket, Buffer.from(JSON.stringify(value), 'utf8'), 0x1);
+}
+
+function broadcastStreamStats() {
+  const now = Date.now();
+  for (const stream of streams) {
+    const elapsedSeconds = Math.max(0.001, (now - stream.lastStatsAt) / 1000);
+    const udpBitsPerSecond = Math.max(0, (stream.byteCount - stream.lastStatsByteCount) * 8 / elapsedSeconds);
+    stream.lastStatsByteCount = stream.byteCount;
+    stream.lastStatsAt = now;
+
+    if (stream.clients.size === 0) {
+      continue;
+    }
+
+    const stats = {
+      type: 'stats',
+      udpBitsPerSecond,
+      packetCount: stream.packetCount,
+      byteCount: stream.byteCount,
+      lastUdpAt: stream.lastUdpAt,
+      clients: stream.clients.size,
+    };
+
+    for (const client of stream.clients) {
+      if (client.destroyed || client.writableLength > 1024 * 1024) {
+        client.destroy();
+        stream.clients.delete(client);
+        continue;
+      }
+      sendWsJson(client, stats);
+    }
+  }
 }
 
 function sendWsBinary(socket, buffer) {

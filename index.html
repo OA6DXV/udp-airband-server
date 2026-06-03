@@ -273,8 +273,7 @@
     let latestWave = new Float32Array(0);
     let browserBytes = 0;
     let lastBrowserBytes = 0;
-    let lastUdpBytes = null;
-    let lastStatsAt = null;
+    let lastBrowserStatsAt = performance.now();
     let wsGeneration = 0;
     let ws;
     const streamName = location.pathname.replace(/^\/+|\/+$/g, '');
@@ -324,6 +323,8 @@
             config = message;
             document.title = `${message.label} - UDP Airband Monitor`;
             document.getElementById('title').textContent = message.label;
+          } else if (message.type === 'stats') {
+            udpBandwidthEl.textContent = formatBandwidth(message.udpBitsPerSecond);
           }
           return;
         }
@@ -373,31 +374,13 @@
       return peak;
     }
 
-    async function updateBandwidth() {
+    function updateBrowserBandwidth() {
       const now = performance.now();
-      const elapsedSeconds = Math.max(0.001, ((lastStatsAt === null ? now : now - lastStatsAt)) / 1000);
-
-      try {
-        const response = await fetch(`/status/${encodeURIComponent(streamName)}`, { cache: 'no-store' });
-        if (response.ok) {
-          const status = await response.json();
-          if (lastUdpBytes === null || lastStatsAt === null) {
-            lastUdpBytes = status.byteCount;
-            lastStatsAt = now;
-            return;
-          }
-          const udpBitsPerSecond = Math.max(0, (status.byteCount - lastUdpBytes) * 8 / elapsedSeconds);
-          udpBandwidthEl.textContent = formatBandwidth(udpBitsPerSecond);
-          lastUdpBytes = status.byteCount;
-        }
-      } catch {
-        udpBandwidthEl.textContent = 'offline';
-      }
-
+      const elapsedSeconds = Math.max(0.001, (now - lastBrowserStatsAt) / 1000);
       const browserBitsPerSecond = Math.max(0, (browserBytes - lastBrowserBytes) * 8 / elapsedSeconds);
       browserBandwidthEl.textContent = formatBandwidth(browserBitsPerSecond);
       lastBrowserBytes = browserBytes;
-      lastStatsAt = now;
+      lastBrowserStatsAt = now;
     }
 
     function formatBandwidth(bitsPerSecond) {
@@ -446,7 +429,7 @@
       requestAnimationFrame(draw);
     }
     draw();
-    setInterval(updateBandwidth, 1000);
+    setInterval(updateBrowserBandwidth, 1000);
   </script>
 </body>
 </html>
