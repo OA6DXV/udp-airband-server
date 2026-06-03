@@ -1,0 +1,18 @@
+{
+  "streams": [
+    {
+      "name": "tower",
+      "label": "Tower 118.100",
+      "udpPort": 8686,
+      "sampleRate": 8000,
+      "channels": 1
+    },
+    {
+      "name": "atis",
+      "label": "ATIS 127.800",
+      "udpPort": 8687,
+      "sampleRate": 8000,
+      "channels": 1
+    }
+  ]
+}
