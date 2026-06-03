@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UDP Float Audio Monitor</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111318;
+      --panel: #1b2028;
+      --panel-2: #242b35;
+      --text: #eef2f6;
+      --muted: #9aa7b3;
+      --line: #394451;
+      --accent: #4fb477;
+      --warn: #e2a84b;
+      --bad: #e15f5f;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: min(920px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 32px 0;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(24px, 4vw, 36px);
+      font-weight: 750;
+      letter-spacing: 0;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 128px;
+      justify-content: center;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      padding: 8px 12px;
+      border-radius: 8px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--bad);
+    }
+
+    .status.ready .dot {
+      background: var(--warn);
+    }
+
+    .status.live .dot {
+      background: var(--accent);
+      box-shadow: 0 0 0 4px rgb(79 180 119 / 18%);
+    }
+
+    .controls,
+    .meters {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+      padding: 18px;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: end;
+      gap: 18px;
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: grid;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    button {
+      min-width: 132px;
+      height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-2);
+      color: var(--text);
+      font: inherit;
+      font-weight: 650;
+      cursor: pointer;
+    }
+
+    button:hover {
+      border-color: var(--accent);
+    }
+
+    .meters {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .meter {
+      min-height: 90px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #151920;
+    }
+
+    .meter span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+
+    .meter strong {
+      display: block;
+      font-size: 22px;
+      line-height: 1.1;
+      overflow-wrap: anywhere;
+    }
+
+    canvas {
+      width: 100%;
+      height: 180px;
+      display: block;
+      margin-top: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #090b0f;
+    }
+
+    @media (max-width: 720px) {
+      header,
+      .controls {
+        grid-template-columns: 1fr;
+        display: grid;
+        align-items: stretch;
+      }
+
+      .meters {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      button,
+      .status {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>UDP Float Audio Monitor</h1>
+      <div id="status" class="status"><span class="dot"></span><span id="statusText">Disconnected</span></div>
+    </header>
+
+    <section class="controls">
+      <label>
+        Gain <output id="gainValue">100%</output>
+        <input id="gain" type="range" min="0" max="3" step="0.01" value="1">
+      </label>
+      <button id="start">Start Audio</button>
+    </section>
+
+    <section class="meters">
+      <div class="meter"><span>Format</span><strong id="format">waiting</strong></div>
+      <div class="meter"><span>Buffered</span><strong id="buffered">0 ms</strong></div>
+      <div class="meter"><span>Packets</span><strong id="packets">0</strong></div>
+      <div class="meter"><span>Peak</span><strong id="peak">0.000</strong></div>
+    </section>
+
+    <canvas id="scope" width="1200" height="240" aria-label="waveform scope"></canvas>
+  </main>
+
+  <script>
+    const startButton = document.getElementById('start');
+    const gainInput = document.getElementById('gain');
+    const gainValue = document.getElementById('gainValue');
+    const statusEl = document.getElementById('status');
+    const statusText = document.getElementById('statusText');
+    const formatEl = document.getElementById('format');
+    const bufferedEl = document.getElementById('buffered');
+    const packetsEl = document.getElementById('packets');
+    const peakEl = document.getElementById('peak');
+    const canvas = document.getElementById('scope');
+    const ctx = canvas.getContext('2d');
+
+    let audioContext;
+    let gainNode;
+    let config = { sampleRate: 8000, channels: 1 };
+    let queuedFrames = 0;
+    const targetLatencySeconds = 0.25;
+    let nextPlayTime = 0;
+    let packets = 0;
+    let gain = Number(gainInput.value);
+    let lastPeak = 0;
+    let latestWave = new Float32Array(0);
+    let ws;
+
+    gainInput.addEventListener('input', () => {
+      gain = Number(gainInput.value);
+      gainValue.value = `${Math.round(gain * 100)}%`;
+      if (gainNode) gainNode.gain.value = gain;
+    });
+
+    startButton.addEventListener('click', async () => {
+      if (!audioContext) {
+        audioContext = new AudioContext();
+        gainNode = audioContext.createGain();
+        gainNode.gain.value = gain;
+        gainNode.connect(audioContext.destination);
+        nextPlayTime = audioContext.currentTime + targetLatencySeconds;
+      }
+
+      await audioContext.resume();
+      connectWebSocket();
+      startButton.textContent = 'Audio Running';
+      startButton.disabled = true;
+      setStatus('ready', 'Waiting for UDP');
+    });
+
+    function connectWebSocket() {
+      if (ws && ws.readyState <= 1) return;
+
+      ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/audio`);
+      ws.binaryType = 'arraybuffer';
+
+      ws.addEventListener('open', () => setStatus('ready', 'Connected'));
+      ws.addEventListener('close', () => {
+        setStatus('', 'Disconnected');
+        setTimeout(connectWebSocket, 1000);
+      });
+      ws.addEventListener('message', (event) => {
+        if (typeof event.data === 'string') {
+          const message = JSON.parse(event.data);
+          if (message.type === 'config') {
+            config = message;
+            formatEl.textContent = `${message.channels === 1 ? 'mono' : 'stereo'} ${message.sampleRate} Hz`;
+          }
+          return;
+        }
+
+        const samples = new Float32Array(event.data);
+        const frames = samples.length / config.channels;
+        if (!Number.isInteger(frames)) return;
+
+        scheduleAudio(samples, frames);
+        packets += 1;
+        packetsEl.textContent = String(packets);
+        latestWave = samples;
+        lastPeak = Math.max(lastPeak * 0.92, peakOf(samples));
+        peakEl.textContent = lastPeak.toFixed(3);
+        setStatus('live', 'Live');
+      });
+    }
+
+    function scheduleAudio(samples, frames) {
+      if (!audioContext || !gainNode) return;
+
+      const now = audioContext.currentTime;
+      if (nextPlayTime < now + 0.05 || nextPlayTime > now + 1.0) {
+        nextPlayTime = now + targetLatencySeconds;
+      }
+
+      const buffer = audioContext.createBuffer(config.channels, frames, config.sampleRate);
+      for (let channel = 0; channel < config.channels; channel += 1) {
+        const data = buffer.getChannelData(channel);
+        for (let i = 0; i < frames; i += 1) {
+          data[i] = samples[i * config.channels + channel];
+        }
+      }
+
+      const source = audioContext.createBufferSource();
+      source.buffer = buffer;
+      source.connect(gainNode);
+      source.start(nextPlayTime);
+      nextPlayTime += buffer.duration;
+      queuedFrames = Math.max(0, Math.round((nextPlayTime - now) * config.sampleRate));
+    }
+
+    function peakOf(samples) {
+      let peak = 0;
+      for (let i = 0; i < samples.length; i += 1) {
+        const value = Math.abs(samples[i]);
+        if (value > peak) peak = value;
+      }
+      return peak;
+    }
+
+    function setStatus(state, text) {
+      statusEl.className = `status ${state}`;
+      statusText.textContent = text;
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = '#394451';
+      ctx.beginPath();
+      ctx.moveTo(0, canvas.height / 2);
+      ctx.lineTo(canvas.width, canvas.height / 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = '#4fb477';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const step = Math.max(1, Math.floor(latestWave.length / canvas.width));
+      for (let x = 0; x < canvas.width; x += 1) {
+        const sample = latestWave[x * step * config.channels] || 0;
+        const y = canvas.height / 2 - Math.max(-1, Math.min(1, sample * gain)) * canvas.height * 0.45;
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      const bufferedMs = config.sampleRate ? Math.round(queuedFrames / config.sampleRate * 1000) : 0;
+      bufferedEl.textContent = `${bufferedMs} ms`;
+      requestAnimationFrame(draw);
+    }
+    draw();
+  </script>
+</body>
+</html>
