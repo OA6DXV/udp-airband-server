@@ -45,6 +45,12 @@
       margin-bottom: 20px;
     }
 
+    .header-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+
     h1 {
       margin: 0;
       font-size: clamp(24px, 4vw, 36px);
@@ -64,6 +70,25 @@
       border-radius: 8px;
       color: var(--muted);
       font-size: 14px;
+    }
+
+    .active-users {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-width: 78px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      padding: 8px 12px;
+      border-radius: 8px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .active-users strong {
+      color: var(--text);
+      font-size: 15px;
     }
 
     .dot {
@@ -144,7 +169,7 @@
 
     .meters {
       display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 12px;
     }
 
@@ -233,6 +258,12 @@
         align-items: stretch;
       }
 
+      .header-status {
+        width: 100%;
+        display: grid;
+        grid-template-columns: auto 1fr;
+      }
+
       .meters {
         grid-template-columns: 1fr;
       }
@@ -252,13 +283,16 @@
   <main>
     <header>
       <h1 id="title">UDP Airband Monitor</h1>
-      <div id="status" class="status"><span class="dot"></span><span id="statusText">Disconnected</span></div>
+      <div class="header-status">
+        <div class="active-users"><span>Users</span><strong id="activeUsers">0</strong></div>
+        <div id="status" class="status"><span class="dot"></span><span id="statusText">Disconnected</span></div>
+      </div>
     </header>
 
     <section class="controls">
       <label id="gainLabel">
         Gain <output id="gainValue">100%</output>
-        <input id="gain" type="range" min="0" max="3" step="0.01" value="1">
+        <input id="gain" type="range" min="0" max="1.5" step="0.01" value="1">
       </label>
       <button id="start">Start Audio</button>
     </section>
@@ -267,8 +301,7 @@
       <div class="meter"><span>Buffered</span><strong id="buffered">0 ms</strong></div>
       <div class="meter"><span>Bandwidth</span><strong id="browserBandwidth">0 bps</strong></div>
       <div class="meter"><span>Last Heard Time</span><strong id="lastHeard">never</strong></div>
-      <div class="meter"><span>Active Users</span><strong id="activeUsers">0</strong></div>
-      <div class="meter"><span>Mode</span><button id="mode" class="mode-button" type="button">RAW</button></div>
+      <div class="meter"><span>Mode</span><button id="mode" class="mode-button" type="button">Uncompressed</button></div>
     </section>
 
     <canvas id="scope" width="1200" height="240" aria-label="waveform scope"></canvas>
@@ -404,8 +437,9 @@
           } else if (message.type === 'stats') {
             browserBandwidthEl.textContent = formatBandwidth(message.listenerBitsPerSecond || 0);
             activeUsersEl.textContent = String(message.activeListeners || message.clients || 0);
-            lastUdpAt = message.lastUdpAt || 0;
-            if (lastUdpAt || message.packetCount > 0) {
+            lastUdpAt = message.lastHeardAt || message.lastUdpAt || 0;
+            lastHeardEl.textContent = message.lastHeardLabel || 'never';
+            if (message.hasUdp || lastUdpAt || message.packetCount > 0) {
               streamConfirmed = true;
             }
             updateConnectionState();
@@ -488,11 +522,11 @@
     }
 
     function updateModeButton() {
-      modeButton.textContent = currentMode === 'opus' ? 'OPUS' : 'RAW';
+      modeButton.textContent = currentMode === 'opus' ? 'Compressed' : 'Uncompressed';
       modeButton.disabled = !opusAvailable;
-      modeButton.title = opusAvailable ? 'Switch RAW/OPUS' : 'OPUS needs ffmpeg on the server';
+      modeButton.title = opusAvailable ? 'Switch compressed/uncompressed audio' : 'Compressed mode needs ffmpeg on the server';
       if (!opusAvailable && currentMode === 'raw') {
-        modeButton.textContent = 'RAW';
+        modeButton.textContent = 'Uncompressed';
       }
     }
 
@@ -550,22 +584,7 @@
     }
 
     function updateLastHeard() {
-      if (!lastUdpAt) {
-        lastHeardEl.textContent = 'never';
-        return;
-      }
-
-      const elapsedMs = Math.max(0, Date.now() - lastUdpAt);
-      lastHeardEl.textContent = elapsedMs < 3000 ? 'Now' : formatLastHeardTime(lastUdpAt);
-    }
-
-    function formatLastHeardTime(timestamp) {
-      return new Date(timestamp).toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-      });
+      if (!lastUdpAt) lastHeardEl.textContent = 'never';
     }
 
     function updateLevelMeter() {
