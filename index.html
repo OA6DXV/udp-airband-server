@@ -16,6 +16,7 @@
       --accent: #4fb477;
       --warn: #e2a84b;
       --bad: #e15f5f;
+      --disabled: #6f7782;
     }
 
     * {
@@ -31,7 +32,7 @@
     }
 
     main {
-      width: min(920px, calc(100vw - 32px));
+      width: min(980px, calc(100vw - 32px));
       margin: 0 auto;
       padding: 32px 0;
     }
@@ -55,7 +56,7 @@
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      min-width: 128px;
+      min-width: 148px;
       justify-content: center;
       border: 1px solid var(--line);
       background: var(--panel);
@@ -73,10 +74,6 @@
     }
 
     .status.ready .dot {
-      background: var(--warn);
-    }
-
-    .status.idle .dot {
       background: var(--warn);
       box-shadow: 0 0 0 4px rgb(226 168 75 / 16%);
     }
@@ -114,6 +111,16 @@
       accent-color: var(--accent);
     }
 
+    input[type="range"]:disabled {
+      cursor: not-allowed;
+      opacity: 0.65;
+      accent-color: var(--disabled);
+    }
+
+    .gain-muted {
+      color: var(--disabled);
+    }
+
     button {
       min-width: 132px;
       height: 42px;
@@ -137,7 +144,7 @@
 
     .meters {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 12px;
     }
 
@@ -212,6 +219,12 @@
       transition: width 120ms linear;
     }
 
+    @media (max-width: 820px) {
+      .meters {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
     @media (max-width: 720px) {
       header,
       .controls {
@@ -243,7 +256,7 @@
     </header>
 
     <section class="controls">
-      <label>
+      <label id="gainLabel">
         Gain <output id="gainValue">100%</output>
         <input id="gain" type="range" min="0" max="3" step="0.01" value="1">
       </label>
@@ -254,6 +267,7 @@
       <div class="meter"><span>Buffered</span><strong id="buffered">0 ms</strong></div>
       <div class="meter"><span>Bandwidth</span><strong id="browserBandwidth">0 bps</strong></div>
       <div class="meter"><span>Last Heard Time</span><strong id="lastHeard">never</strong></div>
+      <div class="meter"><span>Active Users</span><strong id="activeUsers">0</strong></div>
       <div class="meter"><span>Mode</span><button id="mode" class="mode-button" type="button">RAW</button></div>
     </section>
 
@@ -261,19 +275,21 @@
     <section class="level" aria-label="audio level">
       <span>Level</span>
       <div class="level-track"><div id="levelMask" class="level-mask"></div></div>
-      <span id="levelValue">-∞ dB</span>
+      <span id="levelValue">-&infin; dB</span>
     </section>
   </main>
 
   <script>
     const startButton = document.getElementById('start');
     const gainInput = document.getElementById('gain');
+    const gainLabel = document.getElementById('gainLabel');
     const gainValue = document.getElementById('gainValue');
     const statusEl = document.getElementById('status');
     const statusText = document.getElementById('statusText');
     const bufferedEl = document.getElementById('buffered');
     const browserBandwidthEl = document.getElementById('browserBandwidth');
     const lastHeardEl = document.getElementById('lastHeard');
+    const activeUsersEl = document.getElementById('activeUsers');
     const modeButton = document.getElementById('mode');
     const levelMaskEl = document.getElementById('levelMask');
     const levelValueEl = document.getElementById('levelValue');
@@ -291,6 +307,7 @@
     let latestWave = new Float32Array(0);
     let lastUdpAt = 0;
     let lastAudioAt = 0;
+    let streamConfirmed = false;
     let wsGeneration = 0;
     let controlWs;
     let rawWs;
@@ -320,6 +337,7 @@
         muted = !muted;
         applyOutputGain();
         updateAudioButton();
+        updateGainControl();
         return;
       }
 
@@ -336,7 +354,8 @@
       startSelectedMode();
       audioStarted = true;
       updateAudioButton();
-      setStatus('ready', 'Waiting for UDP');
+      updateGainControl();
+      updateConnectionState();
     });
 
     function applyOutputGain() {
@@ -349,6 +368,11 @@
       startButton.disabled = false;
     }
 
+    function updateGainControl() {
+      gainInput.disabled = muted;
+      gainLabel.classList.toggle('gain-muted', muted);
+    }
+
     function connectControlWebSocket() {
       if (controlWs && controlWs.readyState <= 1) return;
 
@@ -356,7 +380,7 @@
       controlWs = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/${encodeURIComponent(streamName)}/control?clientId=${encodeURIComponent(clientId)}`);
 
       controlWs.addEventListener('open', () => {
-        if (generation === wsGeneration) setStatus('ready', 'Connected');
+        if (generation === wsGeneration) updateConnectionState();
       });
       controlWs.addEventListener('close', () => {
         if (generation === wsGeneration) {
@@ -376,12 +400,26 @@
               startSelectedMode();
             }
             updateModeButton();
+            updateConnectionState();
           } else if (message.type === 'stats') {
             browserBandwidthEl.textContent = formatBandwidth(message.listenerBitsPerSecond || 0);
+            activeUsersEl.textContent = String(message.activeListeners || message.clients || 0);
             lastUdpAt = message.lastUdpAt || 0;
+            if (lastUdpAt || message.packetCount > 0) {
+              streamConfirmed = true;
+            }
+            updateConnectionState();
           }
         }
       });
+    }
+
+    function updateConnectionState() {
+      if (!controlWs || controlWs.readyState !== WebSocket.OPEN) {
+        setStatus('', 'Disconnected');
+        return;
+      }
+      setStatus(streamConfirmed ? 'live' : 'ready', streamConfirmed ? 'Connected' : 'Waiting for UDP');
     }
 
     function startSelectedMode() {
@@ -407,11 +445,12 @@
         const frames = samples.length / config.channels;
         if (!Number.isInteger(frames)) return;
 
+        streamConfirmed = true;
         scheduleAudio(samples, frames);
         latestWave = samples;
         lastPeak = Math.max(lastPeak * 0.92, peakOf(samples));
         lastAudioAt = Date.now();
-        setStatus('live', 'Live');
+        updateConnectionState();
       });
       currentMode = 'raw';
     }
@@ -422,8 +461,8 @@
         opusAudio = new Audio();
         opusAudio.preload = 'none';
         opusAudio.muted = muted;
-        opusAudio.addEventListener('playing', () => setStatus('live', 'Live'));
-        opusAudio.addEventListener('waiting', () => setStatus('idle', 'Idle'));
+        opusAudio.addEventListener('playing', updateConnectionState);
+        opusAudio.addEventListener('waiting', updateConnectionState);
         opusAudio.addEventListener('error', () => setStatus('', 'OPUS unavailable'));
       }
       opusAudio.muted = muted;
@@ -518,10 +557,6 @@
 
       const elapsedMs = Math.max(0, Date.now() - lastUdpAt);
       lastHeardEl.textContent = elapsedMs < 3000 ? 'Now' : formatLastHeardTime(lastUdpAt);
-
-      if (controlWs && controlWs.readyState === WebSocket.OPEN && elapsedMs > 1200) {
-        setStatus('idle', 'Idle');
-      }
     }
 
     function formatLastHeardTime(timestamp) {
@@ -538,7 +573,7 @@
       const clamped = Math.max(-60, Math.min(0, db));
       const percent = (clamped + 60) / 60 * 100;
       levelMaskEl.style.width = `${100 - percent}%`;
-      levelValueEl.textContent = db <= -60 ? '-∞ dB' : `${db.toFixed(1)} dB`;
+      levelValueEl.textContent = db <= -60 ? '-\u221e dB' : `${db.toFixed(1)} dB`;
     }
 
     function setStatus(state, text) {
@@ -566,9 +601,6 @@
       }
       ctx.stroke();
 
-      if (controlWs && controlWs.readyState === WebSocket.OPEN && lastUdpAt && Date.now() - lastUdpAt > 1200) {
-        setStatus('idle', 'Idle');
-      }
       lastPeak *= 0.985;
       updateLevelMeter();
       requestAnimationFrame(draw);

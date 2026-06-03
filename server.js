@@ -544,7 +544,7 @@ function writeOpusSilenceKeepalive() {
 
   const now = Date.now();
   for (const stream of streams) {
-    if (stream.opusClients.size === 0 || now - stream.lastUdpAt < opusKeepaliveMs * 2) {
+    if (stream.opusClients.size === 0 || !stream.lastUdpAt || now - stream.lastUdpAt < opusKeepaliveMs * 2) {
       continue;
     }
 
