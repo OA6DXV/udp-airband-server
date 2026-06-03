@@ -361,8 +361,8 @@
     });
 
     modeButton.addEventListener('click', () => {
-      preferredMode = currentMode === 'raw' ? 'opus' : 'raw';
-      if (audioContext) startSelectedMode();
+      preferredMode = preferredMode === 'raw' ? 'opus' : 'raw';
+      if (audioStarted && audioContext) startSelectedMode();
       updateModeButton();
     });
 
@@ -523,10 +523,11 @@
     }
 
     function updateModeButton() {
-      modeButton.textContent = currentMode === 'opus' ? 'Compressed' : 'Uncompressed';
+      const visibleMode = audioStarted ? currentMode : preferredMode;
+      modeButton.textContent = visibleMode === 'opus' ? 'Compressed' : 'Uncompressed';
       modeButton.disabled = !opusAvailable;
       modeButton.title = opusAvailable ? 'Switch compressed/uncompressed audio' : 'Compressed mode needs ffmpeg on the server';
-      if (!opusAvailable && currentMode === 'raw') {
+      if (!opusAvailable && visibleMode === 'raw') {
         modeButton.textContent = 'Uncompressed';
       }
     }
