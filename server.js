@@ -654,6 +654,9 @@ function getLastHeard(stream, now) {
   if (secondsSince < 3) {
     return { at: stream.lastUdpAt, label: 'Now', secondsSince };
   }
+  if (secondsSince < 10) {
+    return { at: stream.lastUdpAt, label: `${secondsSince}s ago`, secondsSince };
+  }
 
   return {
     at: stream.lastUdpAt,
