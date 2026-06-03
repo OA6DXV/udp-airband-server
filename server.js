@@ -17,11 +17,15 @@ const defaultSampleRate = Number(args.sampleRate || 8000);
 const defaultChannels = Number(args.channels || 1);
 const configPath = args.config || 'streams.json';
 const opusBitrate = args.opusBitrate || '24k';
+const opusKeepaliveMs = Number(args.opusKeepaliveMs || 100);
 const ffmpegPath = args.ffmpeg || 'ffmpeg';
 const opusAvailable = hasFfmpeg();
 
 if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) {
   fatal('--http-port must be a valid port');
+}
+if (!Number.isInteger(opusKeepaliveMs) || opusKeepaliveMs < 20 || opusKeepaliveMs > 1000) {
+  fatal('--opus-keepalive-ms must be between 20 and 1000');
 }
 
 const publicDir = __dirname;
@@ -190,6 +194,7 @@ function startHttpServer() {
     console.log(`OPUS:       ${opusAvailable ? `enabled via ${ffmpegPath}` : 'unavailable (ffmpeg not found)'}`);
   });
   setInterval(broadcastStreamStats, 1000);
+  setInterval(writeOpusSilenceKeepalive, opusKeepaliveMs);
 }
 
 function loadStreams() {
@@ -240,6 +245,7 @@ function normalizeStream(raw) {
     udpPort,
     sampleRate,
     channels,
+    silenceBuffer: Buffer.alloc(Math.round(sampleRate * channels * 4 * opusKeepaliveMs / 1000)),
     controlClients: new Map(),
     rawClients: new Map(),
     opusClients: new Set(),
@@ -453,6 +459,25 @@ function cleanupOpusClient(stream, opusClient) {
   }
   if (!opusClient.res.destroyed) {
     opusClient.res.end();
+  }
+}
+
+function writeOpusSilenceKeepalive() {
+  if (!opusAvailable) return;
+
+  const now = Date.now();
+  for (const stream of streams) {
+    if (stream.opusClients.size === 0 || now - stream.lastUdpAt < opusKeepaliveMs * 2) {
+      continue;
+    }
+
+    for (const opusClient of stream.opusClients) {
+      if (opusClient.res.destroyed || opusClient.ffmpeg.killed || !opusClient.ffmpeg.stdin.writable) {
+        cleanupOpusClient(stream, opusClient);
+        continue;
+      }
+      opusClient.ffmpeg.stdin.write(stream.silenceBuffer);
+    }
   }
 }
 

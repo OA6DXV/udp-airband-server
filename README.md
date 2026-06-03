@@ -135,3 +135,11 @@ The default OPUS bitrate is `24k`. Override it with:
 ```bash
 npm start -- --opus-bitrate 16k
 ```
+
+For OPUS listeners, the server sends compressed silence while UDP is idle so mobile browsers keep the stream open when RTLSDR-Airband uses `continuous = false`. RAW listeners still receive nothing while UDP is idle.
+
+The silence keepalive interval defaults to `100 ms`. Override it with:
+
+```bash
+npm start -- --opus-keepalive-ms 100
+```
