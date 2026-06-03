@@ -346,6 +346,9 @@
     let rawWs;
     let suppressRawReconnect = false;
     let opusAudio;
+    let opusSourceNode;
+    let opusAnalyser;
+    let opusAnalyserBuffer;
     let opusWs;
     let suppressOpusReconnect = false;
     let opusMediaSource;
@@ -358,6 +361,9 @@
     let opusAvailable = false;
     let audioStarted = false;
     let muted = false;
+    let receivedBytes = 0;
+    let lastBandwidthBytes = 0;
+    let lastBandwidthAt = Date.now();
     const clientId = getClientId();
     const streamName = location.pathname.replace(/^\/+|\/+$/g, '');
     connectControlWebSocket();
@@ -402,7 +408,7 @@
 
     function applyOutputGain() {
       if (gainNode) gainNode.gain.value = muted ? 0 : gain;
-      if (opusAudio) opusAudio.muted = muted;
+      if (opusAudio) opusAudio.muted = muted && !opusSourceNode;
     }
 
     function updateAudioButton() {
@@ -488,6 +494,7 @@
         if (currentMode === 'raw') setTimeout(startRaw, 1000);
       });
       rawWs.addEventListener('message', (event) => {
+        receivedBytes += event.data.byteLength || 0;
         const samples = new Float32Array(event.data);
         const frames = samples.length / config.channels;
         if (!Number.isInteger(frames)) return;
@@ -512,6 +519,7 @@
       }
 
       ensureOpusAudio();
+      setupOpusAudioGraph();
       opusQueue = [];
       opusMediaSource = new MediaSource();
       opusObjectUrl = URL.createObjectURL(opusMediaSource);
@@ -533,6 +541,7 @@
         opusWs.binaryType = 'arraybuffer';
         opusWs.addEventListener('message', (event) => {
           streamConfirmed = true;
+          receivedBytes += event.data.byteLength || 0;
           enqueueOpusChunk(event.data);
           updateConnectionState();
         });
@@ -551,7 +560,8 @@
       if (!opusAudio) {
         ensureOpusAudio();
       }
-      opusAudio.muted = muted;
+      setupOpusAudioGraph();
+      applyOutputGain();
       opusAudio.src = `/${encodeURIComponent(streamName)}/opus?clientId=${encodeURIComponent(clientId)}&t=${Date.now()}`;
       opusAudio.play().catch(() => setStatus('', 'OPUS unavailable'));
       currentMode = 'opus';
@@ -565,6 +575,17 @@
       opusAudio.addEventListener('playing', updateConnectionState);
       opusAudio.addEventListener('waiting', updateConnectionState);
       opusAudio.addEventListener('error', () => setStatus('', 'OPUS unavailable'));
+    }
+
+    function setupOpusAudioGraph() {
+      if (!audioContext || !gainNode || !opusAudio || opusSourceNode) return;
+      opusSourceNode = audioContext.createMediaElementSource(opusAudio);
+      opusAnalyser = audioContext.createAnalyser();
+      opusAnalyser.fftSize = 1024;
+      opusAnalyserBuffer = new Float32Array(opusAnalyser.fftSize);
+      opusSourceNode.connect(opusAnalyser);
+      opusAnalyser.connect(gainNode);
+      applyOutputGain();
     }
 
     function enqueueOpusChunk(chunk) {
@@ -718,6 +739,12 @@
     }
 
     function draw() {
+      if (currentMode === 'opus' && opusAnalyser && opusAnalyserBuffer) {
+        opusAnalyser.getFloatTimeDomainData(opusAnalyserBuffer);
+        latestWave = opusAnalyserBuffer;
+        lastPeak = Math.max(lastPeak * 0.92, peakOf(opusAnalyserBuffer));
+      }
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.strokeStyle = '#394451';
       ctx.beginPath();
@@ -746,8 +773,9 @@
     setInterval(updateLastHeard, 500);
 
     function updateBuffered() {
+      updateBrowserBandwidth();
       if (currentMode === 'opus') {
-        bufferedEl.textContent = 'streaming';
+        bufferedEl.textContent = `${getOpusBufferedMs()} ms`;
         return;
       }
       if (audioContext) {
@@ -755,6 +783,21 @@
       }
       const bufferedMs = config.sampleRate ? Math.round(queuedFrames / config.sampleRate * 1000) : 0;
       bufferedEl.textContent = `${bufferedMs} ms`;
+    }
+
+    function updateBrowserBandwidth() {
+      const now = Date.now();
+      const elapsedSeconds = Math.max(0.001, (now - lastBandwidthAt) / 1000);
+      const bitsPerSecond = Math.max(0, (receivedBytes - lastBandwidthBytes) * 8 / elapsedSeconds);
+      lastBandwidthBytes = receivedBytes;
+      lastBandwidthAt = now;
+      browserBandwidthEl.textContent = formatBandwidth(bitsPerSecond);
+    }
+
+    function getOpusBufferedMs() {
+      if (!opusAudio || opusAudio.buffered.length === 0) return 0;
+      const liveEdge = opusAudio.buffered.end(opusAudio.buffered.length - 1);
+      return Math.max(0, Math.round((liveEdge - opusAudio.currentTime) * 1000));
     }
 
     function isMobileDevice() {
