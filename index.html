@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>UDP Float Audio Monitor</title>
+  <title>UDP Airband Monitor</title>
   <style>
     :root {
       color-scheme: dark;
@@ -185,7 +185,7 @@
 <body>
   <main>
     <header>
-      <h1>UDP Float Audio Monitor</h1>
+      <h1 id="title">UDP Airband Monitor</h1>
       <div id="status" class="status"><span class="dot"></span><span id="statusText">Disconnected</span></div>
     </header>
 
@@ -231,6 +231,7 @@
     let lastPeak = 0;
     let latestWave = new Float32Array(0);
     let ws;
+    const streamName = location.pathname.replace(/^\/+|\/+$/g, '');
 
     gainInput.addEventListener('input', () => {
       gain = Number(gainInput.value);
@@ -257,7 +258,7 @@
     function connectWebSocket() {
       if (ws && ws.readyState <= 1) return;
 
-      ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/audio`);
+      ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/${encodeURIComponent(streamName)}/audio`);
       ws.binaryType = 'arraybuffer';
 
       ws.addEventListener('open', () => setStatus('ready', 'Connected'));
@@ -270,6 +271,8 @@
           const message = JSON.parse(event.data);
           if (message.type === 'config') {
             config = message;
+            document.title = `${message.label} - UDP Airband Monitor`;
+            document.getElementById('title').textContent = message.label;
             formatEl.textContent = `${message.channels === 1 ? 'mono' : 'stereo'} ${message.sampleRate} Hz`;
           }
           return;

@@ -1,30 +1,75 @@
 # UDP Airband Server
 
-Receives RTLSDR-Airband `udp_stream` packets and plays them in a web browser.
+Receives one or more RTLSDR-Airband `udp_stream` outputs and plays them in a web browser from a single web server.
 
-The expected stream is raw 32-bit little-endian floating-point PCM:
+Each stream is raw 32-bit little-endian floating-point PCM:
 
 - Mono: `L L L ...`
 - Stereo: interleaved `L R L R ...`
 - Sample rate: `8000 Hz` by default, or `16000 Hz` if RTLSDR-Airband was built with `NFM`
 
-## Run
+## Run one stream
 
 ```bash
 npm start -- --sample-rate 8000 --channels 1
 ```
 
-Then open:
+Default ports:
 
-```text
-http://SERVER_IP:8585/
-```
+- Web: `0.0.0.0:8585`
+- UDP: `0.0.0.0:8686`
+- Stream URL: `http://SERVER_IP:8585/main`
 
 Click `Start Audio`. Browsers require a user gesture before audio playback starts.
 
+## Run multiple streams
+
+Create `streams.json`:
+
+```json
+{
+  "streams": [
+    {
+      "name": "tower",
+      "label": "Tower 118.100",
+      "udpPort": 8686,
+      "sampleRate": 8000,
+      "channels": 1
+    },
+    {
+      "name": "atis",
+      "label": "ATIS 127.800",
+      "udpPort": 8687,
+      "sampleRate": 8000,
+      "channels": 1
+    }
+  ]
+}
+```
+
+Then run:
+
+```bash
+npm start
+```
+
+Open:
+
+```text
+http://SERVER_IP:8585/
+http://SERVER_IP:8585/tower
+http://SERVER_IP:8585/atis
+```
+
+You can also use a custom config path:
+
+```bash
+npm start -- --config /etc/udp-airband-server/streams.json
+```
+
 ## RTLSDR-Airband output config
 
-Example mono output:
+Each Airband output should send to the UDP port assigned to that stream.
 
 ```conf
 outputs: (
@@ -37,25 +82,32 @@ outputs: (
 );
 ```
 
-For stereo channels, run the bridge with:
+For a second stream:
 
-```bash
-npm start -- --sample-rate 8000 --channels 2
+```conf
+outputs: (
+  {
+    type = "udp_stream";
+    dest_address = "127.0.0.1";
+    dest_port = 8687;
+    continuous = true;
+  }
+);
 ```
-
-If RTLSDR-Airband was built with `NFM`, use `--sample-rate 16000`.
 
 ## Quick synthetic test
 
-From WSL/Linux, send a 1 kHz float32 tone:
+From WSL/Linux, send a 1 kHz float32 tone to the `tower` stream:
 
 ```bash
 python3 - <<'PY'
 import math, socket, struct, time
 rate = 8000
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+n = 0
 while True:
-    samples = [0.2 * math.sin(2 * math.pi * 1000 * n / rate) for n in range(rate // 8)]
+    samples = [0.2 * math.sin(2 * math.pi * 1000 * (n + i) / rate) for i in range(rate // 8)]
+    n += len(samples)
     sock.sendto(struct.pack('<%df' % len(samples), *samples), ('127.0.0.1', 8686))
     time.sleep(0.125)
 PY
