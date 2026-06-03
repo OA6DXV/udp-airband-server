@@ -473,10 +473,10 @@
 
     const translations = {
       en: {
-        users: 'Users', gain: 'Gain', startAudio: 'Start Audio', mute: 'Mute', unmute: 'Unmute', buffered: 'Buffered', bandwidth: 'Bandwidth', lastHeardTime: 'Last Heard Time', mode: 'Mode', level: 'Level', localTime: 'Local Time', disconnected: 'Disconnected', waitingUdp: 'Waiting for UDP', connected: 'Connected', opusUnavailable: 'OPUS unavailable', compressed: 'Compressed', uncompressed: 'Uncompressed', switchMode: 'Switch compressed/uncompressed audio', opusNeedsFfmpeg: 'Compressed mode needs ffmpeg on the server', never: 'never', now: 'Now',
+        users: 'Users', gain: 'Gain', startAudio: 'Start Audio', mute: 'Mute', unmute: 'Unmute', buffered: 'Buffered', bandwidth: 'Bandwidth', lastHeardTime: 'Last Heard Time', mode: 'Mode', level: 'Level', localTime: 'Local Time', disconnected: 'Disconnected', waitingUdp: 'Waiting for UDP', connected: 'Connected', opusUnavailable: 'Compressed unavailable', compressed: 'Compressed', uncompressed: 'Uncompressed', switchMode: 'Switch compressed/uncompressed audio', opusNeedsFfmpeg: 'Compressed mode needs ffmpeg on the server', never: 'never', now: 'Now',
       },
       es: {
-        users: 'Usuarios', gain: 'Ganancia', startAudio: 'Iniciar audio', mute: 'Silenciar', unmute: 'Activar audio', buffered: 'Buffer', bandwidth: 'Ancho de banda', lastHeardTime: 'Ultima transmision', mode: 'Modo', level: 'Nivel', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP', connected: 'Conectado', opusUnavailable: 'OPUS no disponible', compressed: 'Comprimido', uncompressed: 'Sin comprimir', switchMode: 'Cambiar audio comprimido/sin comprimir', opusNeedsFfmpeg: 'El modo comprimido necesita ffmpeg en el servidor', never: 'nunca', now: 'Ahora',
+        users: 'Usuarios', gain: 'Ganancia', startAudio: 'Iniciar audio', mute: 'Silenciar', unmute: 'Activar audio', buffered: 'Buffer', bandwidth: 'Ancho de banda', lastHeardTime: 'Ultima transmision', mode: 'Modo', level: 'Nivel', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP', connected: 'Conectado', opusUnavailable: 'Comprimido no disponible', compressed: 'Comprimido', uncompressed: 'Sin comprimir', switchMode: 'Cambiar audio comprimido/sin comprimir', opusNeedsFfmpeg: 'El modo comprimido necesita ffmpeg en el servidor', never: 'nunca', now: 'Ahora',
       },
     };
 
@@ -512,6 +512,8 @@
     let opusObjectUrl;
     let opusQueue = [];
     const opusMimeType = 'audio/webm; codecs="opus"';
+    const aacMimeType = 'audio/mp4; codecs="mp4a.40.2"';
+    let compressedTransport = null;
     let currentMode = 'raw';
     let preferredMode = isMobileDevice() ? 'opus' : 'raw';
     let opusAvailable = false;
@@ -624,9 +626,10 @@
           if (message.type === 'config') {
             config = message;
             opusAvailable = Boolean(message.opusAvailable);
+            compressedTransport = getCompressedTransport();
             document.title = `${message.label} - UDP Airband Monitor`;
             document.getElementById('title').textContent = message.label;
-            if (audioContext && preferredMode === 'opus' && opusAvailable && currentMode !== 'opus') {
+            if (audioContext && preferredMode === 'opus' && isCompressedAvailable() && currentMode !== 'opus') {
               startSelectedMode();
             }
             updateModeButton();
@@ -655,7 +658,7 @@
     }
 
     function startSelectedMode() {
-      if (preferredMode === 'opus' && opusAvailable) {
+      if (preferredMode === 'opus' && isCompressedAvailable()) {
         startOpus();
       } else {
         startRaw();
@@ -696,7 +699,13 @@
       stopRaw();
       stopOpus();
 
-      if (!window.MediaSource || !MediaSource.isTypeSupported(opusMimeType)) {
+      const transport = getCompressedTransport();
+      if (!transport) {
+        startRaw();
+        return;
+      }
+
+      if (transport.httpFallback) {
         startHttpOpus();
         return;
       }
@@ -704,7 +713,8 @@
       ensureOpusAudio();
       setupOpusAudioGraph();
       opusQueue = [];
-      opusMediaSource = new MediaSource();
+      const MediaSourceCtor = getMediaSourceConstructor();
+      opusMediaSource = new MediaSourceCtor();
       opusObjectUrl = URL.createObjectURL(opusMediaSource);
       opusAudio.src = opusObjectUrl;
       opusAudio.play().catch(() => setStatus('', 'opusUnavailable'));
@@ -713,14 +723,14 @@
       opusMediaSource.addEventListener('sourceopen', () => {
         if (!opusMediaSource || opusMediaSource.readyState !== 'open') return;
 
-        opusSourceBuffer = opusMediaSource.addSourceBuffer(opusMimeType);
+        opusSourceBuffer = opusMediaSource.addSourceBuffer(transport.mimeType);
         opusSourceBuffer.mode = 'sequence';
         opusSourceBuffer.addEventListener('updateend', () => {
           trimOpusBuffer();
           drainOpusQueue();
         });
 
-        opusWs = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/${encodeURIComponent(streamName)}/opus?clientId=${encodeURIComponent(clientId)}`);
+        opusWs = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/${encodeURIComponent(streamName)}/${transport.endpoint}?clientId=${encodeURIComponent(clientId)}`);
         opusWs.binaryType = 'arraybuffer';
         opusWs.addEventListener('message', (event) => {
           streamConfirmed = true;
@@ -853,9 +863,9 @@
     function updateModeButton() {
       const visibleMode = audioStarted ? currentMode : preferredMode;
       modeButton.textContent = visibleMode === 'opus' ? t('compressed') : t('uncompressed');
-      modeButton.disabled = !opusAvailable;
-      modeButton.title = opusAvailable ? t('switchMode') : t('opusNeedsFfmpeg');
-      if (!opusAvailable && visibleMode === 'raw') {
+      modeButton.disabled = !isCompressedAvailable();
+      modeButton.title = isCompressedAvailable() ? t('switchMode') : t('opusNeedsFfmpeg');
+      if (!isCompressedAvailable() && visibleMode === 'raw') {
         modeButton.textContent = t('uncompressed');
       }
     }
@@ -1036,6 +1046,45 @@
         if (seconds) return `hace ${seconds[1]} s`;
       }
       return label;
+    }
+
+    function isCompressedAvailable() {
+      return Boolean(getCompressedTransport());
+    }
+
+    function getCompressedTransport() {
+      if (!opusAvailable) return null;
+
+      const supportsAac = isMediaSourceTypeSupported(aacMimeType);
+      const supportsOpus = isMediaSourceTypeSupported(opusMimeType);
+
+      if (isAppleMobileDevice() && supportsAac) {
+        return { endpoint: 'aac', mimeType: aacMimeType };
+      }
+      if (supportsOpus) {
+        return { endpoint: 'opus', mimeType: opusMimeType };
+      }
+      if (supportsAac) {
+        return { endpoint: 'aac', mimeType: aacMimeType };
+      }
+      if (!isAppleMobileDevice()) {
+        return { endpoint: 'opus', httpFallback: true };
+      }
+      return null;
+    }
+
+    function getMediaSourceConstructor() {
+      return window.MediaSource || window.ManagedMediaSource;
+    }
+
+    function isMediaSourceTypeSupported(mimeType) {
+      const MediaSourceCtor = getMediaSourceConstructor();
+      return Boolean(MediaSourceCtor && MediaSourceCtor.isTypeSupported(mimeType));
+    }
+
+    function isAppleMobileDevice() {
+      return /iPhone|iPad|iPod/i.test(navigator.userAgent)
+        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     }
 
     function isMobileDevice() {

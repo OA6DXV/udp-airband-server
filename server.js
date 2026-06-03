@@ -11,7 +11,7 @@ const { spawn, spawnSync } = require('child_process');
 
 const MAX_SOCKET_BUFFER_BYTES = 1024 * 1024;
 const MAX_OPUS_STDIN_BUFFER_BYTES = 512 * 1024;
-const SOFTWARE_VERSION = '1.0.1';
+const SOFTWARE_VERSION = '1.1';
 
 const args = parseArgs(process.argv.slice(2));
 const defaultUdpHost = args.udpHost || '0.0.0.0';
@@ -22,6 +22,7 @@ const defaultSampleRate = Number(args.sampleRate || 8000);
 const defaultChannels = Number(args.channels || 1);
 const configPath = args.config || 'streams.json';
 const opusBitrate = args.opusBitrate || '24k';
+const aacBitrate = args.aacBitrate || '32k';
 const opusKeepaliveMs = Number(args.opusKeepaliveMs || 1000);
 const ffmpegPath = args.ffmpeg || 'ffmpeg';
 const tlsKeyPath = args.tlsKey || args.httpsKey || '';
@@ -168,7 +169,7 @@ function handleHttpRequest(req, res) {
 function attachUpgradeHandler(server) {
   server.on('upgrade', (req, socket) => {
     const requestUrl = new URL(req.url, `${socket.encrypted ? 'https' : 'http'}://${req.headers.host || 'localhost'}`);
-    const match = normalizePath(requestUrl.pathname).match(/^\/([^/]+)\/(audio|control|opus)$/);
+    const match = normalizePath(requestUrl.pathname).match(/^\/([^/]+)\/(audio|control|opus|aac)$/);
     if (!match) {
       socket.destroy();
       return;
@@ -208,8 +209,8 @@ function attachUpgradeHandler(server) {
       stream.controlClients.set(socket, clientId);
       addListenerMode(stream, clientId, 'control');
       sendWsJson(socket, streamConfig(stream));
-    } else if (socketType === 'opus') {
-      serveOpusWebSocket(stream, clientId, socket);
+    } else if (socketType === 'opus' || socketType === 'aac') {
+      serveCompressedWebSocket(stream, clientId, socket, socketType);
     } else {
       stream.rawClients.set(socket, clientId);
       addListenerMode(stream, clientId, 'raw');
@@ -348,6 +349,7 @@ function publicStreamStatus(stream) {
     hasUdp: stream.packetCount > 0,
     url: `/${stream.name}`,
     opusAvailable,
+    aacAvailable: opusAvailable,
     tlsEnabled,
     softwareVersion: SOFTWARE_VERSION,
   };
@@ -421,6 +423,8 @@ function streamConfig(stream) {
     format: 'f32le',
     opusAvailable,
     opusBitrate,
+    aacAvailable: opusAvailable,
+    aacBitrate,
     tlsEnabled,
     softwareVersion: SOFTWARE_VERSION,
   };
@@ -537,14 +541,40 @@ function serveOpus(stream, requestUrl, res) {
   res.on('close', () => cleanupOpusClient(stream, opusClient));
 }
 
-function serveOpusWebSocket(stream, clientId, socket) {
+function serveCompressedWebSocket(stream, clientId, socket, mode) {
   if (!opusAvailable) {
     socket.destroy();
     return;
   }
 
-  addListenerMode(stream, clientId, 'opus');
-  const ffmpeg = spawn(ffmpegPath, [
+  addListenerMode(stream, clientId, mode);
+  const ffmpeg = spawn(ffmpegPath, compressedWebSocketArgs(stream, mode), { stdio: ['pipe', 'pipe', 'ignore'] });
+
+  const opusClient = { clientId, mode, ffmpeg, socket, backpressured: false, droppedBytes: 0 };
+  stream.opusClients.add(opusClient);
+
+  ffmpeg.stdout.on('data', (chunk) => {
+    if (socket.destroyed) {
+      cleanupOpusClient(stream, opusClient);
+      return;
+    }
+    if (!sendWsBinary(socket, chunk)) {
+      ffmpeg.stdout.pause();
+      socket.once('drain', () => ffmpeg.stdout.resume());
+    }
+    addListenerBytes(stream, clientId, mode, chunk.length);
+  });
+
+  ffmpeg.stdin.on('drain', () => {
+    opusClient.backpressured = false;
+  });
+  ffmpeg.on('close', () => cleanupOpusClient(stream, opusClient));
+  socket.on('close', () => cleanupOpusClient(stream, opusClient));
+  socket.on('error', () => cleanupOpusClient(stream, opusClient));
+}
+
+function compressedWebSocketArgs(stream, mode) {
+  const inputArgs = [
     '-hide_banner',
     '-loglevel', 'error',
     '-fflags', 'nobuffer',
@@ -553,6 +583,22 @@ function serveOpusWebSocket(stream, clientId, socket) {
     '-ac', String(stream.channels),
     '-i', 'pipe:0',
     '-vn',
+  ];
+
+  if (mode === 'aac') {
+    return inputArgs.concat([
+      '-c:a', 'aac',
+      '-b:a', aacBitrate,
+      '-ar', '16000',
+      '-flush_packets', '1',
+      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+      '-frag_duration', '20000',
+      '-f', 'mp4',
+      'pipe:1',
+    ]);
+  }
+
+  return inputArgs.concat([
     '-c:a', 'libopus',
     '-application', 'lowdelay',
     '-b:a', opusBitrate,
@@ -566,35 +612,13 @@ function serveOpusWebSocket(stream, clientId, socket) {
     '-cluster_size_limit', '4096',
     '-f', 'webm',
     'pipe:1',
-  ], { stdio: ['pipe', 'pipe', 'ignore'] });
-
-  const opusClient = { clientId, ffmpeg, socket, backpressured: false, droppedBytes: 0 };
-  stream.opusClients.add(opusClient);
-
-  ffmpeg.stdout.on('data', (chunk) => {
-    if (socket.destroyed) {
-      cleanupOpusClient(stream, opusClient);
-      return;
-    }
-    if (!sendWsBinary(socket, chunk)) {
-      ffmpeg.stdout.pause();
-      socket.once('drain', () => ffmpeg.stdout.resume());
-    }
-    addListenerBytes(stream, clientId, 'opus', chunk.length);
-  });
-
-  ffmpeg.stdin.on('drain', () => {
-    opusClient.backpressured = false;
-  });
-  ffmpeg.on('close', () => cleanupOpusClient(stream, opusClient));
-  socket.on('close', () => cleanupOpusClient(stream, opusClient));
-  socket.on('error', () => cleanupOpusClient(stream, opusClient));
+  ]);
 }
 
 function cleanupOpusClient(stream, opusClient) {
   if (!stream.opusClients.has(opusClient)) return;
   stream.opusClients.delete(opusClient);
-  removeListenerMode(stream, opusClient.clientId, 'opus');
+  removeListenerMode(stream, opusClient.clientId, opusClient.mode || 'opus');
   if (!opusClient.ffmpeg.killed) {
     opusClient.ffmpeg.kill('SIGTERM');
   }
@@ -681,6 +705,7 @@ function ensureListenerStats(stream, clientId) {
       lastBytes: 0,
       rawBytes: 0,
       opusBytes: 0,
+      aacBytes: 0,
       opusInputBytes: 0,
       modes: new Set(),
       connectedAt: Date.now(),
@@ -712,6 +737,7 @@ function addListenerBytes(stream, clientId, mode, bytes) {
   stats.lastSeenAt = Date.now();
   if (mode === 'raw') stats.rawBytes += bytes;
   if (mode === 'opus') stats.opusBytes += bytes;
+  if (mode === 'aac') stats.aacBytes += bytes;
 }
 
 function getActiveListeners(stream) {
@@ -726,6 +752,7 @@ function getActiveListeners(stream) {
       bytes: stats.bytes,
       rawBytes: stats.rawBytes,
       opusBytes: stats.opusBytes,
+      aacBytes: stats.aacBytes,
       opusInputBytes: stats.opusInputBytes,
     });
   }
