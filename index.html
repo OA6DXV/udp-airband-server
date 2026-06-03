@@ -126,6 +126,11 @@
       cursor: pointer;
     }
 
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
     button:hover {
       border-color: var(--accent);
     }
@@ -156,6 +161,12 @@
       font-size: 22px;
       line-height: 1.1;
       overflow-wrap: anywhere;
+    }
+
+    .mode-button {
+      width: 100%;
+      min-width: 0;
+      margin-top: 2px;
     }
 
     canvas {
@@ -241,9 +252,9 @@
 
     <section class="meters">
       <div class="meter"><span>Buffered</span><strong id="buffered">0 ms</strong></div>
-      <div class="meter"><span>UDP Bandwidth</span><strong id="udpBandwidth">0 bps</strong></div>
-      <div class="meter"><span>Browser Bandwidth</span><strong id="browserBandwidth">0 bps</strong></div>
+      <div class="meter"><span>Bandwidth</span><strong id="browserBandwidth">0 bps</strong></div>
       <div class="meter"><span>Last Heard Time</span><strong id="lastHeard">never</strong></div>
+      <div class="meter"><span>Mode</span><button id="mode" class="mode-button" type="button">RAW</button></div>
     </section>
 
     <canvas id="scope" width="1200" height="240" aria-label="waveform scope"></canvas>
@@ -261,9 +272,9 @@
     const statusEl = document.getElementById('status');
     const statusText = document.getElementById('statusText');
     const bufferedEl = document.getElementById('buffered');
-    const udpBandwidthEl = document.getElementById('udpBandwidth');
     const browserBandwidthEl = document.getElementById('browserBandwidth');
     const lastHeardEl = document.getElementById('lastHeard');
+    const modeButton = document.getElementById('mode');
     const levelMaskEl = document.getElementById('levelMask');
     const levelValueEl = document.getElementById('levelValue');
     const canvas = document.getElementById('scope');
@@ -278,19 +289,28 @@
     let gain = Number(gainInput.value);
     let lastPeak = 0;
     let latestWave = new Float32Array(0);
-    let browserBytes = 0;
-    let lastBrowserBytes = 0;
-    let lastBrowserStatsAt = performance.now();
     let lastUdpAt = 0;
     let lastAudioAt = 0;
     let wsGeneration = 0;
-    let ws;
+    let controlWs;
+    let rawWs;
+    let opusAudio;
+    let currentMode = 'raw';
+    let preferredMode = isMobileDevice() ? 'opus' : 'raw';
+    let opusAvailable = false;
+    const clientId = getClientId();
     const streamName = location.pathname.replace(/^\/+|\/+$/g, '');
 
     gainInput.addEventListener('input', () => {
       gain = Number(gainInput.value);
       gainValue.value = `${Math.round(gain * 100)}%`;
       if (gainNode) gainNode.gain.value = gain;
+    });
+
+    modeButton.addEventListener('click', () => {
+      preferredMode = currentMode === 'raw' ? 'opus' : 'raw';
+      if (audioContext) startSelectedMode();
+      updateModeButton();
     });
 
     startButton.addEventListener('click', async () => {
@@ -303,43 +323,67 @@
       }
 
       await audioContext.resume();
-      connectWebSocket();
+      connectControlWebSocket();
+      startSelectedMode();
       startButton.textContent = 'Audio Running';
       startButton.disabled = true;
       setStatus('ready', 'Waiting for UDP');
     });
 
-    function connectWebSocket() {
-      if (ws && ws.readyState <= 1) return;
+    function connectControlWebSocket() {
+      if (controlWs && controlWs.readyState <= 1) return;
 
       const generation = ++wsGeneration;
-      ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/${encodeURIComponent(streamName)}/audio`);
-      ws.binaryType = 'arraybuffer';
+      controlWs = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/${encodeURIComponent(streamName)}/control?clientId=${encodeURIComponent(clientId)}`);
 
-      ws.addEventListener('open', () => {
+      controlWs.addEventListener('open', () => {
         if (generation === wsGeneration) setStatus('ready', 'Connected');
       });
-      ws.addEventListener('close', () => {
+      controlWs.addEventListener('close', () => {
         if (generation === wsGeneration) {
           setStatus('', 'Disconnected');
-          setTimeout(connectWebSocket, 1000);
+          setTimeout(connectControlWebSocket, 1000);
         }
       });
-      ws.addEventListener('message', (event) => {
+      controlWs.addEventListener('message', (event) => {
         if (typeof event.data === 'string') {
           const message = JSON.parse(event.data);
           if (message.type === 'config') {
             config = message;
+            opusAvailable = Boolean(message.opusAvailable);
             document.title = `${message.label} - UDP Airband Monitor`;
             document.getElementById('title').textContent = message.label;
+            if (audioContext && preferredMode === 'opus' && opusAvailable && currentMode !== 'opus') {
+              startSelectedMode();
+            }
+            updateModeButton();
           } else if (message.type === 'stats') {
-            udpBandwidthEl.textContent = formatBandwidth(message.udpBitsPerSecond);
+            browserBandwidthEl.textContent = formatBandwidth(message.listenerBitsPerSecond || 0);
             lastUdpAt = message.lastUdpAt || 0;
           }
-          return;
         }
+      });
+    }
 
-        browserBytes += event.data.byteLength;
+    function startSelectedMode() {
+      if (preferredMode === 'opus' && opusAvailable) {
+        startOpus();
+      } else {
+        startRaw();
+      }
+      updateModeButton();
+    }
+
+    function startRaw() {
+      stopOpus();
+      if (rawWs && rawWs.readyState <= 1) return;
+
+      rawWs = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/${encodeURIComponent(streamName)}/audio?clientId=${encodeURIComponent(clientId)}`);
+      rawWs.binaryType = 'arraybuffer';
+      rawWs.addEventListener('close', () => {
+        if (currentMode === 'raw') setTimeout(startRaw, 1000);
+      });
+      rawWs.addEventListener('message', (event) => {
         const samples = new Float32Array(event.data);
         const frames = samples.length / config.channels;
         if (!Number.isInteger(frames)) return;
@@ -350,6 +394,46 @@
         lastAudioAt = Date.now();
         setStatus('live', 'Live');
       });
+      currentMode = 'raw';
+    }
+
+    function startOpus() {
+      stopRaw();
+      if (!opusAudio) {
+        opusAudio = new Audio();
+        opusAudio.preload = 'none';
+        opusAudio.addEventListener('playing', () => setStatus('live', 'Live'));
+        opusAudio.addEventListener('waiting', () => setStatus('idle', 'Idle'));
+        opusAudio.addEventListener('error', () => setStatus('', 'OPUS unavailable'));
+      }
+      opusAudio.src = `/${encodeURIComponent(streamName)}/opus?clientId=${encodeURIComponent(clientId)}&t=${Date.now()}`;
+      opusAudio.play().catch(() => setStatus('', 'OPUS unavailable'));
+      currentMode = 'opus';
+    }
+
+    function stopRaw() {
+      if (rawWs) {
+        rawWs.onclose = null;
+        rawWs.close();
+        rawWs = null;
+      }
+    }
+
+    function stopOpus() {
+      if (opusAudio) {
+        opusAudio.pause();
+        opusAudio.removeAttribute('src');
+        opusAudio.load();
+      }
+    }
+
+    function updateModeButton() {
+      modeButton.textContent = currentMode === 'opus' ? 'OPUS' : 'RAW';
+      modeButton.disabled = !opusAvailable;
+      modeButton.title = opusAvailable ? 'Switch RAW/OPUS' : 'OPUS needs ffmpeg on the server';
+      if (!opusAvailable && currentMode === 'raw') {
+        modeButton.textContent = 'RAW';
+      }
     }
 
     function scheduleAudio(samples, frames) {
@@ -399,15 +483,6 @@
       return peak;
     }
 
-    function updateBrowserBandwidth() {
-      const now = performance.now();
-      const elapsedSeconds = Math.max(0.001, (now - lastBrowserStatsAt) / 1000);
-      const browserBitsPerSecond = Math.max(0, (browserBytes - lastBrowserBytes) * 8 / elapsedSeconds);
-      browserBandwidthEl.textContent = formatBandwidth(browserBitsPerSecond);
-      lastBrowserBytes = browserBytes;
-      lastBrowserStatsAt = now;
-    }
-
     function formatBandwidth(bitsPerSecond) {
       if (bitsPerSecond >= 1_000_000) return `${(bitsPerSecond / 1_000_000).toFixed(2)} Mbps`;
       if (bitsPerSecond >= 1_000) return `${(bitsPerSecond / 1_000).toFixed(1)} kbps`;
@@ -423,7 +498,7 @@
       const elapsedMs = Math.max(0, Date.now() - lastUdpAt);
       lastHeardEl.textContent = formatLastHeardTime(lastUdpAt);
 
-      if (ws && ws.readyState === WebSocket.OPEN && elapsedMs > 1200) {
+      if (controlWs && controlWs.readyState === WebSocket.OPEN && elapsedMs > 1200) {
         setStatus('idle', 'Idle');
       }
     }
@@ -433,6 +508,7 @@
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
+        hour12: false,
       });
     }
 
@@ -469,12 +545,7 @@
       }
       ctx.stroke();
 
-      if (audioContext) {
-        queuedFrames = Math.max(0, Math.round((nextPlayTime - audioContext.currentTime) * config.sampleRate));
-      }
-      const bufferedMs = config.sampleRate ? Math.round(queuedFrames / config.sampleRate * 1000) : 0;
-      bufferedEl.textContent = `${bufferedMs} ms`;
-      if (bufferedMs === 0 && ws && ws.readyState === WebSocket.OPEN && lastUdpAt && Date.now() - lastUdpAt > 1200) {
+      if (controlWs && controlWs.readyState === WebSocket.OPEN && lastUdpAt && Date.now() - lastUdpAt > 1200) {
         setStatus('idle', 'Idle');
       }
       lastPeak *= 0.985;
@@ -482,8 +553,34 @@
       requestAnimationFrame(draw);
     }
     draw();
-    setInterval(updateBrowserBandwidth, 1000);
+    setInterval(updateBuffered, 500);
     setInterval(updateLastHeard, 500);
+
+    function updateBuffered() {
+      if (currentMode === 'opus') {
+        bufferedEl.textContent = 'streaming';
+        return;
+      }
+      if (audioContext) {
+        queuedFrames = Math.max(0, Math.round((nextPlayTime - audioContext.currentTime) * config.sampleRate));
+      }
+      const bufferedMs = config.sampleRate ? Math.round(queuedFrames / config.sampleRate * 1000) : 0;
+      bufferedEl.textContent = `${bufferedMs} ms`;
+    }
+
+    function isMobileDevice() {
+      return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+    }
+
+    function getClientId() {
+      const key = 'udp-airband-client-id';
+      let value = localStorage.getItem(key);
+      if (!value) {
+        value = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+        localStorage.setItem(key, value);
+      }
+      return value;
+    }
   </script>
 </body>
 </html>
