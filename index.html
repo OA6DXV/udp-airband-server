@@ -298,13 +298,15 @@
     let currentMode = 'raw';
     let preferredMode = isMobileDevice() ? 'opus' : 'raw';
     let opusAvailable = false;
+    let audioStarted = false;
+    let muted = false;
     const clientId = getClientId();
     const streamName = location.pathname.replace(/^\/+|\/+$/g, '');
 
     gainInput.addEventListener('input', () => {
       gain = Number(gainInput.value);
       gainValue.value = `${Math.round(gain * 100)}%`;
-      if (gainNode) gainNode.gain.value = gain;
+      applyOutputGain();
     });
 
     modeButton.addEventListener('click', () => {
@@ -314,10 +316,17 @@
     });
 
     startButton.addEventListener('click', async () => {
+      if (audioStarted) {
+        muted = !muted;
+        applyOutputGain();
+        updateAudioButton();
+        return;
+      }
+
       if (!audioContext) {
         audioContext = new AudioContext();
         gainNode = audioContext.createGain();
-        gainNode.gain.value = gain;
+        applyOutputGain();
         gainNode.connect(audioContext.destination);
         nextPlayTime = audioContext.currentTime + targetLatencySeconds;
       }
@@ -325,10 +334,20 @@
       await audioContext.resume();
       connectControlWebSocket();
       startSelectedMode();
-      startButton.textContent = 'Audio Running';
-      startButton.disabled = true;
+      audioStarted = true;
+      updateAudioButton();
       setStatus('ready', 'Waiting for UDP');
     });
+
+    function applyOutputGain() {
+      if (gainNode) gainNode.gain.value = muted ? 0 : gain;
+      if (opusAudio) opusAudio.muted = muted;
+    }
+
+    function updateAudioButton() {
+      startButton.textContent = muted ? 'Unmute' : 'Mute';
+      startButton.disabled = false;
+    }
 
     function connectControlWebSocket() {
       if (controlWs && controlWs.readyState <= 1) return;
@@ -402,10 +421,12 @@
       if (!opusAudio) {
         opusAudio = new Audio();
         opusAudio.preload = 'none';
+        opusAudio.muted = muted;
         opusAudio.addEventListener('playing', () => setStatus('live', 'Live'));
         opusAudio.addEventListener('waiting', () => setStatus('idle', 'Idle'));
         opusAudio.addEventListener('error', () => setStatus('', 'OPUS unavailable'));
       }
+      opusAudio.muted = muted;
       opusAudio.src = `/${encodeURIComponent(streamName)}/opus?clientId=${encodeURIComponent(clientId)}&t=${Date.now()}`;
       opusAudio.play().catch(() => setStatus('', 'OPUS unavailable'));
       currentMode = 'opus';
@@ -496,7 +517,7 @@
       }
 
       const elapsedMs = Math.max(0, Date.now() - lastUdpAt);
-      lastHeardEl.textContent = formatLastHeardTime(lastUdpAt);
+      lastHeardEl.textContent = elapsedMs < 3000 ? 'Now' : formatLastHeardTime(lastUdpAt);
 
       if (controlWs && controlWs.readyState === WebSocket.OPEN && elapsedMs > 1200) {
         setStatus('idle', 'Idle');
