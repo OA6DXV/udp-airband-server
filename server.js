@@ -22,7 +22,7 @@ const defaultSampleRate = Number(args.sampleRate || 8000);
 const defaultChannels = Number(args.channels || 1);
 const configPath = args.config || 'streams.json';
 const opusBitrate = args.opusBitrate || '24k';
-const opusKeepaliveMs = Number(args.opusKeepaliveMs || 100);
+const opusKeepaliveMs = Number(args.opusKeepaliveMs || 1000);
 const ffmpegPath = args.ffmpeg || 'ffmpeg';
 const tlsKeyPath = args.tlsKey || args.httpsKey || '';
 const tlsCertPath = args.tlsCert || args.httpsCert || '';
@@ -505,6 +505,7 @@ function serveOpus(stream, requestUrl, res) {
     '-application', 'lowdelay',
     '-b:a', opusBitrate,
     '-vbr', 'on',
+    '-dtx', '1',
     '-frame_duration', '20',
     '-compression_level', '0',
     '-flush_packets', '1',
@@ -556,6 +557,7 @@ function serveOpusWebSocket(stream, clientId, socket) {
     '-application', 'lowdelay',
     '-b:a', opusBitrate,
     '-vbr', 'on',
+    '-dtx', '1',
     '-frame_duration', '20',
     '-compression_level', '0',
     '-flush_packets', '1',
