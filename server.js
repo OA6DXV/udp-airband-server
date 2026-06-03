@@ -768,7 +768,13 @@ function cleanupOpusClient(stream, opusClient) {
 }
 
 function isWritableOpusClient(opusClient) {
-  const outputWritable = opusClient.res ? !opusClient.res.destroyed : !opusClient.socket.destroyed;
+  let outputWritable = true;
+  if (opusClient.res) {
+    outputWritable = !opusClient.res.destroyed;
+  } else if (opusClient.socket) {
+    outputWritable = !opusClient.socket.destroyed;
+  }
+
   return outputWritable
     && !opusClient.ffmpeg.killed
     && opusClient.ffmpeg.stdin.writable
