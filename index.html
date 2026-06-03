@@ -421,17 +421,22 @@
       }
 
       const elapsedMs = Math.max(0, Date.now() - lastUdpAt);
-      if (elapsedMs < 1500) {
-        lastHeardEl.textContent = 'now';
-      } else if (elapsedMs < 60000) {
-        lastHeardEl.textContent = `${Math.round(elapsedMs / 1000)}s ago`;
-      } else {
-        lastHeardEl.textContent = `${Math.round(elapsedMs / 60000)}m ago`;
-      }
+      lastHeardEl.textContent = formatLastHeard(elapsedMs);
 
       if (ws && ws.readyState === WebSocket.OPEN && elapsedMs > 1200) {
         setStatus('idle', 'Idle');
       }
+    }
+
+    function formatLastHeard(elapsedMs) {
+      if (elapsedMs < 3000) return 'now';
+      if (elapsedMs < 60000) return `${Math.round(elapsedMs / 1000)}s ago`;
+
+      const minutes = Math.round(elapsedMs / 60000);
+      if (minutes < 5) return `${minutes}m ago`;
+      if (minutes < 60) return `${Math.floor(minutes / 5) * 5}m ago`;
+      if (minutes < 90) return '1 hour ago';
+      return '+1 hour ago';
     }
 
     function updateLevelMeter() {
