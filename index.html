@@ -243,7 +243,7 @@
       <div class="meter"><span>Buffered</span><strong id="buffered">0 ms</strong></div>
       <div class="meter"><span>UDP Bandwidth</span><strong id="udpBandwidth">0 bps</strong></div>
       <div class="meter"><span>Browser Bandwidth</span><strong id="browserBandwidth">0 bps</strong></div>
-      <div class="meter"><span>Last Heard</span><strong id="lastHeard">never</strong></div>
+      <div class="meter"><span>Last Heard Time</span><strong id="lastHeard">never</strong></div>
     </section>
 
     <canvas id="scope" width="1200" height="240" aria-label="waveform scope"></canvas>
@@ -421,22 +421,19 @@
       }
 
       const elapsedMs = Math.max(0, Date.now() - lastUdpAt);
-      lastHeardEl.textContent = formatLastHeard(elapsedMs);
+      lastHeardEl.textContent = formatLastHeardTime(lastUdpAt);
 
       if (ws && ws.readyState === WebSocket.OPEN && elapsedMs > 1200) {
         setStatus('idle', 'Idle');
       }
     }
 
-    function formatLastHeard(elapsedMs) {
-      if (elapsedMs < 3000) return 'now';
-      if (elapsedMs < 60000) return `${Math.round(elapsedMs / 1000)}s ago`;
-
-      const minutes = Math.round(elapsedMs / 60000);
-      if (minutes < 5) return `${minutes}m ago`;
-      if (minutes < 60) return `${Math.floor(minutes / 5) * 5}m ago`;
-      if (minutes < 90) return '1 hour ago';
-      return '+1 hour ago';
+    function formatLastHeardTime(timestamp) {
+      return new Date(timestamp).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
     }
 
     function updateLevelMeter() {
