@@ -99,8 +99,8 @@
     }
 
     .status.ready .dot {
-      background: var(--warn);
-      box-shadow: 0 0 0 4px rgb(226 168 75 / 16%);
+      background: var(--accent);
+      box-shadow: 0 0 0 4px rgb(79 180 119 / 18%);
     }
 
     .status.live .dot {
@@ -352,6 +352,7 @@
     let muted = false;
     const clientId = getClientId();
     const streamName = location.pathname.replace(/^\/+|\/+$/g, '');
+    connectControlWebSocket();
 
     gainInput.addEventListener('input', () => {
       gain = Number(gainInput.value);
