@@ -402,6 +402,8 @@
     let receivedBytes = 0;
     let lastBandwidthBytes = 0;
     let lastBandwidthAt = Date.now();
+    const maxOpusLiveBufferSeconds = 1.25;
+    const targetOpusLiveBufferSeconds = 0.35;
     const clientId = getClientId();
     const streamName = location.pathname.replace(/^\/+|\/+$/g, '');
     connectControlWebSocket();
@@ -644,20 +646,29 @@
     }
 
     function trimOpusBuffer() {
-      if (!opusAudio || !opusSourceBuffer || opusSourceBuffer.updating || opusAudio.buffered.length === 0) return;
+      if (!opusAudio || opusAudio.buffered.length === 0) return;
+
+      syncOpusLivePlayback();
+      if (!opusSourceBuffer || opusSourceBuffer.updating) return;
 
       const liveEdge = opusAudio.buffered.end(opusAudio.buffered.length - 1);
-      if (liveEdge - opusAudio.currentTime > 2.5) {
-        opusAudio.currentTime = Math.max(0, liveEdge - 0.8);
-      }
-
-      const removeEnd = liveEdge - 6;
+      const removeEnd = liveEdge - 4;
       if (removeEnd > 0 && opusAudio.buffered.start(0) < removeEnd) {
         try {
           opusSourceBuffer.remove(0, removeEnd);
         } catch {
           // Ignore transient MediaSource states while the browser is updating.
         }
+      }
+    }
+
+    function syncOpusLivePlayback() {
+      if (!opusAudio || opusAudio.buffered.length === 0) return;
+
+      const liveEdge = opusAudio.buffered.end(opusAudio.buffered.length - 1);
+      const bufferedSeconds = liveEdge - opusAudio.currentTime;
+      if (bufferedSeconds > maxOpusLiveBufferSeconds) {
+        opusAudio.currentTime = Math.max(0, liveEdge - targetOpusLiveBufferSeconds);
       }
     }
 
@@ -781,6 +792,9 @@
         opusAnalyser.getFloatTimeDomainData(opusAnalyserBuffer);
         latestWave = opusAnalyserBuffer;
         lastPeak = Math.max(lastPeak * 0.92, peakOf(opusAnalyserBuffer));
+      } else if (currentMode === 'raw' && lastAudioAt && Date.now() - lastAudioAt > 350) {
+        latestWave = new Float32Array(0);
+        lastPeak = 0;
       }
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -815,6 +829,7 @@
     function updateBuffered() {
       updateBrowserBandwidth();
       if (currentMode === 'opus') {
+        syncOpusLivePlayback();
         bufferedEl.textContent = `${getOpusBufferedMs()} ms`;
         return;
       }
