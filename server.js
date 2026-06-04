@@ -299,16 +299,16 @@ function startWebServers() {
   if (debugEnabled) {
     logger.debug('debug_enabled', { flag: '-D' });
   }
-  logger.info('startup', {
-    version: SOFTWARE_VERSION,
-    serverConfig: serverConfigPath,
-    serverConfigLoaded: serverConfigExists,
-    streamsConfig: configPath,
-    streamsConfigLoaded: streamsConfigExists,
-    logLevel: logger.level,
-  });
   webServer.listen(httpPort, httpHost, () => {
     logger.plain('info', `Web player: ${formatUrl(webProtocol, httpHost, httpPort)}/`);
+    logger.info('startup', {
+      version: SOFTWARE_VERSION,
+      serverConfig: serverConfigPath,
+      serverConfigLoaded: serverConfigExists,
+      streamsConfig: configPath,
+      streamsConfigLoaded: streamsConfigExists,
+      logLevel: logger.level,
+    });
   });
 
   logger.plain('info', `Compressed: ${compressedEnabled ? formatCompressedStatus() : 'disabled by config'}`);
