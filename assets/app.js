@@ -22,10 +22,10 @@ const ctx = canvas.getContext('2d');
 
 const translations = {
   en: {
-    users: 'Users', gain: 'Gain', startAudio: 'Start Audio', mute: 'Mute', unmute: 'Unmute', buffered: 'Buffered', bandwidth: 'Bandwidth', lastHeardTime: 'Last Heard Time', mode: 'Mode', level: 'Level', localTime: 'Local Time', disconnected: 'Disconnected', waitingUdp: 'Waiting for UDP', connected: 'Connected', idle: 'Reconnect', opusUnavailable: 'Compressed unavailable', compressed: 'Compressed', uncompressed: 'Uncompressed', switchMode: 'Switch compressed/uncompressed audio', opusNeedsFfmpeg: 'Compressed mode is unavailable on the server', never: 'never', now: 'Now',
+    users: 'Users', gain: 'Gain', startAudio: 'Start Audio', mute: 'Mute', unmute: 'Unmute', buffered: 'Buffered', bandwidth: 'Bandwidth', lastHeardTime: 'Last Heard Time', mode: 'Mode', level: 'Level', localTime: 'Local Time', disconnected: 'Disconnected', waitingUdp: 'Waiting for UDP', connected: 'Connected', idle: 'Push to Reconnect', stopStream: 'Stop stream', opusUnavailable: 'Compressed unavailable', compressed: 'Compressed', uncompressed: 'Uncompressed', switchMode: 'Switch compressed/uncompressed audio', opusNeedsFfmpeg: 'Compressed mode is unavailable on the server', never: 'never', now: 'Now',
   },
   es: {
-    users: 'Usuarios', gain: 'Ganancia', startAudio: 'Iniciar audio', mute: 'Silenciar', unmute: 'Activar audio', buffered: 'Buffer', bandwidth: 'Ancho de banda', lastHeardTime: 'Ultima transmision', mode: 'Modo', level: 'Nivel', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP', connected: 'Conectado', idle: 'Reconectar', opusUnavailable: 'Comprimido no disponible', compressed: 'Comprimido', uncompressed: 'Sin comprimir', switchMode: 'Cambiar audio comprimido/sin comprimir', opusNeedsFfmpeg: 'El modo comprimido no esta disponible en el servidor', never: 'nunca', now: 'Ahora',
+    users: 'Usuarios', gain: 'Ganancia', startAudio: 'Iniciar audio', mute: 'Silenciar', unmute: 'Activar audio', buffered: 'Buffer', bandwidth: 'Ancho de banda', lastHeardTime: 'Ultima transmision', mode: 'Modo', level: 'Nivel', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP', connected: 'Conectado', idle: 'Presiona para reconectar', stopStream: 'Detener stream', opusUnavailable: 'Comprimido no disponible', compressed: 'Comprimido', uncompressed: 'Sin comprimir', switchMode: 'Cambiar audio comprimido/sin comprimir', opusNeedsFfmpeg: 'El modo comprimido no esta disponible en el servidor', never: 'nunca', now: 'Ahora',
   },
 };
 
@@ -75,6 +75,7 @@ let audioStarted = false;
 let muted = false;
 let streamPaused = false;
 let pausedMode = null;
+let statusHovering = false;
 let receivedBytes = 0;
 let lastBandwidthBytes = 0;
 let lastBandwidthAt = Date.now();
@@ -140,6 +141,14 @@ statusEl.addEventListener('click', () => {
   if (streamConfirmed && controlWs && controlWs.readyState === WebSocket.OPEN) {
     pauseStream();
   }
+});
+statusEl.addEventListener('mouseenter', () => {
+  statusHovering = true;
+  updateStatusLabel();
+});
+statusEl.addEventListener('mouseleave', () => {
+  statusHovering = false;
+  updateStatusLabel();
 });
 
 startButton.addEventListener('click', async () => {
@@ -215,7 +224,9 @@ function connectControlWebSocket() {
         updateModeButton();
         updateConnectionState();
       } else if (message.type === 'stats') {
-        browserBandwidthEl.textContent = formatBandwidth(message.listenerBitsPerSecond || 0);
+        if (!streamPaused) {
+          browserBandwidthEl.textContent = formatBandwidth(message.listenerBitsPerSecond || 0);
+        }
         activeUsersEl.textContent = String(message.activeListeners || message.clients || 0);
         lastUdpAt = message.lastHeardAt || message.lastUdpAt || 0;
         lastHeardLabel = message.lastHeardLabel || 'never';
@@ -677,7 +688,15 @@ function updateLevelMeter() {
 function setStatus(state, textKey) {
   statusEl.className = `status ${state}`;
   currentStatusKey = textKey;
-  statusText.textContent = t(textKey);
+  updateStatusLabel();
+}
+
+function updateStatusLabel() {
+  if (currentStatusKey === 'connected' && statusHovering && !streamPaused) {
+    statusText.textContent = t('stopStream');
+    return;
+  }
+  statusText.textContent = t(currentStatusKey);
 }
 
 function draw() {
@@ -720,6 +739,11 @@ updateClocks();
 setInterval(updateClocks, 1000);
 
 function updateBuffered() {
+  if (streamPaused) {
+    bufferedEl.textContent = 'Idle';
+    browserBandwidthEl.textContent = 'Idle';
+    return;
+  }
   updateBrowserBandwidth();
   if (currentMode === 'opus' && activeCompressedKind !== 'adpcm') {
     syncOpusLivePlayback();
@@ -734,6 +758,10 @@ function updateBuffered() {
 }
 
 function updateBrowserBandwidth() {
+  if (streamPaused) {
+    browserBandwidthEl.textContent = 'Idle';
+    return;
+  }
   const now = Date.now();
   const elapsedSeconds = Math.max(0.001, (now - lastBandwidthAt) / 1000);
   const bitsPerSecond = Math.max(0, (receivedBytes - lastBandwidthBytes) * 8 / elapsedSeconds);
@@ -773,7 +801,7 @@ function applyLanguage() {
   });
   updateAudioButton();
   updateModeButton();
-  statusText.textContent = t(currentStatusKey);
+  updateStatusLabel();
   lastHeardEl.textContent = localizeLastHeard(lastHeardLabel);
 }
 

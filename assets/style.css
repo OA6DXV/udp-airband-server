@@ -208,6 +208,17 @@ h1 {
   box-shadow: 0 0 0 4px rgb(7 17 12 / 16%);
 }
 
+.status.live:hover {
+  border-color: var(--bad);
+  background: var(--bad);
+  color: #160606;
+}
+
+.status.live:hover .dot {
+  background: #160606;
+  box-shadow: 0 0 0 4px rgb(22 6 6 / 16%);
+}
+
 .status.idle {
   border-color: var(--warn);
   background: var(--warn);
