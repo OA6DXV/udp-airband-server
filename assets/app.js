@@ -84,6 +84,7 @@ const targetOpusLiveBufferSeconds = 0.35;
 const waveformBarWidth = 6;
 const waveformBarGap = 6;
 const waveformMinBarHeight = 4;
+const waveformVisualGain = 2;
 const adpcmIndexTable = [-1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8];
 const adpcmStepTable = [
   7, 8, 9, 10, 11, 12, 13, 14, 16, 17,
@@ -736,7 +737,7 @@ function drawBarWaveform() {
   ctx.fillStyle = frames > 0 ? '#ff3d12' : '#394451';
   for (let bar = 0; bar < barCount; bar += 1) {
     const peak = frames > 0 ? waveformPeakForBar(bar, barCount, frames, channels) : 0;
-    const scaledPeak = Math.max(0, Math.min(1, peak * gain));
+    const scaledPeak = Math.max(0, Math.min(1, peak * gain * waveformVisualGain));
     const height = Math.max(waveformMinBarHeight, scaledPeak * canvas.height * 0.88);
     roundRect(ctx, x, centerY - height / 2, waveformBarWidth, height, waveformBarWidth / 2);
     ctx.fill();
