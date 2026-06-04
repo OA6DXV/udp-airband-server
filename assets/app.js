@@ -245,11 +245,13 @@ function startRaw() {
 }
 
 function startOpus() {
+  currentMode = 'opus';
   stopRaw();
   stopOpus();
 
   const transport = getCompressedTransport();
   if (!transport) {
+    currentMode = 'raw';
     startRaw();
     return;
   }

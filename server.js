@@ -537,7 +537,7 @@ function serveHls(stream, rawClientId, fileName, res) {
   }
 
   const segmentPath = path.join(hlsClient.dir, fileName);
-  fs.readFile(segmentPath, (err, data) => {
+  readHlsSegment(segmentPath, Date.now() + 2500, (err, data) => {
     if (err) {
       sendNotFound(res);
       return;
@@ -551,6 +551,20 @@ function serveHls(stream, rawClientId, fileName, res) {
     });
     res.end(data);
     addListenerBytes(stream, clientId, 'hls', data.length);
+  });
+}
+
+function readHlsSegment(segmentPath, deadline, callback) {
+  fs.readFile(segmentPath, (err, data) => {
+    if (!err) {
+      callback(null, data);
+      return;
+    }
+    if (Date.now() >= deadline) {
+      callback(err);
+      return;
+    }
+    setTimeout(() => readHlsSegment(segmentPath, deadline, callback), 100);
   });
 }
 
@@ -619,7 +633,8 @@ function hlsArgs(stream) {
     '-flush_packets', '1',
     '-f', 'hls',
     '-hls_time', '1',
-    '-hls_list_size', '4',
+    '-hls_list_size', '6',
+    '-hls_delete_threshold', '6',
     '-hls_flags', 'delete_segments+omit_endlist+independent_segments',
     '-hls_segment_type', 'mpegts',
     '-hls_segment_filename', 'segment-%05d.ts',
