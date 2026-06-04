@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3-preview - Unreleased
+
+### Added
+
+- Added `tools/tone.py` for sending a continuous 1 kHz f32le UDP test tone to the example `test` stream.
+- Added `tools/file-to-udp.py` for converting audio files through `ffmpeg` and sending them as timed f32le UDP chunks.
+- Added `tools/README.md` with tool descriptions and execution examples.
+
+### Changed
+
+- Updated the development version string to `1.3-preview`.
+- Updated the second example stream from `atis` to `test` with label `Testing UDP Input`, UDP port `8690`, 8000 Hz, mono.
+- Updated the main README with concise descriptions of the project files and moved test-tool instructions to `tools/README.md`.
+- Matched the main page user counter and language selector styling to the stream page.
+
 ## 1.2 - 2026-06-04
 
 Production release focused on making compressed mobile playback usable without relying on the experimental HLS/AAC path.

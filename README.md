@@ -17,6 +17,17 @@ cp server.example.conf server.conf
 cp streams.example.json streams.json
 ```
 
+Main files:
+
+- `server.js`: Node.js application entry point. It starts UDP listeners, HTTP/HTTPS servers, WebSocket routes, status endpoints, and compressed audio backends.
+- `server.example.conf`: example server-level configuration for UDP bind defaults, web ports, SSL/TLS paths, and compressed audio settings.
+- `streams.example.json`: example input-stream configuration. This is where feed names, labels, UDP ports, sample rates, and channel counts are defined.
+- `index.html`: stream player HTML shell.
+- `assets/style.css`: stream player styling.
+- `assets/app.js`: browser-side audio, UI, status, language, waveform, and reconnect logic.
+- `lib/`: server modules for configuration, stream loading, listener tracking, WebSocket framing, and compressed audio backends.
+- `tools/`: helper scripts for sending test audio into UDP inputs.
+
 `server.conf` controls server-level settings:
 
 ```conf
@@ -54,9 +65,9 @@ adpcm_frame_ms = 40
       "channels": 1
     },
     {
-      "name": "atis",
-      "label": "ATIS 127.800",
-      "udpPort": 8687,
+      "name": "test",
+      "label": "Testing UDP Input",
+      "udpPort": 8690,
       "sampleRate": 8000,
       "channels": 1
     }
@@ -75,7 +86,7 @@ Open:
 ```text
 http://SERVER_IP:8585/
 http://SERVER_IP:8585/tower
-http://SERVER_IP:8585/atis
+http://SERVER_IP:8585/test
 ```
 
 Click `Start Audio`. Browsers require a user gesture before audio playback starts.
@@ -136,36 +147,24 @@ outputs: (
 );
 ```
 
-For a second stream:
+For the example test stream:
 
 ```conf
 outputs: (
   {
     type = "udp_stream";
     dest_address = "127.0.0.1";
-    dest_port = 8687;
+    dest_port = 8690;
     continuous = true;
   }
 );
 ```
 
-## Quick synthetic test
+## Test tools
 
-From WSL/Linux, send a 1 kHz float32 tone to the `tower` stream:
+The `tools/` directory contains helper scripts for sending synthetic or file-based audio to the example `test` UDP stream on port `8690`.
 
-```bash
-python3 - <<'PY'
-import math, socket, struct, time
-rate = 8000
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-n = 0
-while True:
-    samples = [0.2 * math.sin(2 * math.pi * 1000 * (n + i) / rate) for i in range(rate // 8)]
-    n += len(samples)
-    sock.sendto(struct.pack('<%df' % len(samples), *samples), ('127.0.0.1', 8686))
-    time.sleep(0.125)
-PY
-```
+See `tools/README.md` for usage details.
 
 In RAW mode, the player forwards UDP packets as WebSocket binary frames, so latency stays low and the browser receives the same float PCM shape as the original stream.
 

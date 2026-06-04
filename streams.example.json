@@ -8,9 +8,9 @@
       "channels": 1
     },
     {
-      "name": "atis",
-      "label": "ATIS 127.800",
-      "udpPort": 8687,
+      "name": "test",
+      "label": "Testing UDP Input",
+      "udpPort": 8690,
       "sampleRate": 8000,
       "channels": 1
     }

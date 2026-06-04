@@ -28,7 +28,7 @@ const { createCompressedManager } = require('./lib/compressed');
 
 const MAX_SOCKET_BUFFER_BYTES = 1024 * 1024;
 const MAX_OPUS_STDIN_BUFFER_BYTES = 512 * 1024;
-const SOFTWARE_VERSION = '1.2';
+const SOFTWARE_VERSION = '1.3-preview';
 const COMPRESSED_CODECS = new Set(['adpcm', 'opus', 'aac', 'hls']);
 
 const args = parseArgs(process.argv.slice(2));
