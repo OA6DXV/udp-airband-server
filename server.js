@@ -127,7 +127,7 @@ function startUdpServers() {
     udpServer.on('message', (msg) => handleUdpMessage(stream, msg));
     udpServer.on('error', (err) => fatal(`UDP error on ${stream.name}: ${err.message}`));
     udpServer.bind(stream.udpPort, stream.udpHost, () => {
-      console.log(`UDP input:  ${stream.name} -> ${stream.udpHost}:${stream.udpPort}`);
+      console.log(formatStreamStartupLine(stream));
       pendingUdpBinds -= 1;
       if (pendingUdpBinds === 0) {
         startWebServers();
@@ -284,9 +284,6 @@ function startWebServers() {
     });
   }
 
-  for (const stream of streams) {
-    console.log(`Stream:     /${stream.name} (${stream.label}) ${stream.channels === 1 ? 'mono' : 'stereo'} @ ${stream.sampleRate} Hz`);
-  }
   console.log(`Compressed: ${compressedEnabled ? formatCompressedStatus() : 'disabled by config'}`);
   setInterval(broadcastStreamStats, 1000);
   if (compressedEnabled) {
@@ -456,9 +453,13 @@ function isTlsRequest(req) {
 }
 
 function formatUrl(protocol, host, port) {
-  const displayHost = host === '0.0.0.0' ? 'localhost' : host;
   const defaultPort = protocol === 'https' ? 443 : 80;
-  return `${protocol}://${displayHost}${port === defaultPort ? '' : `:${port}`}`;
+  return `${protocol}://${host}${port === defaultPort ? '' : `:${port}`}`;
+}
+
+function formatStreamStartupLine(stream) {
+  const channelLabel = stream.channels === 1 ? 'mono' : 'stereo';
+  return `Stream: ${stream.name} ( ${stream.udpHost}:${stream.udpPort} ) -> /${stream.name} (${stream.label}) ${channelLabel} @ ${stream.sampleRate} Hz`;
 }
 
 function normalizePath(value) {
