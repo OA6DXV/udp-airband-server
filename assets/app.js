@@ -74,6 +74,7 @@ let compressedAvailable = false;
 let audioStarted = false;
 let muted = false;
 let streamPaused = false;
+let pausedMode = null;
 let receivedBytes = 0;
 let lastBandwidthBytes = 0;
 let lastBandwidthAt = Date.now();
@@ -240,9 +241,9 @@ function updateConnectionState() {
   setStatus(streamConfirmed ? 'live' : 'ready', streamConfirmed ? 'connected' : 'waitingUdp');
 }
 
-function startSelectedMode() {
+function startSelectedMode(mode = preferredMode) {
   if (streamPaused) return;
-  if (preferredMode === 'opus' && isCompressedAvailable()) {
+  if (mode === 'opus' && isCompressedAvailable()) {
     startOpus();
   } else {
     startRaw();
@@ -251,6 +252,7 @@ function startSelectedMode() {
 }
 
 function pauseStream() {
+  pausedMode = currentMode;
   streamPaused = true;
   stopRaw();
   stopOpus();
@@ -267,8 +269,9 @@ function resumeStream() {
     nextPlayTime = audioContext.currentTime + targetLatencySeconds;
   }
   if (audioStarted) {
-    startSelectedMode();
+    startSelectedMode(pausedMode || currentMode || preferredMode);
   }
+  pausedMode = null;
   updateConnectionState();
 }
 
