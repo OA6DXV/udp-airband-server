@@ -223,7 +223,7 @@ The server logs to stdout/stderr, so `systemd` automatically stores the output i
 
 The default `info` level is intentionally soft enough for service use. It shows startup lines, stream binds, player URLs, connection/disconnection events, warnings, and errors. It does not print full ffmpeg encoder debug output.
 
-If `server.conf` is missing, the server starts with built-in defaults and logs a warning. If `streams.json` is missing, the server logs a warning and exits because stream definitions are required.
+If `server.conf` is missing, the server starts with built-in defaults and logs a warning. If `streams.json` is missing, the server logs a warning and starts a built-in `test` stream on UDP port `8690`, mono, `8000 Hz`.
 
 Configure the normal service log level in `server.conf`:
 

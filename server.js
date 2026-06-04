@@ -23,7 +23,7 @@ const {
   removeListenerMode,
 } = require('./lib/listeners');
 const { createLogger } = require('./lib/logger');
-const { loadStreams, renderStreamList, validateStreams } = require('./lib/streams');
+const { DEFAULT_STREAMS, loadStreams, renderStreamList, validateStreams } = require('./lib/streams');
 const { acceptWebSocket, sendWsBinary, sendWsJson } = require('./lib/websocket');
 const { createCompressedManager } = require('./lib/compressed');
 
@@ -115,7 +115,10 @@ if (!serverConfigExists) {
 
 const streamsConfigExists = fs.existsSync(path.resolve(configPath));
 if (!streamsConfigExists) {
-  logger.warn('streams_config_missing', { path: configPath, action: 'server cannot start without streams' });
+  logger.warn('streams_config_missing', {
+    path: configPath,
+    fallback: `/${DEFAULT_STREAMS[0].name} on UDP ${defaultUdpHost}:${DEFAULT_STREAMS[0].udpPort}`,
+  });
 }
 
 let streams;

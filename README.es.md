@@ -223,7 +223,7 @@ El servidor escribe logs en stdout/stderr, asi que `systemd` guarda automaticame
 
 El nivel predeterminado `info` es intencionalmente suave para uso como servicio. Muestra lineas de arranque, streams cargados, URLs del player, conexiones/desconexiones, warnings y errores. No imprime todo el debug de los encoders ffmpeg.
 
-Si falta `server.conf`, el servidor inicia con valores predeterminados internos y muestra un warning. Si falta `streams.json`, el servidor muestra un warning y termina porque las definiciones de streams son obligatorias.
+Si falta `server.conf`, el servidor inicia con valores predeterminados internos y muestra un warning. Si falta `streams.json`, el servidor muestra un warning e inicia un stream interno `test` en el puerto UDP `8690`, mono, `8000 Hz`.
 
 Configura el nivel normal del servicio en `server.conf`:
 
