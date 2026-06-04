@@ -63,6 +63,7 @@ let opusQueue = [];
 const opusMimeType = 'audio/webm; codecs="opus"';
 const aacMimeType = 'audio/mp4; codecs="mp4a.40.2"';
 let compressedTransport = null;
+let usingNativeHls = false;
 let currentMode = 'raw';
 let preferredMode = isMobileDevice() ? 'opus' : 'raw';
 let opusAvailable = false;
@@ -320,9 +321,12 @@ function startHlsCompressed() {
   if (!opusAudio) {
     ensureOpusAudio();
   }
-  setupOpusAudioGraph();
+  usingNativeHls = true;
+  latestWave = new Float32Array(0);
+  lastPeak = 0;
   applyOutputGain();
   opusAudio.src = `/${encodeURIComponent(streamName)}/hls/${encodeURIComponent(clientId)}/playlist.m3u8?t=${Date.now()}`;
+  opusAudio.load();
   opusAudio.play().catch(() => setStatus('', 'opusUnavailable'));
   currentMode = 'opus';
 }
@@ -338,7 +342,7 @@ function ensureOpusAudio() {
 }
 
 function setupOpusAudioGraph() {
-  if (!audioContext || !gainNode || !opusAudio || opusSourceNode) return;
+  if (usingNativeHls || !audioContext || !gainNode || !opusAudio || opusSourceNode) return;
   opusSourceNode = audioContext.createMediaElementSource(opusAudio);
   opusAnalyser = audioContext.createAnalyser();
   opusAnalyser.fftSize = 1024;
@@ -383,6 +387,7 @@ function trimOpusBuffer() {
 }
 
 function syncOpusLivePlayback() {
+  if (usingNativeHls) return;
   if (!opusAudio || opusAudio.buffered.length === 0) return;
 
   const liveEdge = opusAudio.buffered.end(opusAudio.buffered.length - 1);
@@ -401,6 +406,7 @@ function stopRaw() {
 }
 
 function stopOpus() {
+  usingNativeHls = false;
   if (opusWs) {
     suppressOpusReconnect = true;
     opusWs.close();
@@ -509,7 +515,7 @@ function setStatus(state, textKey) {
 }
 
 function draw() {
-  if (currentMode === 'opus' && opusAnalyser && opusAnalyserBuffer) {
+  if (currentMode === 'opus' && !usingNativeHls && opusAnalyser && opusAnalyserBuffer) {
     opusAnalyser.getFloatTimeDomainData(opusAnalyserBuffer);
     latestWave = opusAnalyserBuffer;
     lastPeak = Math.max(lastPeak * 0.92, peakOf(opusAnalyserBuffer));

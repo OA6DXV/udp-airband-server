@@ -527,7 +527,7 @@ function serveHls(stream, rawClientId, fileName, res) {
   addListenerMode(stream, clientId, 'hls');
 
   if (fileName === 'playlist.m3u8') {
-    serveHlsPlaylist(hlsClient, res);
+    serveHlsPlaylist(hlsClient, Date.now() + 4000, res);
     return;
   }
 
@@ -568,8 +568,13 @@ function readHlsSegment(segmentPath, deadline, callback) {
   });
 }
 
-function serveHlsPlaylist(hlsClient, res) {
+function serveHlsPlaylist(hlsClient, deadline, res) {
   fs.readFile(hlsClient.playlistPath, 'utf8', (err, data) => {
+    if ((err || !data.includes('.ts')) && Date.now() < deadline) {
+      setTimeout(() => serveHlsPlaylist(hlsClient, deadline, res), 100);
+      return;
+    }
+
     const playlist = err ? [
       '#EXTM3U',
       '#EXT-X-VERSION:3',
