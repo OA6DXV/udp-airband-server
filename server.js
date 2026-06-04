@@ -183,6 +183,10 @@ function handleUdpMessage(stream, msg) {
 function handleHttpRequest(req, res) {
   const requestUrl = new URL(req.url, `${isTlsRequest(req) ? 'https' : 'http'}://${req.headers.host || 'localhost'}`);
   const pathname = normalizePath(requestUrl.pathname);
+  if (pathname === null) {
+    sendBadRequest(res);
+    return;
+  }
 
   if (pathname === '/') {
     sendHtml(res, renderStreamList(streams, { softwareVersion: SOFTWARE_VERSION }));
@@ -253,7 +257,12 @@ function handleHttpRequest(req, res) {
 function attachUpgradeHandler(server) {
   server.on('upgrade', (req, socket) => {
     const requestUrl = new URL(req.url, `${socket.encrypted ? 'https' : 'http'}://${req.headers.host || 'localhost'}`);
-    const match = normalizePath(requestUrl.pathname).match(/^\/([^/]+)\/(audio|control|adpcm|opus|aac)$/);
+    const pathname = normalizePath(requestUrl.pathname);
+    if (pathname === null) {
+      socket.destroy();
+      return;
+    }
+    const match = pathname.match(/^\/([^/]+)\/(audio|control|adpcm|opus|aac)$/);
     if (!match) {
       logger.warn('websocket_rejected', { path: requestUrl.pathname, reason: 'invalid_route' });
       socket.destroy();
@@ -327,20 +336,9 @@ function publicStreamStatus(stream) {
   return {
     name: stream.name,
     label: stream.label,
-    udpHost: stream.udpHost,
-    udpPort: stream.udpPort,
     sampleRate: stream.sampleRate,
     channels: stream.channels,
-    clients: stream.rawClients.size + stream.opusClients.size,
-    controlClients: stream.controlClients.size,
-    rawClients: stream.rawClients.size,
-    opusClients: stream.opusClients.size,
-    hlsClients: stream.hlsClients.size,
     activeListeners: activeListeners.length,
-    listeners: activeListeners,
-    packetCount: stream.packetCount,
-    byteCount: stream.byteCount,
-    lastUdpAt: stream.lastUdpAt,
     lastHeardAt: lastHeard.at,
     lastHeardLabel: lastHeard.label,
     secondsSinceLastHeard: lastHeard.secondsSince,
@@ -364,7 +362,6 @@ function streamConfig(stream) {
     type: 'config',
     name: stream.name,
     label: stream.label,
-    udpPort: stream.udpPort,
     sampleRate: stream.sampleRate,
     channels: stream.channels,
     format: 'f32le',
@@ -390,7 +387,6 @@ function broadcastStreamStats() {
     compressed.pruneInactiveHlsClients(stream, now);
     const lastHeard = getLastHeard(stream, now);
     const elapsedSeconds = Math.max(0.001, (now - stream.lastStatsAt) / 1000);
-    const udpBitsPerSecond = Math.max(0, (stream.byteCount - stream.lastStatsByteCount) * 8 / elapsedSeconds);
     stream.lastStatsByteCount = stream.byteCount;
     stream.lastStatsAt = now;
 
@@ -406,16 +402,11 @@ function broadcastStreamStats() {
       listenerStats.lastBytes = listenerStats.bytes;
       sendWsJson(client, {
         type: 'stats',
-        udpBitsPerSecond,
         listenerBitsPerSecond,
-        packetCount: stream.packetCount,
-        byteCount: stream.byteCount,
-        lastUdpAt: stream.lastUdpAt,
         lastHeardAt: lastHeard.at,
         lastHeardLabel: lastHeard.label,
         secondsSinceLastHeard: lastHeard.secondsSince,
         hasUdp: stream.packetCount > 0,
-        clients: stream.rawClients.size + stream.opusClients.size,
         activeListeners: getActiveListeners(stream).length,
         compressedCodec,
         softwareVersion: SOFTWARE_VERSION,
@@ -438,6 +429,7 @@ function sendHtml(res, body) {
   res.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
     'cache-control': 'no-store',
+    ...securityHeaders(),
   });
   res.end(body);
 }
@@ -446,7 +438,7 @@ function sendAsset(res, body, contentType, cacheControl = 'no-store') {
   res.writeHead(200, {
     'content-type': contentType,
     'cache-control': cacheControl,
-    'x-content-type-options': 'nosniff',
+    ...securityHeaders(),
   });
   res.end(body);
 }
@@ -455,13 +447,19 @@ function sendJsonResponse(res, value) {
   res.writeHead(200, {
     'content-type': 'application/json',
     'cache-control': 'no-store',
+    ...securityHeaders(),
   });
   res.end(JSON.stringify(value));
 }
 
 function sendNotFound(res) {
-  res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+  res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', ...securityHeaders() });
   res.end('not found\n');
+}
+
+function sendBadRequest(res) {
+  res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8', ...securityHeaders() });
+  res.end('bad request\n');
 }
 
 function loadTlsOptions() {
@@ -503,11 +501,25 @@ function formatStreamStartupLine(stream) {
 }
 
 function normalizePath(value) {
-  const pathOnly = decodeURIComponent(value.split('?')[0]);
+  let pathOnly;
+  try {
+    pathOnly = decodeURIComponent(value.split('?')[0]);
+  } catch {
+    return null;
+  }
   if (pathOnly.length > 1 && pathOnly.endsWith('/')) {
     return pathOnly.slice(0, -1);
   }
   return pathOnly;
+}
+
+function securityHeaders() {
+  return {
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'DENY',
+    'referrer-policy': 'no-referrer',
+    'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; media-src 'self' blob:; worker-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+  };
 }
 
 function fatal(message) {
