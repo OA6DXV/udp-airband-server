@@ -1,5 +1,7 @@
 # UDP Airband Server
 
+[Documento en espanol aqui](README.es.md)
+
 UDP Airband Server is a small Node.js web server for listening to one or more [RTLSDR-Airband](https://github.com/rtl-airband/RTLSDR-Airband) UDP audio outputs from a browser.
 
 RTLSDR-Airband is an open-source airband receiver and streaming daemon. It uses SDR receivers to demodulate analog AM/NFM voice channels, commonly aviation frequencies, and can send each received channel to several outputs such as Icecast, PulseAudio, files, or raw UDP audio. See the [RTLSDR-Airband project](https://github.com/rtl-airband/RTLSDR-Airband) and its [UDP output documentation](https://github.com/rtl-airband/RTLSDR-Airband/wiki/Configuring-UDP-outputs) for the upstream receiver side.
@@ -7,8 +9,6 @@ RTLSDR-Airband is an open-source airband receiver and streaming daemon. It uses 
 This project sits after RTLSDR-Airband. RTLSDR-Airband receives and demodulates the radio signal, then sends raw audio samples by UDP. UDP Airband Server receives those UDP packets, tracks stream state, and exposes a browser player with listener counts, last transmission time, waveform, level meter, uncompressed playback, and a low-bandwidth compressed mode.
 
 The goal is a simple private web listener for local or remote airband feeds: run RTLSDR-Airband near the antenna, send each channel as UDP audio to this server, then open the web page from a phone, tablet, or desktop browser.
-
-Spanish documentation is available in [`README.es.md`](README.es.md).
 
 ## What Is UDP Audio?
 
