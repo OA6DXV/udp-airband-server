@@ -270,6 +270,25 @@ key = /etc/letsencrypt/live/example.com/privkey.pem
 cert = /etc/letsencrypt/live/example.com/fullchain.pem
 ```
 
+Para pruebas locales, puedes crear un certificado autogenerado:
+
+```bash
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout selfsigned.key \
+  -out selfsigned.crt \
+  -days 365 \
+  -subj "/CN=localhost"
+```
+
+Luego apunta `server.conf` a esos archivos:
+
+```conf
+[ssl]
+enabled = true
+key = /opt/udp-airband-server/selfsigned.key
+cert = /opt/udp-airband-server/selfsigned.crt
+```
+
 Luego abre:
 
 ```text
@@ -277,6 +296,8 @@ https://SERVER_IP:8585/
 ```
 
 Cuando SSL esta activo, el player cambia de HTTP a HTTPS en `[web].port`; no inicia un segundo listener HTTP. Si `enabled = true` pero `key` o `cert` falta, no se puede leer o apunta a un archivo inexistente, el servidor muestra `ssl_fallback_http` e inicia HTTP en el mismo puerto.
+
+Los navegadores mostraran una advertencia con certificados autogenerados porque no son confiables por defecto. Esto sirve para pruebas locales, pero para acceso publico se recomienda un certificado confiable, como Let's Encrypt.
 
 ## Modos Uncompressed Y Compressed
 

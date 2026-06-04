@@ -270,6 +270,25 @@ key = /etc/letsencrypt/live/example.com/privkey.pem
 cert = /etc/letsencrypt/live/example.com/fullchain.pem
 ```
 
+For local testing, you can create a self-signed certificate:
+
+```bash
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout selfsigned.key \
+  -out selfsigned.crt \
+  -days 365 \
+  -subj "/CN=localhost"
+```
+
+Then point `server.conf` to those files:
+
+```conf
+[ssl]
+enabled = true
+key = /opt/udp-airband-server/selfsigned.key
+cert = /opt/udp-airband-server/selfsigned.crt
+```
+
 Then open:
 
 ```text
@@ -277,6 +296,8 @@ https://SERVER_IP:8585/
 ```
 
 When SSL is active, the player switches from HTTP to HTTPS on `[web].port`; it does not start a second HTTP listener. If `enabled = true` but `key` or `cert` is missing, unreadable, or points to a non-existing file, the server logs `ssl_fallback_http` and starts HTTP on the same port instead.
+
+Browsers will warn about self-signed certificates because they are not trusted by default. This is acceptable for local testing, but a trusted certificate, such as Let's Encrypt, is recommended for public access.
 
 ## Uncompressed And Compressed Modes
 
