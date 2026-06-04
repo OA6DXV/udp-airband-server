@@ -215,7 +215,7 @@ node server.js -D \
   --config /etc/udp-airband-server/streams.json
 ```
 
-Use `-D` only when running the server directly in a terminal. It can produce a lot of ffmpeg output and is not recommended for the normal `systemd` service command.
+Use `-D` only when running the server directly in a terminal. It forces debug logging, enables timestamps for terminal output, and can produce a lot of ffmpeg output. It is not recommended for the normal `systemd` service command.
 
 ## Logging
 
@@ -244,7 +244,7 @@ Use `debug` in the config only if you really want persistent debug logs in `jour
 node server.js -D --server-config server.conf --config streams.json
 ```
 
-When `-D` is active, ffmpeg-backed encoders such as Opus, AAC, and HLS are started with ffmpeg debug logging and their `stderr` output is printed. Without `-D`, ffmpeg stays at error-level logging so service logs do not get flooded.
+When `-D` is active, ffmpeg-backed encoders such as Opus, AAC, and HLS are started with ffmpeg debug logging and their `stderr` output is printed. `-D` also enables timestamps automatically for manual terminal runs. Without `-D`, ffmpeg stays at error-level logging and timestamp behavior comes from `server.conf`, so service logs do not get flooded.
 
 Then open the home page:
 

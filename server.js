@@ -47,7 +47,6 @@ const aacBitrate = args.aacBitrate || getSetting(serverConfig, 'compressed.aacBi
 const opusKeepaliveMs = Number(args.opusKeepaliveMs || getSetting(serverConfig, 'compressed.keepaliveMs', 1000));
 const ffmpegPath = args.ffmpeg || getSetting(serverConfig, 'compressed.ffmpeg', 'ffmpeg');
 const logLevel = args.logLevel || getSetting(serverConfig, 'logging.level', 'info');
-const logTimestamps = parseBoolean(args.logTimestamps !== undefined ? args.logTimestamps : getSetting(serverConfig, 'logging.timestamps', false));
 const tlsKeyPath = args.tlsKey || args.httpsKey || getSetting(serverConfig, 'ssl.key', '');
 const tlsCertPath = args.tlsCert || args.httpsCert || getSetting(serverConfig, 'ssl.cert', '');
 const tlsConfigured = Boolean(tlsKeyPath || tlsCertPath);
@@ -57,6 +56,7 @@ const httpsHost = args.httpsHost || getSetting(serverConfig, 'ssl.host', httpHos
 const httpsPort = Number(args.httpsPort || getSetting(serverConfig, 'ssl.port', httpPort));
 const redirectHttpToHttps = parseBoolean(args.redirectHttpToHttps !== undefined ? args.redirectHttpToHttps : getSetting(serverConfig, 'ssl.redirectHttpToHttps', false));
 const debugEnabled = Boolean(args.debug);
+const logTimestamps = parseBoolean(args.logTimestamps !== undefined ? args.logTimestamps : (debugEnabled ? true : getSetting(serverConfig, 'logging.timestamps', false)));
 const logger = createLogger({ debug: debugEnabled, level: logLevel, timestamps: logTimestamps });
 
 if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) {
