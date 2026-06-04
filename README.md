@@ -73,6 +73,7 @@ file = streams.json
 [logging]
 level = info
 timestamps = false
+colors = false
 
 [ssl]
 enabled = false
@@ -96,6 +97,7 @@ Important fields:
 - `[streams].file`: JSON file that defines the feeds.
 - `[logging].level`: service-friendly logging level. Supported values are `off`, `error`, `warn`, `info`, and `debug`. The default is `info`.
 - `[logging].timestamps`: set to `true` to prepend ISO timestamps. With `systemd`, this can usually stay `false` because `journalctl` already adds timestamps.
+- `[logging].colors`: set to `true` to color terminal logs. Keep it `false` for normal `systemd` service logs.
 - `[ssl]`: optional HTTPS mode for the same `[web]` host and port. Enable it and provide valid `key` and `cert` paths when you want Node.js to serve TLS directly. If SSL is enabled but the certificate paths are missing or invalid, the server logs a warning and falls back to HTTP on the same port.
 - `[compressed].enabled`: set to `false` to disable all compressed modes and their transcoding/framing logic.
 - `[compressed].codec`: compressed mode backend. `adpcm` is the default low-latency option and does not require `ffmpeg`.
@@ -227,6 +229,7 @@ Configure the normal service log level in `server.conf`:
 [logging]
 level = info
 timestamps = false
+colors = false
 ```
 
 Use `warn` or `error` for quieter service logs:
@@ -242,7 +245,7 @@ Use `debug` in the config only if you really want persistent debug logs in `jour
 node server.js -D --server-config server.conf --config streams.json
 ```
 
-When `-D` is active, ffmpeg-backed encoders such as Opus, AAC, and HLS are started with ffmpeg debug logging and their `stderr` output is printed. `-D` also enables timestamps automatically for manual terminal runs. Without `-D`, ffmpeg stays at error-level logging and timestamp behavior comes from `server.conf`, so service logs do not get flooded.
+When `-D` is active, ffmpeg-backed encoders such as Opus, AAC, and HLS are started with ffmpeg debug logging and their `stderr` output is printed. `-D` also enables timestamps and colors automatically for manual terminal runs. Without `-D`, ffmpeg stays at error-level logging and timestamp/color behavior comes from `server.conf`, so service logs do not get flooded.
 
 Then open the home page:
 

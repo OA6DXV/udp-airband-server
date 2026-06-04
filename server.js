@@ -54,7 +54,8 @@ const sslEnabledSetting = args.sslEnabled !== undefined ? args.sslEnabled : (arg
 const sslRequested = parseBoolean(sslEnabledSetting);
 const debugEnabled = Boolean(args.debug);
 const logTimestamps = parseBoolean(args.logTimestamps !== undefined ? args.logTimestamps : (debugEnabled ? true : getSetting(serverConfig, 'logging.timestamps', false)));
-const logger = createLogger({ debug: debugEnabled, level: logLevel, timestamps: logTimestamps });
+const logColors = parseBoolean(args.logColors !== undefined ? args.logColors : (debugEnabled ? true : getSetting(serverConfig, 'logging.colors', false)));
+const logger = createLogger({ debug: debugEnabled, level: logLevel, timestamps: logTimestamps, colors: logColors });
 
 if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) {
   fatal('--http-port must be a valid port');

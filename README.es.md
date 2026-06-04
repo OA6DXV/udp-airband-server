@@ -73,6 +73,7 @@ file = streams.json
 [logging]
 level = info
 timestamps = false
+colors = false
 
 [ssl]
 enabled = false
@@ -96,6 +97,7 @@ Campos importantes:
 - `[streams].file`: archivo JSON que define los feeds.
 - `[logging].level`: nivel de logging amigable para servicio. Valores soportados: `off`, `error`, `warn`, `info` y `debug`. El valor predeterminado es `info`.
 - `[logging].timestamps`: usa `true` para anteponer timestamps ISO. Con `systemd`, normalmente puede quedar en `false` porque `journalctl` ya agrega timestamps.
+- `[logging].colors`: usa `true` para colorear logs en terminal. Mantenlo en `false` para logs normales de servicio con `systemd`.
 - `[ssl]`: modo HTTPS opcional para el mismo host y puerto de `[web]`. Activalo y define rutas validas `key` y `cert` cuando quieras que Node.js sirva TLS directamente. Si SSL esta activado pero faltan las rutas del certificado o son invalidas, el servidor muestra un warning y cae a HTTP en el mismo puerto.
 - `[compressed].enabled`: usa `false` para desactivar todos los modos comprimidos y su logica de transcoding/framing.
 - `[compressed].codec`: backend del modo comprimido. `adpcm` es la opcion predeterminada de baja latencia y no requiere `ffmpeg`.
@@ -227,6 +229,7 @@ Configura el nivel normal del servicio en `server.conf`:
 [logging]
 level = info
 timestamps = false
+colors = false
 ```
 
 Usa `warn` o `error` para logs mas silenciosos en servicio:
@@ -242,7 +245,7 @@ Usa `debug` en la configuracion solo si realmente quieres logs debug persistente
 node server.js -D --server-config server.conf --config streams.json
 ```
 
-Cuando `-D` esta activo, los encoders basados en ffmpeg como Opus, AAC y HLS se inician con logging debug de ffmpeg y su salida `stderr` se imprime. `-D` tambien activa timestamps automaticamente para ejecuciones manuales en terminal. Sin `-D`, ffmpeg queda en nivel de errores y el comportamiento de timestamps viene desde `server.conf`, para que los logs del servicio no se inunden.
+Cuando `-D` esta activo, los encoders basados en ffmpeg como Opus, AAC y HLS se inician con logging debug de ffmpeg y su salida `stderr` se imprime. `-D` tambien activa timestamps y colores automaticamente para ejecuciones manuales en terminal. Sin `-D`, ffmpeg queda en nivel de errores y el comportamiento de timestamps/colores viene desde `server.conf`, para que los logs del servicio no se inunden.
 
 Luego abre la pagina principal:
 
