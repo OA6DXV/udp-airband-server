@@ -51,8 +51,8 @@ if (parseBoolean(sslEnabledSetting) && (!tlsKeyPath || !tlsCertPath)) {
 
 const publicDir = __dirname;
 const indexHtml = fs.readFileSync(path.join(publicDir, 'index.html'));
-const appJs = fs.readFileSync(path.join(publicDir, 'app.js'));
-const styleCss = fs.readFileSync(path.join(publicDir, 'style.css'));
+const appJs = fs.readFileSync(path.join(publicDir, 'assets', 'app.js'));
+const styleCss = fs.readFileSync(path.join(publicDir, 'assets', 'style.css'));
 const tlsOptions = tlsEnabled ? loadTlsOptions() : null;
 const streams = loadStreams();
 validateStreams(streams);
