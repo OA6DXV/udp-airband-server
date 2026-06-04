@@ -8,23 +8,38 @@ Each stream is raw 32-bit little-endian floating-point PCM:
 - Stereo: interleaved `L R L R ...`
 - Sample rate: `8000 Hz` by default, or `16000 Hz` if RTLSDR-Airband was built with `NFM`
 
-## Run one stream
+## Configuration
+
+Copy the example files and edit them for your server:
 
 ```bash
-npm start -- --sample-rate 8000 --channels 1
+cp server.example.conf server.conf
+cp streams.example.json streams.json
 ```
 
-Default ports:
+`server.conf` controls server-level settings:
 
-- Web: `0.0.0.0:8585`
-- UDP: `0.0.0.0:8686`
-- Stream URL: `http://SERVER_IP:8585/main`
+```conf
+[udp]
+host = 0.0.0.0
 
-Click `Start Audio`. Browsers require a user gesture before audio playback starts.
+[web]
+host = 0.0.0.0
+port = 8585
 
-## Run multiple streams
+[streams]
+file = streams.json
 
-Create `streams.json`:
+[ssl]
+enabled = false
+key =
+cert =
+
+[compressed]
+enabled = true
+```
+
+`streams.json` is the only place that defines feeds, UDP ports, sample rate, and channel count:
 
 ```json
 {
@@ -47,7 +62,7 @@ Create `streams.json`:
 }
 ```
 
-Then run:
+Then run the server:
 
 ```bash
 npm start
@@ -61,21 +76,28 @@ http://SERVER_IP:8585/tower
 http://SERVER_IP:8585/atis
 ```
 
-You can also use a custom config path:
+Click `Start Audio`. Browsers require a user gesture before audio playback starts.
+
+You can also use custom config paths:
 
 ```bash
-npm start -- --config /etc/udp-airband-server/streams.json
+npm start -- \
+  --server-config /etc/udp-airband-server/server.conf \
+  --config /etc/udp-airband-server/streams.json
 ```
 
 ## HTTPS / TLS
 
-The server can listen with HTTPS directly when you provide a certificate and private key:
+The server can listen with HTTPS directly when you enable SSL and provide a certificate and private key in `server.conf`:
 
-```bash
-npm start -- \
-  --tls-key /etc/letsencrypt/live/example.com/privkey.pem \
-  --tls-cert /etc/letsencrypt/live/example.com/fullchain.pem \
-  --https-port 8443
+```conf
+[ssl]
+enabled = true
+host = 0.0.0.0
+port = 8443
+key = /etc/letsencrypt/live/example.com/privkey.pem
+cert = /etc/letsencrypt/live/example.com/fullchain.pem
+redirect_http_to_https = false
 ```
 
 Then open:
@@ -83,14 +105,6 @@ Then open:
 ```text
 https://SERVER_IP:8443/main
 ```
-
-Useful TLS flags:
-
-- `--tls-key`: path to the private key file.
-- `--tls-cert`: path to the certificate/fullchain file.
-- `--https-host`: HTTPS bind address, defaults to `--http-host`.
-- `--https-port`: HTTPS bind port, defaults to the HTTP port.
-- `--redirect-http-to-https true`: keep HTTP open only to redirect browsers to HTTPS.
 
 The plain HTTP listener is still started by default so existing deployments do not break. Use firewall or reverse-proxy rules if you want HTTPS only exposed publicly.
 
@@ -168,22 +182,32 @@ Install `ffmpeg` on Ubuntu to enable compressed audio:
 sudo apt install ffmpeg
 ```
 
-The default Opus bitrate is `24k`. Override it with:
+To disable all compressed audio and all transcoding logic, set this in `server.conf`:
 
-```bash
-npm start -- --opus-bitrate 16k
+```conf
+[compressed]
+enabled = false
+```
+
+The default Opus bitrate is `24k`. Override it in `server.conf` with:
+
+```conf
+[compressed]
+opus_bitrate = 16k
 ```
 
 The default AAC bitrate for iPhone/iPad compressed mode is `32k`. Override it with:
 
-```bash
-npm start -- --aac-bitrate 24k
+```conf
+[compressed]
+aac_bitrate = 24k
 ```
 
 For compressed listeners, the server sends compressed silence while UDP is idle so mobile browsers keep the stream open when RTLSDR-Airband uses `continuous = false`. Uncompressed listeners still receive nothing while UDP is idle.
 
 The silence keepalive interval defaults to `1000 ms`. Override it with:
 
-```bash
-npm start -- --opus-keepalive-ms 100
+```conf
+[compressed]
+keepalive_ms = 100
 ```

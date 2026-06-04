@@ -15,24 +15,26 @@ const MAX_OPUS_STDIN_BUFFER_BYTES = 512 * 1024;
 const SOFTWARE_VERSION = '1.1';
 
 const args = parseArgs(process.argv.slice(2));
-const defaultUdpHost = args.udpHost || '0.0.0.0';
-const defaultUdpPort = Number(args.udpPort || args.udp || 8686);
-const httpHost = args.httpHost || '0.0.0.0';
-const httpPort = Number(args.httpPort || args.http || 8585);
-const defaultSampleRate = Number(args.sampleRate || 8000);
-const defaultChannels = Number(args.channels || 1);
-const configPath = args.config || 'streams.json';
-const opusBitrate = args.opusBitrate || '24k';
-const aacBitrate = args.aacBitrate || '32k';
-const opusKeepaliveMs = Number(args.opusKeepaliveMs || 1000);
-const ffmpegPath = args.ffmpeg || 'ffmpeg';
-const tlsKeyPath = args.tlsKey || args.httpsKey || '';
-const tlsCertPath = args.tlsCert || args.httpsCert || '';
-const tlsEnabled = Boolean(tlsKeyPath || tlsCertPath);
-const httpsHost = args.httpsHost || httpHost;
-const httpsPort = Number(args.httpsPort || httpPort);
-const redirectHttpToHttps = parseBoolean(args.redirectHttpToHttps || false);
-const opusAvailable = hasFfmpeg();
+const serverConfigPath = args.serverConfig || args.serverConf || 'server.conf';
+const serverConfig = loadServerConfig(serverConfigPath);
+const defaultUdpHost = args.udpHost || getSetting('udp.host', '0.0.0.0');
+const httpHost = args.httpHost || getSetting('web.host', '0.0.0.0');
+const httpPort = Number(args.httpPort || args.http || getSetting('web.port', 8585));
+const configPath = args.config || getSetting('streams.file', 'streams.json');
+const compressedEnabled = parseBoolean(args.compressedEnabled !== undefined ? args.compressedEnabled : getSetting('compressed.enabled', true));
+const opusBitrate = args.opusBitrate || getSetting('compressed.opusBitrate', '24k');
+const aacBitrate = args.aacBitrate || getSetting('compressed.aacBitrate', '32k');
+const opusKeepaliveMs = Number(args.opusKeepaliveMs || getSetting('compressed.keepaliveMs', 1000));
+const ffmpegPath = args.ffmpeg || getSetting('compressed.ffmpeg', 'ffmpeg');
+const tlsKeyPath = args.tlsKey || args.httpsKey || getSetting('ssl.key', '');
+const tlsCertPath = args.tlsCert || args.httpsCert || getSetting('ssl.cert', '');
+const tlsConfigured = Boolean(tlsKeyPath || tlsCertPath);
+const sslEnabledSetting = args.sslEnabled !== undefined ? args.sslEnabled : (args.tlsEnabled !== undefined ? args.tlsEnabled : getSetting('ssl.enabled', tlsConfigured));
+const tlsEnabled = parseBoolean(sslEnabledSetting) && tlsConfigured;
+const httpsHost = args.httpsHost || getSetting('ssl.host', httpHost);
+const httpsPort = Number(args.httpsPort || getSetting('ssl.port', httpPort));
+const redirectHttpToHttps = parseBoolean(args.redirectHttpToHttps !== undefined ? args.redirectHttpToHttps : getSetting('ssl.redirectHttpToHttps', false));
+const opusAvailable = compressedEnabled && hasFfmpeg();
 
 if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) {
   fatal('--http-port must be a valid port');
@@ -43,17 +45,19 @@ if (!Number.isInteger(httpsPort) || httpsPort < 1 || httpsPort > 65535) {
 if (!Number.isInteger(opusKeepaliveMs) || opusKeepaliveMs < 20 || opusKeepaliveMs > 1000) {
   fatal('--opus-keepalive-ms must be between 20 and 1000');
 }
-if (tlsEnabled && (!tlsKeyPath || !tlsCertPath)) {
+if (parseBoolean(sslEnabledSetting) && (!tlsKeyPath || !tlsCertPath)) {
   fatal('TLS requires both --tls-key and --tls-cert');
 }
 
 const publicDir = __dirname;
 const indexHtml = fs.readFileSync(path.join(publicDir, 'index.html'));
+const appJs = fs.readFileSync(path.join(publicDir, 'app.js'));
+const styleCss = fs.readFileSync(path.join(publicDir, 'style.css'));
 const tlsOptions = tlsEnabled ? loadTlsOptions() : null;
 const streams = loadStreams();
 validateStreams(streams);
 const streamsByName = new Map(streams.map((stream) => [stream.name, stream]));
-const hlsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-hls-'));
+const hlsRoot = compressedEnabled ? fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-hls-')) : '';
 
 const httpServer = http.createServer((req, res) => {
   if (tlsEnabled && redirectHttpToHttps) {
@@ -129,6 +133,16 @@ function handleHttpRequest(req, res) {
   if (pathname === '/favicon.ico') {
     res.writeHead(204, { 'cache-control': 'public, max-age=86400' });
     res.end();
+    return;
+  }
+
+  if (pathname === '/assets/style.css') {
+    sendAsset(res, styleCss, 'text/css; charset=utf-8');
+    return;
+  }
+
+  if (pathname === '/assets/app.js') {
+    sendAsset(res, appJs, 'application/javascript; charset=utf-8');
     return;
   }
 
@@ -252,29 +266,24 @@ function startWebServers() {
   for (const stream of streams) {
     console.log(`Stream:     /${stream.name} (${stream.label}) ${stream.channels === 1 ? 'mono' : 'stereo'} @ ${stream.sampleRate} Hz`);
   }
-  console.log(`OPUS:       ${opusAvailable ? `enabled via ${ffmpegPath}` : 'unavailable (ffmpeg not found)'}`);
+  console.log(`Compressed: ${compressedEnabled ? (opusAvailable ? `enabled via ${ffmpegPath}` : 'unavailable (ffmpeg not found)') : 'disabled by config'}`);
   setInterval(broadcastStreamStats, 1000);
-  setInterval(writeOpusSilenceKeepalive, opusKeepaliveMs);
+  if (compressedEnabled) {
+    setInterval(writeOpusSilenceKeepalive, opusKeepaliveMs);
+  }
 }
 
 function loadStreams() {
   const configFile = path.resolve(configPath);
-  if (fs.existsSync(configFile)) {
-    const parsed = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-    if (!Array.isArray(parsed.streams) || parsed.streams.length === 0) {
-      fatal(`${configPath} must contain a non-empty "streams" array`);
-    }
-    return parsed.streams.map(normalizeStream);
+  if (!fs.existsSync(configFile)) {
+    fatal(`Streams config not found: ${configPath}`);
   }
 
-  return [normalizeStream({
-    name: args.name || 'main',
-    label: args.label || args.name || 'main',
-    udpHost: defaultUdpHost,
-    udpPort: defaultUdpPort,
-    sampleRate: defaultSampleRate,
-    channels: defaultChannels,
-  })];
+  const parsed = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+  if (!Array.isArray(parsed.streams) || parsed.streams.length === 0) {
+    fatal(`${configPath} must contain a non-empty "streams" array`);
+  }
+  return parsed.streams.map(normalizeStream);
 }
 
 function normalizeStream(raw) {
@@ -285,8 +294,8 @@ function normalizeStream(raw) {
 
   const udpHost = raw.udpHost || defaultUdpHost;
   const udpPort = Number(raw.udpPort);
-  const sampleRate = Number(raw.sampleRate || defaultSampleRate);
-  const channels = Number(raw.channels || defaultChannels);
+  const sampleRate = Number(raw.sampleRate);
+  const channels = Number(raw.channels);
 
   if (!Number.isInteger(udpPort) || udpPort < 1 || udpPort > 65535) {
     fatal(`Stream "${name}" has invalid udpPort`);
@@ -363,6 +372,7 @@ function publicStreamStatus(stream) {
     secondsSinceLastHeard: lastHeard.secondsSince,
     hasUdp: stream.packetCount > 0,
     url: `/${stream.name}`,
+    compressedEnabled,
     opusAvailable,
     aacAvailable: opusAvailable,
     hlsAvailable: opusAvailable,
@@ -411,6 +421,15 @@ function sendHtml(res, body) {
   res.end(body);
 }
 
+function sendAsset(res, body, contentType) {
+  res.writeHead(200, {
+    'content-type': contentType,
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+  });
+  res.end(body);
+}
+
 function sendJsonResponse(res, value) {
   res.writeHead(200, {
     'content-type': 'application/json',
@@ -437,6 +456,7 @@ function streamConfig(stream) {
     sampleRate: stream.sampleRate,
     channels: stream.channels,
     format: 'f32le',
+    compressedEnabled,
     opusAvailable,
     opusBitrate,
     aacAvailable: opusAvailable,
@@ -1014,6 +1034,57 @@ function parseArgs(argv) {
     }
   }
   return out;
+}
+
+function loadServerConfig(filePath) {
+  const resolved = path.resolve(filePath);
+  if (!fs.existsSync(resolved)) {
+    return {};
+  }
+
+  const out = {};
+  let section = '';
+  const lines = fs.readFileSync(resolved, 'utf8').split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.replace(/[;#].*$/, '').trim();
+    if (!trimmed) continue;
+
+    const sectionMatch = trimmed.match(/^\[([^\]]+)\]$/);
+    if (sectionMatch) {
+      section = normalizeConfigKey(sectionMatch[1]);
+      continue;
+    }
+
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) {
+      fatal(`Invalid config line in ${filePath}: ${line}`);
+    }
+
+    const rawKey = normalizeConfigKey(trimmed.slice(0, eq).trim());
+    const key = section ? `${section}.${rawKey}` : rawKey;
+    out[key] = unquote(trimmed.slice(eq + 1).trim());
+  }
+  return out;
+}
+
+function getSetting(key, fallback) {
+  const normalized = normalizeConfigKey(key);
+  return Object.prototype.hasOwnProperty.call(serverConfig, normalized) ? serverConfig[normalized] : fallback;
+}
+
+function normalizeConfigKey(value) {
+  return String(value)
+    .trim()
+    .replace(/[-_]+([a-zA-Z0-9])/g, (_, c) => c.toUpperCase())
+    .replace(/\s+/g, '');
+}
+
+function unquote(value) {
+  const trimmed = value.trim();
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
 }
 
 function toCamel(name) {
