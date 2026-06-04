@@ -25,7 +25,7 @@ The useful part of this approach is latency and simplicity. RTLSDR-Airband can k
 ## Files
 
 - `server.js`: Node.js entry point. It starts the UDP listeners, HTTP/HTTPS web server, stream routes, status handling used by the UI, and compressed-audio backends.
-- `server.example.conf`: example server-level configuration. Copy it to `server.conf` and set web bind addresses, ports, SSL/TLS certificate paths, and compressed-audio options.
+- `server.conf`: server-level configuration. Edit it to set web bind addresses, ports, SSL/TLS certificate paths, logging, and compressed-audio options.
 - `streams.example.json`: example stream configuration. Copy it to `streams.json`; this is where feed names, labels, UDP ports, sample rates, and channel counts are defined.
 - `index.html`: stream player HTML shell used for each individual feed page.
 - `assets/style.css`: CSS for the stream player and responsive UI.
@@ -49,10 +49,9 @@ cd udp-airband-server
 npm install
 ```
 
-Copy the example configuration files:
+Copy the example stream configuration:
 
 ```bash
-cp server.example.conf server.conf
 cp streams.example.json streams.json
 ```
 
@@ -223,7 +222,7 @@ The server logs to stdout/stderr, so `systemd` automatically stores the output i
 
 The default `info` level is intentionally soft enough for service use. It shows startup lines, stream binds, player URLs, connection/disconnection events, warnings, and errors. It does not print full ffmpeg encoder debug output.
 
-If `server.conf` is missing, the server starts with built-in defaults and logs a warning. If `streams.json` is missing, the server logs a warning and starts a built-in `test` stream on UDP port `8690`, mono, `8000 Hz`.
+`server.conf` is included in the repository with the default server settings, so users can see and edit it directly. If it is removed, the server starts with built-in defaults and logs a warning. If `streams.json` is missing, the server logs a warning and starts a built-in `test` stream on UDP port `8690`, mono, `8000 Hz`.
 
 Configure the normal service log level in `server.conf`:
 

@@ -25,7 +25,7 @@ La utilidad de este enfoque es la baja latencia y la simplicidad. RTLSDR-Airband
 ## Archivos
 
 - `server.js`: punto de entrada de Node.js. Inicia los listeners UDP, el servidor HTTP/HTTPS, rutas de stream, estado usado por la UI y backends de audio comprimido.
-- `server.example.conf`: configuracion de ejemplo a nivel servidor. Copialo como `server.conf` y define direcciones de escucha, puertos, rutas de certificado SSL/TLS y opciones de audio comprimido.
+- `server.conf`: configuracion a nivel servidor. Editalo para definir direcciones de escucha, puertos, rutas de certificado SSL/TLS, logging y opciones de audio comprimido.
 - `streams.example.json`: configuracion de streams de ejemplo. Copialo como `streams.json`; aqui se definen nombres de feeds, labels, puertos UDP, sample rates y cantidad de canales.
 - `index.html`: estructura HTML del reproductor para cada pagina individual de stream.
 - `assets/style.css`: estilos CSS del reproductor y la UI responsive.
@@ -49,10 +49,9 @@ cd udp-airband-server
 npm install
 ```
 
-Copia los archivos de configuracion de ejemplo:
+Copia la configuracion de streams de ejemplo:
 
 ```bash
-cp server.example.conf server.conf
 cp streams.example.json streams.json
 ```
 
@@ -223,7 +222,7 @@ El servidor escribe logs en stdout/stderr, asi que `systemd` guarda automaticame
 
 El nivel predeterminado `info` es intencionalmente suave para uso como servicio. Muestra lineas de arranque, streams cargados, URLs del player, conexiones/desconexiones, warnings y errores. No imprime todo el debug de los encoders ffmpeg.
 
-Si falta `server.conf`, el servidor inicia con valores predeterminados internos y muestra un warning. Si falta `streams.json`, el servidor muestra un warning e inicia un stream interno `test` en el puerto UDP `8690`, mono, `8000 Hz`.
+`server.conf` viene incluido en el repositorio con la configuracion predeterminada del servidor, para que el usuario pueda verlo y editarlo directamente. Si se elimina, el servidor inicia con valores predeterminados internos y muestra un warning. Si falta `streams.json`, el servidor muestra un warning e inicia un stream interno `test` en el puerto UDP `8690`, mono, `8000 Hz`.
 
 Configura el nivel normal del servicio en `server.conf`:
 
