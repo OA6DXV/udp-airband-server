@@ -76,11 +76,8 @@ timestamps = false
 
 [ssl]
 enabled = false
-host = 0.0.0.0
-port = 8443
 key =
 cert =
-redirect_http_to_https = false
 
 [compressed]
 enabled = true
@@ -95,11 +92,11 @@ keepalive_ms = 1000
 Campos importantes:
 
 - `[udp].host`: direccion UDP predeterminada para streams que no definan su propio `udpHost`.
-- `[web].host` y `[web].port`: direccion y puerto HTTP para la interfaz web.
+- `[web].host` y `[web].port`: direccion y puerto para la interfaz web. El mismo puerto se usa para HTTP o HTTPS segun `[ssl]`.
 - `[streams].file`: archivo JSON que define los feeds.
 - `[logging].level`: nivel de logging amigable para servicio. Valores soportados: `off`, `error`, `warn`, `info` y `debug`. El valor predeterminado es `info`.
 - `[logging].timestamps`: usa `true` para anteponer timestamps ISO. Con `systemd`, normalmente puede quedar en `false` porque `journalctl` ya agrega timestamps.
-- `[ssl]`: listener HTTPS opcional. Activalo y define las rutas `key` y `cert` cuando quieras que Node.js sirva TLS directamente.
+- `[ssl]`: modo HTTPS opcional para el mismo host y puerto de `[web]`. Activalo y define rutas validas `key` y `cert` cuando quieras que Node.js sirva TLS directamente. Si SSL esta activado pero faltan las rutas del certificado o son invalidas, el servidor muestra un warning y cae a HTTP en el mismo puerto.
 - `[compressed].enabled`: usa `false` para desactivar todos los modos comprimidos y su logica de transcoding/framing.
 - `[compressed].codec`: backend del modo comprimido. `adpcm` es la opcion predeterminada de baja latencia y no requiere `ffmpeg`.
 
@@ -257,25 +254,26 @@ Abre una pagina de stream y presiona `Start Audio`. Los navegadores requieren un
 
 ## HTTPS / TLS
 
-El servidor puede servir HTTPS directamente cuando SSL esta activado:
+El servidor puede servir HTTPS directamente en el mismo host y puerto configurado en `[web]`.
 
 ```conf
+[web]
+host = 0.0.0.0
+port = 8585
+
 [ssl]
 enabled = true
-host = 0.0.0.0
-port = 8443
 key = /etc/letsencrypt/live/example.com/privkey.pem
 cert = /etc/letsencrypt/live/example.com/fullchain.pem
-redirect_http_to_https = false
 ```
 
 Luego abre:
 
 ```text
-https://SERVER_IP:8443/
+https://SERVER_IP:8585/
 ```
 
-El listener HTTP sigue iniciando por defecto para no romper despliegues existentes. Usa reglas de firewall o un reverse proxy si quieres exponer publicamente solo HTTPS.
+Cuando SSL esta activo, el player cambia de HTTP a HTTPS en `[web].port`; no inicia un segundo listener HTTP. Si `enabled = true` pero `key` o `cert` falta, no se puede leer o apunta a un archivo inexistente, el servidor muestra `ssl_fallback_http` e inicia HTTP en el mismo puerto.
 
 ## Modos Uncompressed Y Compressed
 

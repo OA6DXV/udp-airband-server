@@ -50,21 +50,14 @@ const ffmpegPath = args.ffmpeg || getSetting(serverConfig, 'compressed.ffmpeg', 
 const logLevel = args.logLevel || getSetting(serverConfig, 'logging.level', 'info');
 const tlsKeyPath = args.tlsKey || args.httpsKey || getSetting(serverConfig, 'ssl.key', '');
 const tlsCertPath = args.tlsCert || args.httpsCert || getSetting(serverConfig, 'ssl.cert', '');
-const tlsConfigured = Boolean(tlsKeyPath || tlsCertPath);
-const sslEnabledSetting = args.sslEnabled !== undefined ? args.sslEnabled : (args.tlsEnabled !== undefined ? args.tlsEnabled : getSetting(serverConfig, 'ssl.enabled', tlsConfigured));
-const tlsEnabled = parseBoolean(sslEnabledSetting) && tlsConfigured;
-const httpsHost = args.httpsHost || getSetting(serverConfig, 'ssl.host', httpHost);
-const httpsPort = Number(args.httpsPort || getSetting(serverConfig, 'ssl.port', httpPort));
-const redirectHttpToHttps = parseBoolean(args.redirectHttpToHttps !== undefined ? args.redirectHttpToHttps : getSetting(serverConfig, 'ssl.redirectHttpToHttps', false));
+const sslEnabledSetting = args.sslEnabled !== undefined ? args.sslEnabled : (args.tlsEnabled !== undefined ? args.tlsEnabled : getSetting(serverConfig, 'ssl.enabled', false));
+const sslRequested = parseBoolean(sslEnabledSetting);
 const debugEnabled = Boolean(args.debug);
 const logTimestamps = parseBoolean(args.logTimestamps !== undefined ? args.logTimestamps : (debugEnabled ? true : getSetting(serverConfig, 'logging.timestamps', false)));
 const logger = createLogger({ debug: debugEnabled, level: logLevel, timestamps: logTimestamps });
 
 if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) {
   fatal('--http-port must be a valid port');
-}
-if (!Number.isInteger(httpsPort) || httpsPort < 1 || httpsPort > 65535) {
-  fatal('--https-port must be a valid port');
 }
 if (!Number.isInteger(opusKeepaliveMs) || opusKeepaliveMs < 20 || opusKeepaliveMs > 1000) {
   fatal('--opus-keepalive-ms must be between 20 and 1000');
@@ -75,16 +68,13 @@ if (!COMPRESSED_CODECS.has(compressedCodec)) {
 if (!Number.isInteger(adpcmFrameMs) || adpcmFrameMs < 10 || adpcmFrameMs > 100) {
   fatal('--adpcm-frame-ms must be between 10 and 100');
 }
-if (parseBoolean(sslEnabledSetting) && (!tlsKeyPath || !tlsCertPath)) {
-  fatal('TLS requires both --tls-key and --tls-cert');
-}
-
 const publicDir = __dirname;
 const indexHtml = fs.readFileSync(path.join(publicDir, 'index.html'));
 const appJs = fs.readFileSync(path.join(publicDir, 'assets', 'app.js'));
 const styleCss = fs.readFileSync(path.join(publicDir, 'assets', 'style.css'));
 const faviconIco = fs.readFileSync(path.join(publicDir, 'assets', 'favicon.ico'));
-const tlsOptions = tlsEnabled ? loadTlsOptions() : null;
+const tlsOptions = sslRequested ? loadTlsOptions() : null;
+const tlsEnabled = Boolean(tlsOptions);
 const hlsRoot = compressedEnabled ? fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-hls-')) : '';
 const compressed = createCompressedManager({
   aacBitrate,
@@ -130,17 +120,12 @@ try {
 }
 const streamsByName = new Map(streams.map((stream) => [stream.name, stream]));
 
-const httpServer = http.createServer((req, res) => {
-  if (tlsEnabled && redirectHttpToHttps) {
-    redirectToHttps(req, res);
-    return;
-  }
-  handleHttpRequest(req, res);
-});
-const httpsServer = tlsEnabled ? https.createServer(tlsOptions, handleHttpRequest) : null;
+const webProtocol = tlsEnabled ? 'https' : 'http';
+const webServer = tlsEnabled
+  ? https.createServer(tlsOptions, handleHttpRequest)
+  : http.createServer(handleHttpRequest);
 
-attachUpgradeHandler(httpServer);
-if (httpsServer) attachUpgradeHandler(httpsServer);
+attachUpgradeHandler(webServer);
 startUdpServers();
 
 function startUdpServers() {
@@ -321,16 +306,9 @@ function startWebServers() {
     streamsConfigLoaded: streamsConfigExists,
     logLevel: logger.level,
   });
-  httpServer.listen(httpPort, httpHost, () => {
-    const mode = tlsEnabled && redirectHttpToHttps ? 'HTTP redirect' : 'Web player';
-    logger.plain('info', `${mode}: ${formatUrl('http', httpHost, httpPort)}/`);
+  webServer.listen(httpPort, httpHost, () => {
+    logger.plain('info', `Web player: ${formatUrl(webProtocol, httpHost, httpPort)}/`);
   });
-
-  if (httpsServer) {
-    httpsServer.listen(httpsPort, httpsHost, () => {
-      logger.plain('info', `TLS player: ${formatUrl('https', httpsHost, httpsPort)}/`);
-    });
-  }
 
   logger.plain('info', `Compressed: ${compressedEnabled ? formatCompressedStatus() : 'disabled by config'}`);
   if (compressedEnabled && !compressedAvailable) {
@@ -486,18 +464,27 @@ function sendNotFound(res) {
 }
 
 function loadTlsOptions() {
-  return {
-    key: fs.readFileSync(path.resolve(tlsKeyPath)),
-    cert: fs.readFileSync(path.resolve(tlsCertPath)),
-  };
-}
+  if (!tlsKeyPath || !tlsCertPath) {
+    logger.warn('ssl_fallback_http', { reason: 'missing certificate path', key: tlsKeyPath || 'missing', cert: tlsCertPath || 'missing' });
+    return null;
+  }
 
-function redirectToHttps(req, res) {
-  const hostHeader = req.headers.host || `localhost:${httpsPort}`;
-  const hostname = hostHeader.replace(/:\d+$/, '');
-  const host = httpsPort === 443 ? hostname : `${hostname}:${httpsPort}`;
-  res.writeHead(308, { location: `https://${host}${req.url}` });
-  res.end();
+  const resolvedKey = path.resolve(tlsKeyPath);
+  const resolvedCert = path.resolve(tlsCertPath);
+  if (!fs.existsSync(resolvedKey) || !fs.existsSync(resolvedCert)) {
+    logger.warn('ssl_fallback_http', { reason: 'certificate file not found', key: resolvedKey, cert: resolvedCert });
+    return null;
+  }
+
+  try {
+    return {
+      key: fs.readFileSync(resolvedKey),
+      cert: fs.readFileSync(resolvedCert),
+    };
+  } catch (err) {
+    logger.warn('ssl_fallback_http', { reason: 'certificate read failed', error: err.message });
+    return null;
+  }
 }
 
 function isTlsRequest(req) {

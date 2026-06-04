@@ -76,11 +76,8 @@ timestamps = false
 
 [ssl]
 enabled = false
-host = 0.0.0.0
-port = 8443
 key =
 cert =
-redirect_http_to_https = false
 
 [compressed]
 enabled = true
@@ -95,11 +92,11 @@ keepalive_ms = 1000
 Important fields:
 
 - `[udp].host`: default UDP bind address used by streams that do not define their own `udpHost`.
-- `[web].host` and `[web].port`: HTTP bind address and port for the browser interface.
+- `[web].host` and `[web].port`: bind address and port for the browser interface. The same port is used for HTTP or HTTPS depending on `[ssl]`.
 - `[streams].file`: JSON file that defines the feeds.
 - `[logging].level`: service-friendly logging level. Supported values are `off`, `error`, `warn`, `info`, and `debug`. The default is `info`.
 - `[logging].timestamps`: set to `true` to prepend ISO timestamps. With `systemd`, this can usually stay `false` because `journalctl` already adds timestamps.
-- `[ssl]`: optional HTTPS listener. Enable it and provide `key` and `cert` paths when you want Node.js to serve TLS directly.
+- `[ssl]`: optional HTTPS mode for the same `[web]` host and port. Enable it and provide valid `key` and `cert` paths when you want Node.js to serve TLS directly. If SSL is enabled but the certificate paths are missing or invalid, the server logs a warning and falls back to HTTP on the same port.
 - `[compressed].enabled`: set to `false` to disable all compressed modes and their transcoding/framing logic.
 - `[compressed].codec`: compressed mode backend. `adpcm` is the default low-latency option and does not require `ffmpeg`.
 
@@ -257,25 +254,26 @@ Open a stream page, then press `Start Audio`. Browsers require a user gesture be
 
 ## HTTPS / TLS
 
-The server can serve HTTPS directly when SSL is enabled:
+The server can serve HTTPS directly on the same host and port configured in `[web]`.
 
 ```conf
+[web]
+host = 0.0.0.0
+port = 8585
+
 [ssl]
 enabled = true
-host = 0.0.0.0
-port = 8443
 key = /etc/letsencrypt/live/example.com/privkey.pem
 cert = /etc/letsencrypt/live/example.com/fullchain.pem
-redirect_http_to_https = false
 ```
 
 Then open:
 
 ```text
-https://SERVER_IP:8443/
+https://SERVER_IP:8585/
 ```
 
-The HTTP listener still starts by default so existing deployments do not break. Use firewall rules or a reverse proxy if you want only HTTPS exposed publicly.
+When SSL is active, the player switches from HTTP to HTTPS on `[web].port`; it does not start a second HTTP listener. If `enabled = true` but `key` or `cert` is missing, unreadable, or points to a non-existing file, the server logs `ssl_fallback_http` and starts HTTP on the same port instead.
 
 ## Uncompressed And Compressed Modes
 
