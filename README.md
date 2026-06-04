@@ -176,7 +176,11 @@ The browser can play either:
 - `Uncompressed`: the original float32 PCM stream over WebSocket.
 - `Compressed`: low-latency IMA ADPCM over WebSocket by default.
 
+Desktop browsers open in `Uncompressed` by default. Mobile browsers open in `Compressed` by default so iPhone and Android users can test the lower-bandwidth path immediately.
+
 ADPCM is designed for intermittent RTLSDR-Airband UDP output. The server sends compressed frames only when UDP audio arrives, so idle squelch periods do not consume audio bandwidth. Each ADPCM frame includes its own decoder state, allowing newly connected clients or clients after a silence gap to resynchronize immediately.
+
+The ADPCM encoder keeps its adaptive state across active UDP packets and resets after idle gaps. It also applies a light smoothing stage before encoding to reduce granular quantization noise and harsh high-frequency artifacts from radio bursts.
 
 Compressed mode defaults to:
 
@@ -199,7 +203,7 @@ Supported compressed codecs are:
 - `adpcm`: default, low latency, no `ffmpeg` required.
 - `opus`: Opus/WebM over WebSocket or HTTP fallback, requires `ffmpeg`.
 - `aac`: AAC over WebSocket/MediaSource, requires `ffmpeg`.
-- `hls`: experimental HLS/AAC route, requires `ffmpeg`.
+- `hls`: experimental HLS/AAC route, requires `ffmpeg`. This path is currently kept in the codebase but is on hold while ADPCM is tested as the mobile-friendly compressed mode.
 
 To use one of the ffmpeg-backed codecs:
 
@@ -245,3 +249,11 @@ The silence keepalive interval defaults to `1000 ms`. Override it with:
 [compressed]
 keepalive_ms = 100
 ```
+
+## Player controls
+
+The stream page shows listener count, UDP/stream state, buffering, bandwidth, last transmission time, mode, gain, waveform, and audio level.
+
+When the stream has been validated by at least one UDP packet, the status changes to `Connected`. Pressing `Connected` switches the page to `Reconnect`, closes only the audio stream socket, and stops bandwidth consumption without closing the web page or the control/status connection. Pressing `Reconnect` resumes the same mode that was active before pausing.
+
+The main page lists all configured feeds under `Realtime Airband Streams`, shows the active user count, language selector, route, channel/sample-rate information, and the server-side last transmission time for each feed.
