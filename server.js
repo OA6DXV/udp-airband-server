@@ -22,6 +22,7 @@ const {
   removeWsClient,
   removeListenerMode,
 } = require('./lib/listeners');
+const { createLogger } = require('./lib/logger');
 const { loadStreams, renderStreamList, validateStreams } = require('./lib/streams');
 const { acceptWebSocket, sendWsBinary, sendWsJson } = require('./lib/websocket');
 const { createCompressedManager } = require('./lib/compressed');
@@ -53,6 +54,8 @@ const tlsEnabled = parseBoolean(sslEnabledSetting) && tlsConfigured;
 const httpsHost = args.httpsHost || getSetting(serverConfig, 'ssl.host', httpHost);
 const httpsPort = Number(args.httpsPort || getSetting(serverConfig, 'ssl.port', httpPort));
 const redirectHttpToHttps = parseBoolean(args.redirectHttpToHttps !== undefined ? args.redirectHttpToHttps : getSetting(serverConfig, 'ssl.redirectHttpToHttps', false));
+const debugEnabled = Boolean(args.debug);
+const logger = createLogger({ debug: debugEnabled });
 
 if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) {
   fatal('--http-port must be a valid port');
@@ -98,6 +101,8 @@ const compressed = createCompressedManager({
   spawn,
   spawnSync,
   opusBitrate,
+  logger,
+  debugEnabled,
 });
 const compressedAvailable = compressedEnabled && compressed.isCodecAvailable(compressedCodec);
 const opusAvailable = compressedEnabled && compressed.ffmpegAvailable;
@@ -273,6 +278,9 @@ function attachUpgradeHandler(server) {
 }
 
 function startWebServers() {
+  if (debugEnabled) {
+    logger.debug('debug_enabled', { flag: '-D' });
+  }
   httpServer.listen(httpPort, httpHost, () => {
     const mode = tlsEnabled && redirectHttpToHttps ? 'HTTP redirect' : 'Web player';
     console.log(`${mode}: ${formatUrl('http', httpHost, httpPort)}/`);

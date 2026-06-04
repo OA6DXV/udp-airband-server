@@ -201,6 +201,16 @@ npm start -- \
   --config /etc/udp-airband-server/streams.json
 ```
 
+Para diagnostico manual, inicia con `-D` para activar salida debug completa del servidor y de los encoders basados en ffmpeg:
+
+```bash
+node server.js -D \
+  --server-config /etc/udp-airband-server/server.conf \
+  --config /etc/udp-airband-server/streams.json
+```
+
+Usa `-D` solo cuando ejecutes el servidor directamente en una terminal. Puede generar mucha salida de ffmpeg y no se recomienda para el comando normal del servicio `systemd`.
+
 Luego abre la pagina principal:
 
 ```text
