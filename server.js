@@ -28,7 +28,8 @@ const { createCompressedManager } = require('./lib/compressed');
 
 const MAX_SOCKET_BUFFER_BYTES = 1024 * 1024;
 const MAX_OPUS_STDIN_BUFFER_BYTES = 512 * 1024;
-const SOFTWARE_VERSION = '1.1';
+const SOFTWARE_VERSION = '1.2';
+const COMPRESSED_CODECS = new Set(['adpcm', 'opus', 'aac', 'hls']);
 
 const args = parseArgs(process.argv.slice(2));
 const serverConfigPath = args.serverConfig || args.serverConf || 'server.conf';
@@ -38,6 +39,8 @@ const httpHost = args.httpHost || getSetting(serverConfig, 'web.host', '0.0.0.0'
 const httpPort = Number(args.httpPort || args.http || getSetting(serverConfig, 'web.port', 8585));
 const configPath = args.config || getSetting(serverConfig, 'streams.file', 'streams.json');
 const compressedEnabled = parseBoolean(args.compressedEnabled !== undefined ? args.compressedEnabled : getSetting(serverConfig, 'compressed.enabled', true));
+const compressedCodec = String(args.compressedCodec || args.codec || getSetting(serverConfig, 'compressed.codec', 'adpcm')).trim().toLowerCase();
+const adpcmFrameMs = Number(args.adpcmFrameMs || getSetting(serverConfig, 'compressed.adpcmFrameMs', 40));
 const opusBitrate = args.opusBitrate || getSetting(serverConfig, 'compressed.opusBitrate', '24k');
 const aacBitrate = args.aacBitrate || getSetting(serverConfig, 'compressed.aacBitrate', '32k');
 const opusKeepaliveMs = Number(args.opusKeepaliveMs || getSetting(serverConfig, 'compressed.keepaliveMs', 1000));
@@ -60,6 +63,12 @@ if (!Number.isInteger(httpsPort) || httpsPort < 1 || httpsPort > 65535) {
 if (!Number.isInteger(opusKeepaliveMs) || opusKeepaliveMs < 20 || opusKeepaliveMs > 1000) {
   fatal('--opus-keepalive-ms must be between 20 and 1000');
 }
+if (!COMPRESSED_CODECS.has(compressedCodec)) {
+  fatal('--compressed-codec must be one of: adpcm, opus, aac, hls');
+}
+if (!Number.isInteger(adpcmFrameMs) || adpcmFrameMs < 10 || adpcmFrameMs > 100) {
+  fatal('--adpcm-frame-ms must be between 10 and 100');
+}
 if (parseBoolean(sslEnabledSetting) && (!tlsKeyPath || !tlsCertPath)) {
   fatal('TLS requires both --tls-key and --tls-cert');
 }
@@ -72,12 +81,14 @@ const tlsOptions = tlsEnabled ? loadTlsOptions() : null;
 const hlsRoot = compressedEnabled ? fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-hls-')) : '';
 const compressed = createCompressedManager({
   aacBitrate,
+  adpcmFrameMs,
   addListenerBytes,
   addListenerMode,
   ensureListenerStats,
   ffmpegPath,
   fs,
   hlsRoot,
+  maxSocketBufferBytes: MAX_SOCKET_BUFFER_BYTES,
   maxStdinBufferBytes: MAX_OPUS_STDIN_BUFFER_BYTES,
   normalizeClientId: (value) => normalizeClientId(value, crypto),
   path,
@@ -87,7 +98,8 @@ const compressed = createCompressedManager({
   spawnSync,
   opusBitrate,
 });
-const opusAvailable = compressedEnabled && compressed.available;
+const compressedAvailable = compressedEnabled && compressed.isCodecAvailable(compressedCodec);
+const opusAvailable = compressedEnabled && compressed.ffmpegAvailable;
 const streams = loadStreams({ configPath, defaultUdpHost, fs, opusKeepaliveMs, path });
 validateStreams(streams);
 const streamsByName = new Map(streams.map((stream) => [stream.name, stream]));
@@ -225,7 +237,7 @@ function handleHttpRequest(req, res) {
 function attachUpgradeHandler(server) {
   server.on('upgrade', (req, socket) => {
     const requestUrl = new URL(req.url, `${socket.encrypted ? 'https' : 'http'}://${req.headers.host || 'localhost'}`);
-    const match = normalizePath(requestUrl.pathname).match(/^\/([^/]+)\/(audio|control|opus|aac)$/);
+    const match = normalizePath(requestUrl.pathname).match(/^\/([^/]+)\/(audio|control|adpcm|opus|aac)$/);
     if (!match) {
       socket.destroy();
       return;
@@ -243,7 +255,7 @@ function attachUpgradeHandler(server) {
       stream.controlClients.set(socket, clientId);
       addListenerMode(stream, clientId, 'control');
       sendWsJson(socket, streamConfig(stream));
-    } else if (socketType === 'opus' || socketType === 'aac') {
+    } else if (socketType === 'adpcm' || socketType === 'opus' || socketType === 'aac') {
       compressed.serveWebSocket(stream, clientId, socket, socketType);
     } else {
       stream.rawClients.set(socket, clientId);
@@ -271,7 +283,7 @@ function startWebServers() {
   for (const stream of streams) {
     console.log(`Stream:     /${stream.name} (${stream.label}) ${stream.channels === 1 ? 'mono' : 'stereo'} @ ${stream.sampleRate} Hz`);
   }
-  console.log(`Compressed: ${compressedEnabled ? (opusAvailable ? `enabled via ${ffmpegPath}` : 'unavailable (ffmpeg not found)') : 'disabled by config'}`);
+  console.log(`Compressed: ${compressedEnabled ? formatCompressedStatus() : 'disabled by config'}`);
   setInterval(broadcastStreamStats, 1000);
   if (compressedEnabled) {
     setInterval(() => compressed.writeSilenceKeepalive(streams, opusKeepaliveMs), opusKeepaliveMs);
@@ -304,9 +316,13 @@ function publicStreamStatus(stream) {
     hasUdp: stream.packetCount > 0,
     url: `/${stream.name}`,
     compressedEnabled,
+    compressedAvailable,
+    compressedCodec,
+    adpcmAvailable: compressedEnabled,
+    adpcmFrameMs,
     opusAvailable,
-    aacAvailable: opusAvailable,
-    hlsAvailable: opusAvailable,
+    aacAvailable: opusAvailable && compressedCodec === 'aac',
+    hlsAvailable: opusAvailable && compressedCodec === 'hls',
     tlsEnabled,
     softwareVersion: SOFTWARE_VERSION,
   };
@@ -322,11 +338,15 @@ function streamConfig(stream) {
     channels: stream.channels,
     format: 'f32le',
     compressedEnabled,
+    compressedAvailable,
+    compressedCodec,
+    adpcmAvailable: compressedEnabled,
+    adpcmFrameMs,
     opusAvailable,
     opusBitrate,
-    aacAvailable: opusAvailable,
+    aacAvailable: opusAvailable && compressedCodec === 'aac',
     aacBitrate,
-    hlsAvailable: opusAvailable,
+    hlsAvailable: opusAvailable && compressedCodec === 'hls',
     tlsEnabled,
     softwareVersion: SOFTWARE_VERSION,
   };
@@ -365,10 +385,21 @@ function broadcastStreamStats() {
         hasUdp: stream.packetCount > 0,
         clients: stream.rawClients.size + stream.opusClients.size,
         activeListeners: getActiveListeners(stream).length,
+        compressedCodec,
         softwareVersion: SOFTWARE_VERSION,
       });
     }
   }
+}
+
+function formatCompressedStatus() {
+  if (!compressedAvailable) {
+    return `${compressedCodec} unavailable${compressedCodec === 'adpcm' ? '' : ' (ffmpeg not found)'}`;
+  }
+  if (compressedCodec === 'adpcm') {
+    return `enabled via ADPCM (${adpcmFrameMs} ms frames)`;
+  }
+  return `enabled via ${ffmpegPath} (${compressedCodec})`;
 }
 
 function sendHtml(res, body) {
