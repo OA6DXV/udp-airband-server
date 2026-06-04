@@ -142,6 +142,15 @@ h1 {
   letter-spacing: 0;
 }
 
+.stream-title-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.stream-title-link:hover {
+  color: var(--accent);
+}
+
 .status {
   display: inline-flex;
   align-items: center;

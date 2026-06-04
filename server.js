@@ -77,6 +77,7 @@ const publicDir = __dirname;
 const indexHtml = fs.readFileSync(path.join(publicDir, 'index.html'));
 const appJs = fs.readFileSync(path.join(publicDir, 'assets', 'app.js'));
 const styleCss = fs.readFileSync(path.join(publicDir, 'assets', 'style.css'));
+const faviconIco = fs.readFileSync(path.join(publicDir, 'assets', 'favicon.ico'));
 const tlsOptions = tlsEnabled ? loadTlsOptions() : null;
 const hlsRoot = compressedEnabled ? fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-hls-')) : '';
 const compressed = createCompressedManager({
@@ -172,12 +173,15 @@ function handleHttpRequest(req, res) {
   const pathname = normalizePath(requestUrl.pathname);
 
   if (pathname === '/') {
-    sendHtml(res, renderStreamList(streams));
+    sendHtml(res, renderStreamList(streams, { softwareVersion: SOFTWARE_VERSION }));
     return;
   }
   if (pathname === '/favicon.ico') {
-    res.writeHead(204, { 'cache-control': 'public, max-age=86400' });
-    res.end();
+    sendAsset(res, faviconIco, 'image/x-icon', 'public, max-age=86400');
+    return;
+  }
+  if (pathname === '/assets/favicon.ico') {
+    sendAsset(res, faviconIco, 'image/x-icon', 'public, max-age=86400');
     return;
   }
   if (pathname === '/assets/style.css') {
@@ -410,10 +414,10 @@ function sendHtml(res, body) {
   res.end(body);
 }
 
-function sendAsset(res, body, contentType) {
+function sendAsset(res, body, contentType, cacheControl = 'no-store') {
   res.writeHead(200, {
     'content-type': contentType,
-    'cache-control': 'no-store',
+    'cache-control': cacheControl,
     'x-content-type-options': 'nosniff',
   });
   res.end(body);
