@@ -142,6 +142,15 @@ h1 {
   letter-spacing: 0;
 }
 
+.stream-title-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.stream-title-link:hover {
+  color: var(--accent);
+}
+
 .status {
   display: inline-flex;
   align-items: center;
@@ -206,6 +215,17 @@ h1 {
 .status.live .dot {
   background: #07110c;
   box-shadow: 0 0 0 4px rgb(7 17 12 / 16%);
+}
+
+.status.live:hover {
+  border-color: var(--bad);
+  background: var(--bad);
+  color: #160606;
+}
+
+.status.live:hover .dot {
+  background: #160606;
+  box-shadow: 0 0 0 4px rgb(22 6 6 / 16%);
 }
 
 .status.idle {

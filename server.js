@@ -22,17 +22,19 @@ const {
   removeWsClient,
   removeListenerMode,
 } = require('./lib/listeners');
-const { loadStreams, renderStreamList, validateStreams } = require('./lib/streams');
+const { createLogger } = require('./lib/logger');
+const { DEFAULT_STREAMS, loadStreams, renderStreamList, validateStreams } = require('./lib/streams');
 const { acceptWebSocket, sendWsBinary, sendWsJson } = require('./lib/websocket');
 const { createCompressedManager } = require('./lib/compressed');
 
 const MAX_SOCKET_BUFFER_BYTES = 1024 * 1024;
 const MAX_OPUS_STDIN_BUFFER_BYTES = 512 * 1024;
-const SOFTWARE_VERSION = '1.2';
+const SOFTWARE_VERSION = '1.3';
 const COMPRESSED_CODECS = new Set(['adpcm', 'opus', 'aac', 'hls']);
 
 const args = parseArgs(process.argv.slice(2));
 const serverConfigPath = args.serverConfig || args.serverConf || 'server.conf';
+const serverConfigExists = fs.existsSync(path.resolve(serverConfigPath));
 const serverConfig = loadServerConfig(serverConfigPath, fs, path);
 const defaultUdpHost = args.udpHost || getSetting(serverConfig, 'udp.host', '0.0.0.0');
 const httpHost = args.httpHost || getSetting(serverConfig, 'web.host', '0.0.0.0');
@@ -45,20 +47,18 @@ const opusBitrate = args.opusBitrate || getSetting(serverConfig, 'compressed.opu
 const aacBitrate = args.aacBitrate || getSetting(serverConfig, 'compressed.aacBitrate', '32k');
 const opusKeepaliveMs = Number(args.opusKeepaliveMs || getSetting(serverConfig, 'compressed.keepaliveMs', 1000));
 const ffmpegPath = args.ffmpeg || getSetting(serverConfig, 'compressed.ffmpeg', 'ffmpeg');
+const logLevel = args.logLevel || getSetting(serverConfig, 'logging.level', 'info');
 const tlsKeyPath = args.tlsKey || args.httpsKey || getSetting(serverConfig, 'ssl.key', '');
 const tlsCertPath = args.tlsCert || args.httpsCert || getSetting(serverConfig, 'ssl.cert', '');
-const tlsConfigured = Boolean(tlsKeyPath || tlsCertPath);
-const sslEnabledSetting = args.sslEnabled !== undefined ? args.sslEnabled : (args.tlsEnabled !== undefined ? args.tlsEnabled : getSetting(serverConfig, 'ssl.enabled', tlsConfigured));
-const tlsEnabled = parseBoolean(sslEnabledSetting) && tlsConfigured;
-const httpsHost = args.httpsHost || getSetting(serverConfig, 'ssl.host', httpHost);
-const httpsPort = Number(args.httpsPort || getSetting(serverConfig, 'ssl.port', httpPort));
-const redirectHttpToHttps = parseBoolean(args.redirectHttpToHttps !== undefined ? args.redirectHttpToHttps : getSetting(serverConfig, 'ssl.redirectHttpToHttps', false));
+const sslEnabledSetting = args.sslEnabled !== undefined ? args.sslEnabled : (args.tlsEnabled !== undefined ? args.tlsEnabled : getSetting(serverConfig, 'ssl.enabled', false));
+const sslRequested = parseBoolean(sslEnabledSetting);
+const debugEnabled = Boolean(args.debug);
+const logTimestamps = parseBoolean(args.logTimestamps !== undefined ? args.logTimestamps : (debugEnabled ? true : getSetting(serverConfig, 'logging.timestamps', false)));
+const logColors = parseBoolean(args.logColors !== undefined ? args.logColors : (debugEnabled ? true : getSetting(serverConfig, 'logging.colors', false)));
+const logger = createLogger({ debug: debugEnabled, level: logLevel, timestamps: logTimestamps, colors: logColors });
 
 if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) {
   fatal('--http-port must be a valid port');
-}
-if (!Number.isInteger(httpsPort) || httpsPort < 1 || httpsPort > 65535) {
-  fatal('--https-port must be a valid port');
 }
 if (!Number.isInteger(opusKeepaliveMs) || opusKeepaliveMs < 20 || opusKeepaliveMs > 1000) {
   fatal('--opus-keepalive-ms must be between 20 and 1000');
@@ -69,15 +69,13 @@ if (!COMPRESSED_CODECS.has(compressedCodec)) {
 if (!Number.isInteger(adpcmFrameMs) || adpcmFrameMs < 10 || adpcmFrameMs > 100) {
   fatal('--adpcm-frame-ms must be between 10 and 100');
 }
-if (parseBoolean(sslEnabledSetting) && (!tlsKeyPath || !tlsCertPath)) {
-  fatal('TLS requires both --tls-key and --tls-cert');
-}
-
 const publicDir = __dirname;
 const indexHtml = fs.readFileSync(path.join(publicDir, 'index.html'));
 const appJs = fs.readFileSync(path.join(publicDir, 'assets', 'app.js'));
 const styleCss = fs.readFileSync(path.join(publicDir, 'assets', 'style.css'));
-const tlsOptions = tlsEnabled ? loadTlsOptions() : null;
+const faviconIco = fs.readFileSync(path.join(publicDir, 'assets', 'favicon.ico'));
+const tlsOptions = sslRequested ? loadTlsOptions() : null;
+const tlsEnabled = Boolean(tlsOptions);
 const hlsRoot = compressedEnabled ? fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-hls-')) : '';
 const compressed = createCompressedManager({
   aacBitrate,
@@ -97,24 +95,38 @@ const compressed = createCompressedManager({
   spawn,
   spawnSync,
   opusBitrate,
+  logger,
+  debugEnabled,
 });
 const compressedAvailable = compressedEnabled && compressed.isCodecAvailable(compressedCodec);
 const opusAvailable = compressedEnabled && compressed.ffmpegAvailable;
-const streams = loadStreams({ configPath, defaultUdpHost, fs, opusKeepaliveMs, path });
-validateStreams(streams);
+if (!serverConfigExists) {
+  logger.warn('server_config_missing', { path: serverConfigPath, fallback: 'built-in defaults' });
+}
+
+const streamsConfigExists = fs.existsSync(path.resolve(configPath));
+if (!streamsConfigExists) {
+  logger.warn('streams_config_missing', {
+    path: configPath,
+    fallback: `/${DEFAULT_STREAMS[0].name} on UDP ${defaultUdpHost}:${DEFAULT_STREAMS[0].udpPort}`,
+  });
+}
+
+let streams;
+try {
+  streams = loadStreams({ configPath, defaultUdpHost, fs, opusKeepaliveMs, path });
+  validateStreams(streams);
+} catch (err) {
+  fatal(err.message);
+}
 const streamsByName = new Map(streams.map((stream) => [stream.name, stream]));
 
-const httpServer = http.createServer((req, res) => {
-  if (tlsEnabled && redirectHttpToHttps) {
-    redirectToHttps(req, res);
-    return;
-  }
-  handleHttpRequest(req, res);
-});
-const httpsServer = tlsEnabled ? https.createServer(tlsOptions, handleHttpRequest) : null;
+const webProtocol = tlsEnabled ? 'https' : 'http';
+const webServer = tlsEnabled
+  ? https.createServer(tlsOptions, handleHttpRequest)
+  : http.createServer(handleHttpRequest);
 
-attachUpgradeHandler(httpServer);
-if (httpsServer) attachUpgradeHandler(httpsServer);
+attachUpgradeHandler(webServer);
 startUdpServers();
 
 function startUdpServers() {
@@ -126,7 +138,7 @@ function startUdpServers() {
     udpServer.on('message', (msg) => handleUdpMessage(stream, msg));
     udpServer.on('error', (err) => fatal(`UDP error on ${stream.name}: ${err.message}`));
     udpServer.bind(stream.udpPort, stream.udpHost, () => {
-      console.log(`UDP input:  ${stream.name} -> ${stream.udpHost}:${stream.udpPort}`);
+      logger.plain('info', formatStreamStartupLine(stream));
       pendingUdpBinds -= 1;
       if (pendingUdpBinds === 0) {
         startWebServers();
@@ -146,6 +158,7 @@ function handleUdpMessage(stream, msg) {
 
   for (const [client, clientId] of stream.rawClients) {
     if (client.destroyed || client.writableLength > MAX_SOCKET_BUFFER_BYTES) {
+      logger.warn('raw_client_backpressure', { stream: stream.name, client: clientId, writableLength: client.writableLength });
       client.destroy();
       removeWsClient(stream, client);
       continue;
@@ -170,14 +183,21 @@ function handleUdpMessage(stream, msg) {
 function handleHttpRequest(req, res) {
   const requestUrl = new URL(req.url, `${isTlsRequest(req) ? 'https' : 'http'}://${req.headers.host || 'localhost'}`);
   const pathname = normalizePath(requestUrl.pathname);
+  if (pathname === null) {
+    sendBadRequest(res);
+    return;
+  }
 
   if (pathname === '/') {
-    sendHtml(res, renderStreamList(streams));
+    sendHtml(res, renderStreamList(streams, { softwareVersion: SOFTWARE_VERSION }));
     return;
   }
   if (pathname === '/favicon.ico') {
-    res.writeHead(204, { 'cache-control': 'public, max-age=86400' });
-    res.end();
+    sendAsset(res, faviconIco, 'image/x-icon', 'public, max-age=86400');
+    return;
+  }
+  if (pathname === '/assets/favicon.ico') {
+    sendAsset(res, faviconIco, 'image/x-icon', 'public, max-age=86400');
     return;
   }
   if (pathname === '/assets/style.css') {
@@ -237,8 +257,14 @@ function handleHttpRequest(req, res) {
 function attachUpgradeHandler(server) {
   server.on('upgrade', (req, socket) => {
     const requestUrl = new URL(req.url, `${socket.encrypted ? 'https' : 'http'}://${req.headers.host || 'localhost'}`);
-    const match = normalizePath(requestUrl.pathname).match(/^\/([^/]+)\/(audio|control|adpcm|opus|aac)$/);
+    const pathname = normalizePath(requestUrl.pathname);
+    if (pathname === null) {
+      socket.destroy();
+      return;
+    }
+    const match = pathname.match(/^\/([^/]+)\/(audio|control|adpcm|opus|aac)$/);
     if (!match) {
+      logger.warn('websocket_rejected', { path: requestUrl.pathname, reason: 'invalid_route' });
       socket.destroy();
       return;
     }
@@ -246,6 +272,7 @@ function attachUpgradeHandler(server) {
     const stream = streamsByName.get(match[1]);
     const socketType = match[2];
     if (!stream || !acceptWebSocket(req, socket, crypto)) {
+      logger.warn('websocket_rejected', { path: requestUrl.pathname, reason: stream ? 'invalid_handshake' : 'unknown_stream' });
       socket.destroy();
       return;
     }
@@ -255,35 +282,48 @@ function attachUpgradeHandler(server) {
       stream.controlClients.set(socket, clientId);
       addListenerMode(stream, clientId, 'control');
       sendWsJson(socket, streamConfig(stream));
+      logger.info('client_connected', { stream: stream.name, mode: 'control', client: clientId, remote: socket.remoteAddress });
     } else if (socketType === 'adpcm' || socketType === 'opus' || socketType === 'aac') {
       compressed.serveWebSocket(stream, clientId, socket, socketType);
+      logger.info('client_connected', { stream: stream.name, mode: socketType, client: clientId, remote: socket.remoteAddress });
     } else {
       stream.rawClients.set(socket, clientId);
       addListenerMode(stream, clientId, 'raw');
+      logger.info('client_connected', { stream: stream.name, mode: 'raw', client: clientId, remote: socket.remoteAddress });
     }
 
-    socket.on('error', () => removeWsClient(stream, socket));
-    socket.on('close', () => removeWsClient(stream, socket));
+    socket.on('error', (err) => {
+      logger.warn('client_socket_error', { stream: stream.name, mode: socketType, client: clientId, error: err.message });
+      removeWsClient(stream, socket);
+    });
+    socket.on('close', () => {
+      logger.info('client_disconnected', { stream: stream.name, mode: socketType, client: clientId });
+      removeWsClient(stream, socket);
+    });
     socket.on('data', () => {});
   });
 }
 
 function startWebServers() {
-  httpServer.listen(httpPort, httpHost, () => {
-    const mode = tlsEnabled && redirectHttpToHttps ? 'HTTP redirect' : 'Web player';
-    console.log(`${mode}: ${formatUrl('http', httpHost, httpPort)}/`);
+  if (debugEnabled) {
+    logger.debug('debug_enabled', { flag: '-D' });
+  }
+  webServer.listen(httpPort, httpHost, () => {
+    logger.plain('info', `Web player: ${formatUrl(webProtocol, httpHost, httpPort)}/`);
+    logger.info('startup', {
+      version: SOFTWARE_VERSION,
+      serverConfig: serverConfigPath,
+      serverConfigLoaded: serverConfigExists,
+      streamsConfig: configPath,
+      streamsConfigLoaded: streamsConfigExists,
+      logLevel: logger.level,
+    });
   });
 
-  if (httpsServer) {
-    httpsServer.listen(httpsPort, httpsHost, () => {
-      console.log(`TLS player: ${formatUrl('https', httpsHost, httpsPort)}/`);
-    });
+  logger.plain('info', `Compressed: ${compressedEnabled ? formatCompressedStatus() : 'disabled by config'}`);
+  if (compressedEnabled && !compressedAvailable) {
+    logger.warn('compressed_unavailable', { codec: compressedCodec, ffmpeg: ffmpegPath });
   }
-
-  for (const stream of streams) {
-    console.log(`Stream:     /${stream.name} (${stream.label}) ${stream.channels === 1 ? 'mono' : 'stereo'} @ ${stream.sampleRate} Hz`);
-  }
-  console.log(`Compressed: ${compressedEnabled ? formatCompressedStatus() : 'disabled by config'}`);
   setInterval(broadcastStreamStats, 1000);
   if (compressedEnabled) {
     setInterval(() => compressed.writeSilenceKeepalive(streams, opusKeepaliveMs), opusKeepaliveMs);
@@ -296,20 +336,9 @@ function publicStreamStatus(stream) {
   return {
     name: stream.name,
     label: stream.label,
-    udpHost: stream.udpHost,
-    udpPort: stream.udpPort,
     sampleRate: stream.sampleRate,
     channels: stream.channels,
-    clients: stream.rawClients.size + stream.opusClients.size,
-    controlClients: stream.controlClients.size,
-    rawClients: stream.rawClients.size,
-    opusClients: stream.opusClients.size,
-    hlsClients: stream.hlsClients.size,
     activeListeners: activeListeners.length,
-    listeners: activeListeners,
-    packetCount: stream.packetCount,
-    byteCount: stream.byteCount,
-    lastUdpAt: stream.lastUdpAt,
     lastHeardAt: lastHeard.at,
     lastHeardLabel: lastHeard.label,
     secondsSinceLastHeard: lastHeard.secondsSince,
@@ -333,7 +362,6 @@ function streamConfig(stream) {
     type: 'config',
     name: stream.name,
     label: stream.label,
-    udpPort: stream.udpPort,
     sampleRate: stream.sampleRate,
     channels: stream.channels,
     format: 'f32le',
@@ -359,12 +387,12 @@ function broadcastStreamStats() {
     compressed.pruneInactiveHlsClients(stream, now);
     const lastHeard = getLastHeard(stream, now);
     const elapsedSeconds = Math.max(0.001, (now - stream.lastStatsAt) / 1000);
-    const udpBitsPerSecond = Math.max(0, (stream.byteCount - stream.lastStatsByteCount) * 8 / elapsedSeconds);
     stream.lastStatsByteCount = stream.byteCount;
     stream.lastStatsAt = now;
 
     for (const [client, clientId] of stream.controlClients) {
       if (client.destroyed || client.writableLength > MAX_SOCKET_BUFFER_BYTES) {
+        logger.warn('control_client_backpressure', { stream: stream.name, client: clientId, writableLength: client.writableLength });
         client.destroy();
         removeWsClient(stream, client);
         continue;
@@ -374,16 +402,11 @@ function broadcastStreamStats() {
       listenerStats.lastBytes = listenerStats.bytes;
       sendWsJson(client, {
         type: 'stats',
-        udpBitsPerSecond,
         listenerBitsPerSecond,
-        packetCount: stream.packetCount,
-        byteCount: stream.byteCount,
-        lastUdpAt: stream.lastUdpAt,
         lastHeardAt: lastHeard.at,
         lastHeardLabel: lastHeard.label,
         secondsSinceLastHeard: lastHeard.secondsSince,
         hasUdp: stream.packetCount > 0,
-        clients: stream.rawClients.size + stream.opusClients.size,
         activeListeners: getActiveListeners(stream).length,
         compressedCodec,
         softwareVersion: SOFTWARE_VERSION,
@@ -406,15 +429,16 @@ function sendHtml(res, body) {
   res.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
     'cache-control': 'no-store',
+    ...securityHeaders(),
   });
   res.end(body);
 }
 
-function sendAsset(res, body, contentType) {
+function sendAsset(res, body, contentType, cacheControl = 'no-store') {
   res.writeHead(200, {
     'content-type': contentType,
-    'cache-control': 'no-store',
-    'x-content-type-options': 'nosniff',
+    'cache-control': cacheControl,
+    ...securityHeaders(),
   });
   res.end(body);
 }
@@ -423,28 +447,43 @@ function sendJsonResponse(res, value) {
   res.writeHead(200, {
     'content-type': 'application/json',
     'cache-control': 'no-store',
+    ...securityHeaders(),
   });
   res.end(JSON.stringify(value));
 }
 
 function sendNotFound(res) {
-  res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+  res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', ...securityHeaders() });
   res.end('not found\n');
 }
 
-function loadTlsOptions() {
-  return {
-    key: fs.readFileSync(path.resolve(tlsKeyPath)),
-    cert: fs.readFileSync(path.resolve(tlsCertPath)),
-  };
+function sendBadRequest(res) {
+  res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8', ...securityHeaders() });
+  res.end('bad request\n');
 }
 
-function redirectToHttps(req, res) {
-  const hostHeader = req.headers.host || `localhost:${httpsPort}`;
-  const hostname = hostHeader.replace(/:\d+$/, '');
-  const host = httpsPort === 443 ? hostname : `${hostname}:${httpsPort}`;
-  res.writeHead(308, { location: `https://${host}${req.url}` });
-  res.end();
+function loadTlsOptions() {
+  if (!tlsKeyPath || !tlsCertPath) {
+    logger.warn('ssl_fallback_http', { reason: 'missing certificate path', key: tlsKeyPath || 'missing', cert: tlsCertPath || 'missing' });
+    return null;
+  }
+
+  const resolvedKey = path.resolve(tlsKeyPath);
+  const resolvedCert = path.resolve(tlsCertPath);
+  if (!fs.existsSync(resolvedKey) || !fs.existsSync(resolvedCert)) {
+    logger.warn('ssl_fallback_http', { reason: 'certificate file not found', key: resolvedKey, cert: resolvedCert });
+    return null;
+  }
+
+  try {
+    return {
+      key: fs.readFileSync(resolvedKey),
+      cert: fs.readFileSync(resolvedCert),
+    };
+  } catch (err) {
+    logger.warn('ssl_fallback_http', { reason: 'certificate read failed', error: err.message });
+    return null;
+  }
 }
 
 function isTlsRequest(req) {
@@ -452,20 +491,38 @@ function isTlsRequest(req) {
 }
 
 function formatUrl(protocol, host, port) {
-  const displayHost = host === '0.0.0.0' ? 'localhost' : host;
   const defaultPort = protocol === 'https' ? 443 : 80;
-  return `${protocol}://${displayHost}${port === defaultPort ? '' : `:${port}`}`;
+  return `${protocol}://${host}${port === defaultPort ? '' : `:${port}`}`;
+}
+
+function formatStreamStartupLine(stream) {
+  const channelLabel = stream.channels === 1 ? 'mono' : 'stereo';
+  return `Stream: ${stream.name} ( ${stream.udpHost}:${stream.udpPort} ) -> /${stream.name} (${stream.label}) ${channelLabel} @ ${stream.sampleRate} Hz`;
 }
 
 function normalizePath(value) {
-  const pathOnly = decodeURIComponent(value.split('?')[0]);
+  let pathOnly;
+  try {
+    pathOnly = decodeURIComponent(value.split('?')[0]);
+  } catch {
+    return null;
+  }
   if (pathOnly.length > 1 && pathOnly.endsWith('/')) {
     return pathOnly.slice(0, -1);
   }
   return pathOnly;
 }
 
+function securityHeaders() {
+  return {
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'DENY',
+    'referrer-policy': 'no-referrer',
+    'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; media-src 'self' blob:; worker-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+  };
+}
+
 function fatal(message) {
-  console.error(message);
+  logger.error('fatal', { message });
   process.exit(1);
 }

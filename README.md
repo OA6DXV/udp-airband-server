@@ -1,23 +1,63 @@
 # UDP Airband Server
 
-Receives one or more RTLSDR-Airband `udp_stream` outputs and plays them in a web browser from a single web server.
+[Documento en espanol aqui](README.es.md)
 
-Each stream is raw 32-bit little-endian floating-point PCM:
+UDP Airband Server is a small Node.js web server for listening to one or more [RTLSDR-Airband](https://github.com/rtl-airband/RTLSDR-Airband) UDP audio outputs from a browser.
+
+RTLSDR-Airband is an open-source airband receiver and streaming daemon. It uses SDR receivers to demodulate analog AM/NFM voice channels, commonly aviation frequencies, and can send each received channel to several outputs such as Icecast, PulseAudio, files, or raw UDP audio. See the [RTLSDR-Airband project](https://github.com/rtl-airband/RTLSDR-Airband) and its [UDP output documentation](https://github.com/rtl-airband/RTLSDR-Airband/wiki/Configuring-UDP-outputs) for the upstream receiver side.
+
+This project sits after RTLSDR-Airband. RTLSDR-Airband receives and demodulates the radio signal, then sends raw audio samples by UDP. UDP Airband Server receives those UDP packets, tracks stream state, and exposes a browser player with listener counts, last transmission time, waveform, level meter, uncompressed playback, and a low-bandwidth compressed mode.
+
+The goal is a simple private web listener for local or remote airband feeds: run RTLSDR-Airband near the antenna, send each channel as UDP audio to this server, then open the web page from a phone, tablet, or desktop browser.
+
+## What Is UDP Audio?
+
+RTLSDR-Airband `udp_stream` sends audio samples directly over UDP/IP. There is no playlist, media container, metadata protocol, or reconnect negotiation in the UDP stream itself. It is just raw PCM sample data sent to an IP address and port.
+
+For this server, each UDP stream is expected to be 32-bit little-endian floating-point PCM:
 
 - Mono: `L L L ...`
 - Stereo: interleaved `L R L R ...`
-- Sample rate: `8000 Hz` by default, or `16000 Hz` if RTLSDR-Airband was built with `NFM`
+- Sample rate: usually `8000 Hz`, or `16000 Hz` when RTLSDR-Airband was built with NFM support
 
-## Configuration
+The useful part of this approach is latency and simplicity. RTLSDR-Airband can keep using its native UDP output, while this server handles the browser-specific work: WebSockets, compressed audio framing, status display, language selection, active users, and web UI.
 
-Copy the example files and edit them for your server:
+## Files
+
+- `server.js`: Node.js entry point. It starts the UDP listeners, HTTP/HTTPS web server, stream routes, status handling used by the UI, and compressed-audio backends.
+- `server.conf`: server-level configuration. Edit it to set web bind addresses, ports, SSL/TLS certificate paths, logging, and compressed-audio options.
+- `streams.example.json`: example stream configuration. Copy it to `streams.json`; this is where feed names, labels, UDP ports, sample rates, and channel counts are defined.
+- `index.html`: stream player HTML shell used for each individual feed page.
+- `assets/style.css`: CSS for the stream player and responsive UI.
+- `assets/app.js`: browser-side player logic: audio decoding/playback, UI state, status updates, language switching, waveform, level meter, bandwidth display, and reconnect/idle behavior.
+- `assets/favicon.ico`: browser icon served by all pages.
+- `lib/config.js`: parser and defaults for `server.conf`.
+- `lib/streams.js`: stream configuration loader and main feed-list page renderer.
+- `lib/listeners.js`: active-listener tracking shared by the web UI and server state.
+- `lib/clients.js`: client helpers for stream connections.
+- `lib/websocket.js`: WebSocket framing and helpers.
+- `lib/compressed/`: compressed audio implementations. ADPCM is the default; Opus, AAC, and HLS are kept as optional or experimental backends.
+- `tools/`: helper scripts for generating test UDP audio without RTLSDR-Airband.
+
+## Installation
+
+Clone the repository and install the Node.js dependencies:
 
 ```bash
-cp server.example.conf server.conf
+git clone https://github.com/OA6DXV/udp-airband-server.git
+cd udp-airband-server
+npm install
+```
+
+Copy the example stream configuration:
+
+```bash
 cp streams.example.json streams.json
 ```
 
-`server.conf` controls server-level settings:
+## Server Configuration
+
+`server.conf` controls how this web server listens and where it loads the stream list from:
 
 ```conf
 [udp]
@@ -30,6 +70,11 @@ port = 8585
 [streams]
 file = streams.json
 
+[logging]
+level = info
+timestamps = false
+colors = false
+
 [ssl]
 enabled = false
 key =
@@ -39,9 +84,25 @@ cert =
 enabled = true
 codec = adpcm
 adpcm_frame_ms = 40
+ffmpeg = ffmpeg
+opus_bitrate = 24k
+aac_bitrate = 32k
+keepalive_ms = 1000
 ```
 
-`streams.json` is the only place that defines feeds, UDP ports, sample rate, and channel count:
+Important fields:
+
+- `[udp].host`: default UDP bind address used by streams that do not define their own `udpHost`.
+- `[web].host` and `[web].port`: bind address and port for the browser interface. The same port is used for HTTP or HTTPS depending on `[ssl]`.
+- `[streams].file`: JSON file that defines the feeds.
+- `[logging].level`: service-friendly logging level. Supported values are `off`, `error`, `warn`, `info`, and `debug`. The default is `info`.
+- `[logging].timestamps`: set to `true` to prepend ISO timestamps. With `systemd`, this can usually stay `false` because `journalctl` already adds timestamps.
+- `[logging].colors`: set to `true` to color terminal logs. Keep it `false` for normal `systemd` service logs.
+- `[ssl]`: optional HTTPS mode for the same `[web]` host and port. Enable it and provide valid `key` and `cert` paths when you want Node.js to serve TLS directly. If SSL is enabled but the certificate paths are missing or invalid, the server logs a warning and falls back to HTTP on the same port.
+- `[compressed].enabled`: set to `false` to disable all compressed modes and their transcoding/framing logic.
+- `[compressed].codec`: compressed mode backend. `adpcm` is the default low-latency option and does not require `ffmpeg`.
+
+`streams.json` defines the actual feeds:
 
 ```json
 {
@@ -54,9 +115,9 @@ adpcm_frame_ms = 40
       "channels": 1
     },
     {
-      "name": "atis",
-      "label": "ATIS 127.800",
-      "udpPort": 8687,
+      "name": "test",
+      "label": "Testing UDP Input",
+      "udpPort": 8690,
       "sampleRate": 8000,
       "channels": 1
     }
@@ -64,66 +125,28 @@ adpcm_frame_ms = 40
 }
 ```
 
-Then run the server:
+Important fields:
 
-```bash
-npm start
-```
+- `name`: URL-safe stream id. A stream named `tower` is available at `/tower`.
+- `label`: display name shown in the UI.
+- `udpPort`: UDP port where this server listens for RTLSDR-Airband audio.
+- `sampleRate`: sample rate of the incoming float PCM audio.
+- `channels`: `1` for mono or `2` for stereo/interleaved input.
+- `udpHost`: optional per-stream UDP bind address. When omitted, `[udp].host` is used.
 
-Open:
+The sample configuration creates:
 
 ```text
 http://SERVER_IP:8585/
 http://SERVER_IP:8585/tower
-http://SERVER_IP:8585/atis
+http://SERVER_IP:8585/test
 ```
 
-Click `Start Audio`. Browsers require a user gesture before audio playback starts.
+## RTLSDR-Airband Configuration
 
-You can also use custom config paths:
+In RTLSDR-Airband, each channel that should appear in the web player must have an `udp_stream` output pointing to this server.
 
-```bash
-npm start -- \
-  --server-config /etc/udp-airband-server/server.conf \
-  --config /etc/udp-airband-server/streams.json
-```
-
-## HTTPS / TLS
-
-The server can listen with HTTPS directly when you enable SSL and provide a certificate and private key in `server.conf`:
-
-```conf
-[ssl]
-enabled = true
-host = 0.0.0.0
-port = 8443
-key = /etc/letsencrypt/live/example.com/privkey.pem
-cert = /etc/letsencrypt/live/example.com/fullchain.pem
-redirect_http_to_https = false
-```
-
-Then open:
-
-```text
-https://SERVER_IP:8443/main
-```
-
-The plain HTTP listener is still started by default so existing deployments do not break. Use firewall or reverse-proxy rules if you want HTTPS only exposed publicly.
-
-## Status API
-
-The server exposes JSON status endpoints:
-
-```text
-http://SERVER_IP:8585/status
-http://SERVER_IP:8585/status/main
-```
-
-Status includes UDP counters, uncompressed/compressed client counts, active listener count, per-listener modes, last activity time, and whether TLS/compressed audio are available.
-
-## RTLSDR-Airband output config
-
-Each Airband output should send to the UDP port assigned to that stream.
+If RTLSDR-Airband and UDP Airband Server run on the same host:
 
 ```conf
 outputs: (
@@ -136,51 +159,154 @@ outputs: (
 );
 ```
 
-For a second stream:
+If RTLSDR-Airband runs on a different machine, use the IP address of the machine running UDP Airband Server:
+
+```conf
+outputs: (
+  {
+    type = "udp_stream";
+    dest_address = "192.0.2.25";
+    dest_port = 8686;
+    continuous = true;
+  }
+);
+```
+
+For the example `test` stream:
 
 ```conf
 outputs: (
   {
     type = "udp_stream";
     dest_address = "127.0.0.1";
-    dest_port = 8687;
+    dest_port = 8690;
     continuous = true;
   }
 );
 ```
 
-## Quick synthetic test
+The `dest_port` value in RTLSDR-Airband must match `udpPort` in `streams.json`. The sample rate and channel count in `streams.json` must also match the audio produced by RTLSDR-Airband.
 
-From WSL/Linux, send a 1 kHz float32 tone to the `tower` stream:
+`continuous = true` is recommended because it keeps the receiver output active and makes browser playback easier to keep synchronized. The server still tracks actual UDP activity and reports `Waiting for UDP` until at least one packet is received.
+
+## Starting The Server
+
+Start with the default local config files:
 
 ```bash
-python3 - <<'PY'
-import math, socket, struct, time
-rate = 8000
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-n = 0
-while True:
-    samples = [0.2 * math.sin(2 * math.pi * 1000 * (n + i) / rate) for i in range(rate // 8)]
-    n += len(samples)
-    sock.sendto(struct.pack('<%df' % len(samples), *samples), ('127.0.0.1', 8686))
-    time.sleep(0.125)
-PY
+npm start
 ```
 
-In RAW mode, the player forwards UDP packets as WebSocket binary frames, so latency stays low and the browser receives the same float PCM shape as the original stream.
+Or pass explicit config paths:
 
-## Uncompressed and compressed modes
+```bash
+npm start -- \
+  --server-config /etc/udp-airband-server/server.conf \
+  --config /etc/udp-airband-server/streams.json
+```
+
+For manual troubleshooting, start with `-D` to enable full debug output from the server and ffmpeg-backed encoders:
+
+```bash
+node server.js -D \
+  --server-config /etc/udp-airband-server/server.conf \
+  --config /etc/udp-airband-server/streams.json
+```
+
+Use `-D` only when running the server directly in a terminal. It forces debug logging, enables timestamps for terminal output, and can produce a lot of ffmpeg output. It is not recommended for the normal `systemd` service command.
+
+## Logging
+
+The server logs to stdout/stderr, so `systemd` automatically stores the output in `journalctl`.
+
+The default `info` level is intentionally soft enough for service use. It shows startup lines, stream binds, player URLs, connection/disconnection events, warnings, and errors. It does not print full ffmpeg encoder debug output.
+
+`server.conf` is included in the repository with the default server settings, so users can see and edit it directly. If it is removed, the server starts with built-in defaults and logs a warning. If `streams.json` is missing, the server logs a warning and starts a built-in `test` stream on UDP port `8690`, mono, `8000 Hz`.
+
+Configure the normal service log level in `server.conf`:
+
+```conf
+[logging]
+level = info
+timestamps = false
+colors = false
+```
+
+Use `warn` or `error` for quieter service logs:
+
+```conf
+[logging]
+level = warn
+```
+
+Use `debug` in the config only if you really want persistent debug logs in `journalctl`. For temporary troubleshooting, prefer running manually with `-D`:
+
+```bash
+node server.js -D --server-config server.conf --config streams.json
+```
+
+When `-D` is active, ffmpeg-backed encoders such as Opus, AAC, and HLS are started with ffmpeg debug logging and their `stderr` output is printed. `-D` also enables timestamps and colors automatically for manual terminal runs. Without `-D`, ffmpeg stays at error-level logging and timestamp/color behavior comes from `server.conf`, so service logs do not get flooded.
+
+Then open the home page:
+
+```text
+http://SERVER_IP:8585/
+```
+
+Open a stream page, then press `Start Audio`. Browsers require a user gesture before audio playback can begin.
+
+## HTTPS / TLS
+
+The server can serve HTTPS directly on the same host and port configured in `[web]`.
+
+```conf
+[web]
+host = 0.0.0.0
+port = 8585
+
+[ssl]
+enabled = true
+key = /etc/letsencrypt/live/example.com/privkey.pem
+cert = /etc/letsencrypt/live/example.com/fullchain.pem
+```
+
+For local testing, you can create a self-signed certificate:
+
+```bash
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout selfsigned.key \
+  -out selfsigned.crt \
+  -days 365 \
+  -subj "/CN=localhost"
+```
+
+Then point `server.conf` to those files:
+
+```conf
+[ssl]
+enabled = true
+key = /opt/udp-airband-server/selfsigned.key
+cert = /opt/udp-airband-server/selfsigned.crt
+```
+
+Then open:
+
+```text
+https://SERVER_IP:8585/
+```
+
+When SSL is active, the player switches from HTTP to HTTPS on `[web].port`; it does not start a second HTTP listener. If `enabled = true` but `key` or `cert` is missing, unreadable, or points to a non-existing file, the server logs `ssl_fallback_http` and starts HTTP on the same port instead.
+
+Browsers will warn about self-signed certificates because they are not trusted by default. This is acceptable for local testing, but a trusted certificate, such as Let's Encrypt, is recommended for public access.
+
+## Uncompressed And Compressed Modes
 
 The browser can play either:
 
-- `Uncompressed`: the original float32 PCM stream over WebSocket.
-- `Compressed`: low-latency IMA ADPCM over WebSocket by default.
+- `Uncompressed`: original float32 PCM over WebSocket. This is the default on desktop browsers.
+- `Compressed`: low-latency IMA ADPCM over WebSocket by default. This is the default on mobile browsers.
 
-Desktop browsers open in `Uncompressed` by default. Mobile browsers open in `Compressed` by default so iPhone and Android users can test the lower-bandwidth path immediately.
-
-ADPCM is designed for intermittent RTLSDR-Airband UDP output. The server sends compressed frames only when UDP audio arrives, so idle squelch periods do not consume audio bandwidth. Each ADPCM frame includes its own decoder state, allowing newly connected clients or clients after a silence gap to resynchronize immediately.
-
-The ADPCM encoder keeps its adaptive state across active UDP packets and resets after idle gaps. It also applies a light smoothing stage before encoding to reduce granular quantization noise and harsh high-frequency artifacts from radio bursts.
+ADPCM is designed for intermittent radio audio. The server sends compressed frames only when UDP audio arrives, so idle squelch periods do not consume audio bandwidth. Each ADPCM frame includes enough decoder state for new clients, or clients after a silence gap, to resynchronize quickly.
 
 Compressed mode defaults to:
 
@@ -191,69 +317,36 @@ codec = adpcm
 adpcm_frame_ms = 40
 ```
 
-Use a smaller ADPCM frame size for slightly lower packet duration, or a larger one for slightly less WebSocket overhead:
-
-```conf
-[compressed]
-adpcm_frame_ms = 20
-```
-
-Supported compressed codecs are:
+Supported compressed codecs:
 
 - `adpcm`: default, low latency, no `ffmpeg` required.
 - `opus`: Opus/WebM over WebSocket or HTTP fallback, requires `ffmpeg`.
 - `aac`: AAC over WebSocket/MediaSource, requires `ffmpeg`.
-- `hls`: experimental HLS/AAC route, requires `ffmpeg`. This path is currently kept in the codebase but is on hold while ADPCM is tested as the mobile-friendly compressed mode.
+- `hls`: experimental HLS/AAC route, requires `ffmpeg`. This path is kept in the codebase but is currently on hold while ADPCM is tested as the mobile-friendly compressed mode.
 
-To use one of the ffmpeg-backed codecs:
-
-```conf
-[compressed]
-codec = opus
-```
-
-Install `ffmpeg` on Ubuntu only if you want to use `opus`, `aac`, or `hls`:
+Install `ffmpeg` only if you want to use `opus`, `aac`, or `hls`:
 
 ```bash
 sudo apt install ffmpeg
 ```
 
-To disable all compressed audio, set this in `server.conf`:
+To disable compressed audio completely:
 
 ```conf
 [compressed]
 enabled = false
 ```
 
-The default Opus bitrate is `24k`. Override it in `server.conf` when `codec = opus`:
-
-```conf
-[compressed]
-opus_bitrate = 16k
-```
-
-The default AAC bitrate is `32k`. Override it when `codec = aac` or `codec = hls`:
-
-```conf
-[compressed]
-aac_bitrate = 24k
-```
-
-For ADPCM listeners, the server sends no audio frames while UDP is idle. The browser keeps the connection open and locally displays silence until new UDP audio arrives.
-
-For ffmpeg-backed compressed listeners, the server can send compressed silence while UDP is idle so media decoders keep the stream open when RTLSDR-Airband uses `continuous = false`.
-
-The silence keepalive interval defaults to `1000 ms`. Override it with:
-
-```conf
-[compressed]
-keepalive_ms = 100
-```
-
-## Player controls
+## Player Controls
 
 The stream page shows listener count, UDP/stream state, buffering, bandwidth, last transmission time, mode, gain, waveform, and audio level.
 
-When the stream has been validated by at least one UDP packet, the status changes to `Connected`. Pressing `Connected` switches the page to `Reconnect`, closes only the audio stream socket, and stops bandwidth consumption without closing the web page or the control/status connection. Pressing `Reconnect` resumes the same mode that was active before pausing.
+When the stream has been validated by at least one UDP packet, the status changes to `Connected`. Pressing `Connected` switches the page to `Push to Reconnect`, closes only the audio stream socket, and stops bandwidth consumption without closing the web page or the control/status connection. Pressing `Push to Reconnect` resumes the same mode that was active before pausing.
 
-The main page lists all configured feeds under `Realtime Airband Streams`, shows the active user count, language selector, route, channel/sample-rate information, and the server-side last transmission time for each feed.
+The home page lists all configured feeds under `Real-time Airband audio streams`, shows the active user count, language selector, route, channel/sample-rate information, and the server-side last transmission time for each feed.
+
+## Test Tools
+
+The `tools/` directory contains helper scripts for sending synthetic or file-based audio to the example `test` UDP stream on port `8690`.
+
+See [`tools/README.md`](tools/README.md) for usage details.

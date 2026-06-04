@@ -9,6 +9,7 @@ const browserBandwidthEl = document.getElementById('browserBandwidth');
 const lastHeardEl = document.getElementById('lastHeard');
 const activeUsersEl = document.getElementById('activeUsers');
 const modeButton = document.getElementById('mode');
+const titleLink = document.getElementById('title');
 const levelMaskEl = document.getElementById('levelMask');
 const levelValueEl = document.getElementById('levelValue');
 const localTimeEl = document.getElementById('localTime');
@@ -22,10 +23,10 @@ const ctx = canvas.getContext('2d');
 
 const translations = {
   en: {
-    users: 'Users', gain: 'Gain', startAudio: 'Start Audio', mute: 'Mute', unmute: 'Unmute', buffered: 'Buffered', bandwidth: 'Bandwidth', lastHeardTime: 'Last Heard Time', mode: 'Mode', level: 'Level', localTime: 'Local Time', disconnected: 'Disconnected', waitingUdp: 'Waiting for UDP', connected: 'Connected', idle: 'Reconnect', opusUnavailable: 'Compressed unavailable', compressed: 'Compressed', uncompressed: 'Uncompressed', switchMode: 'Switch compressed/uncompressed audio', opusNeedsFfmpeg: 'Compressed mode is unavailable on the server', never: 'never', now: 'Now',
+    users: 'Users', gain: 'Gain', startAudio: 'Start Audio', mute: 'Mute', unmute: 'Unmute', buffered: 'Buffered', bandwidth: 'Bandwidth', lastHeardTime: 'Last Heard Time', mode: 'Mode', level: 'Level', localTime: 'Local Time', disconnected: 'Disconnected', waitingUdp: 'Waiting for UDP', connected: 'Connected', idle: 'Push to Reconnect', stopStream: 'Stop stream', returnHome: 'Click to return home', opusUnavailable: 'Compressed unavailable', compressed: 'Compressed', uncompressed: 'Uncompressed', switchMode: 'Switch compressed/uncompressed audio', opusNeedsFfmpeg: 'Compressed mode is unavailable on the server', never: 'never', now: 'Now',
   },
   es: {
-    users: 'Usuarios', gain: 'Ganancia', startAudio: 'Iniciar audio', mute: 'Silenciar', unmute: 'Activar audio', buffered: 'Buffer', bandwidth: 'Ancho de banda', lastHeardTime: 'Ultima transmision', mode: 'Modo', level: 'Nivel', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP', connected: 'Conectado', idle: 'Reconectar', opusUnavailable: 'Comprimido no disponible', compressed: 'Comprimido', uncompressed: 'Sin comprimir', switchMode: 'Cambiar audio comprimido/sin comprimir', opusNeedsFfmpeg: 'El modo comprimido no esta disponible en el servidor', never: 'nunca', now: 'Ahora',
+    users: 'Usuarios', gain: 'Ganancia', startAudio: 'Iniciar audio', mute: 'Silenciar', unmute: 'Activar audio', buffered: 'Buffer', bandwidth: 'Ancho de banda', lastHeardTime: 'Ultima transmision', mode: 'Modo', level: 'Nivel', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP', connected: 'Conectado', idle: 'Presiona para reconectar', stopStream: 'Detener stream', returnHome: 'Click para volver a la pagina principal', opusUnavailable: 'Comprimido no disponible', compressed: 'Comprimido', uncompressed: 'Sin comprimir', switchMode: 'Cambiar audio comprimido/sin comprimir', opusNeedsFfmpeg: 'El modo comprimido no esta disponible en el servidor', never: 'nunca', now: 'Ahora',
   },
 };
 
@@ -75,11 +76,16 @@ let audioStarted = false;
 let muted = false;
 let streamPaused = false;
 let pausedMode = null;
+let statusHovering = false;
 let receivedBytes = 0;
 let lastBandwidthBytes = 0;
 let lastBandwidthAt = Date.now();
 const maxOpusLiveBufferSeconds = 1.25;
 const targetOpusLiveBufferSeconds = 0.35;
+const waveformBarWidth = 6;
+const waveformBarGap = 6;
+const waveformMinBarHeight = 4;
+const waveformVisualGain = 3;
 const adpcmIndexTable = [-1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8];
 const adpcmStepTable = [
   7, 8, 9, 10, 11, 12, 13, 14, 16, 17,
@@ -140,6 +146,14 @@ statusEl.addEventListener('click', () => {
   if (streamConfirmed && controlWs && controlWs.readyState === WebSocket.OPEN) {
     pauseStream();
   }
+});
+statusEl.addEventListener('mouseenter', () => {
+  statusHovering = true;
+  updateStatusLabel();
+});
+statusEl.addEventListener('mouseleave', () => {
+  statusHovering = false;
+  updateStatusLabel();
 });
 
 startButton.addEventListener('click', async () => {
@@ -208,14 +222,17 @@ function connectControlWebSocket() {
         compressedAvailable = Boolean(message.compressedAvailable);
         compressedTransport = getCompressedTransport();
         document.title = `${message.label} - UDP Airband Monitor`;
-        document.getElementById('title').textContent = message.label;
+        titleLink.textContent = message.label;
+        titleLink.title = t('returnHome');
         if (audioContext && preferredMode === 'opus' && isCompressedAvailable() && currentMode !== 'opus') {
           startSelectedMode();
         }
         updateModeButton();
         updateConnectionState();
       } else if (message.type === 'stats') {
-        browserBandwidthEl.textContent = formatBandwidth(message.listenerBitsPerSecond || 0);
+        if (!streamPaused) {
+          browserBandwidthEl.textContent = formatBandwidth(message.listenerBitsPerSecond || 0);
+        }
         activeUsersEl.textContent = String(message.activeListeners || message.clients || 0);
         lastUdpAt = message.lastHeardAt || message.lastUdpAt || 0;
         lastHeardLabel = message.lastHeardLabel || 'never';
@@ -667,7 +684,8 @@ function updateLastHeard() {
 }
 
 function updateLevelMeter() {
-  const db = lastPeak > 0 ? 20 * Math.log10(lastPeak) : -60;
+  const outputPeak = lastPeak * gain;
+  const db = outputPeak > 0 ? 20 * Math.log10(outputPeak) : -60;
   const clamped = Math.max(-60, Math.min(0, db));
   const percent = (clamped + 60) / 60 * 100;
   levelMaskEl.style.width = `${100 - percent}%`;
@@ -677,7 +695,15 @@ function updateLevelMeter() {
 function setStatus(state, textKey) {
   statusEl.className = `status ${state}`;
   currentStatusKey = textKey;
-  statusText.textContent = t(textKey);
+  updateStatusLabel();
+}
+
+function updateStatusLabel() {
+  if (currentStatusKey === 'connected' && statusHovering && !streamPaused) {
+    statusText.textContent = t('stopStream');
+    return;
+  }
+  statusText.textContent = t(currentStatusKey);
 }
 
 function draw() {
@@ -691,27 +717,63 @@ function draw() {
   }
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.strokeStyle = '#394451';
-  ctx.beginPath();
-  ctx.moveTo(0, canvas.height / 2);
-  ctx.lineTo(canvas.width, canvas.height / 2);
-  ctx.stroke();
-
-  ctx.strokeStyle = '#4fb477';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  const step = Math.max(1, Math.floor(latestWave.length / canvas.width));
-  for (let x = 0; x < canvas.width; x += 1) {
-    const sample = latestWave[x * step * config.channels] || 0;
-    const y = canvas.height / 2 - Math.max(-1, Math.min(1, sample * gain)) * canvas.height * 0.45;
-    if (x === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
-  ctx.stroke();
+  drawBarWaveform();
 
   lastPeak *= 0.985;
   updateLevelMeter();
   requestAnimationFrame(draw);
+}
+
+function drawBarWaveform() {
+  const centerY = canvas.height / 2;
+  const barStride = waveformBarWidth + waveformBarGap;
+  const barCount = Math.max(1, Math.floor((canvas.width + waveformBarGap) / barStride));
+  const channels = currentMode === 'opus' && activeCompressedKind === 'media' ? 1 : config.channels;
+  const frames = channels ? Math.floor(latestWave.length / channels) : 0;
+  const totalWidth = barCount * waveformBarWidth + (barCount - 1) * waveformBarGap;
+  let x = Math.max(0, (canvas.width - totalWidth) / 2);
+
+  ctx.fillStyle = '#1f2933';
+  roundRect(ctx, 0, centerY - 1, canvas.width, 2, 1);
+  ctx.fill();
+
+  ctx.fillStyle = frames > 0 ? '#ff3d12' : '#394451';
+  for (let bar = 0; bar < barCount; bar += 1) {
+    const peak = frames > 0 ? waveformPeakForBar(bar, barCount, frames, channels) : 0;
+    const scaledPeak = Math.max(0, Math.min(1, peak * waveformVisualGain));
+    const height = Math.max(waveformMinBarHeight, scaledPeak * canvas.height * 0.88);
+    roundRect(ctx, x, centerY - height / 2, waveformBarWidth, height, waveformBarWidth / 2);
+    ctx.fill();
+    x += barStride;
+  }
+}
+
+function waveformPeakForBar(bar, barCount, frames, channels) {
+  const startFrame = Math.floor(bar * frames / barCount);
+  const endFrame = Math.max(startFrame + 1, Math.floor((bar + 1) * frames / barCount));
+  let peak = 0;
+  for (let frame = startFrame; frame < endFrame; frame += 1) {
+    for (let channel = 0; channel < channels; channel += 1) {
+      const value = Math.abs(latestWave[frame * channels + channel] || 0);
+      if (value > peak) peak = value;
+    }
+  }
+  return peak;
+}
+
+function roundRect(context, x, y, width, height, radius) {
+  const safeRadius = Math.min(radius, width / 2, height / 2);
+  context.beginPath();
+  context.moveTo(x + safeRadius, y);
+  context.lineTo(x + width - safeRadius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+  context.lineTo(x + width, y + height - safeRadius);
+  context.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height);
+  context.lineTo(x + safeRadius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
+  context.lineTo(x, y + safeRadius);
+  context.quadraticCurveTo(x, y, x + safeRadius, y);
+  context.closePath();
 }
 draw();
 setInterval(updateBuffered, 500);
@@ -720,6 +782,11 @@ updateClocks();
 setInterval(updateClocks, 1000);
 
 function updateBuffered() {
+  if (streamPaused) {
+    bufferedEl.textContent = 'Idle';
+    browserBandwidthEl.textContent = 'Idle';
+    return;
+  }
   updateBrowserBandwidth();
   if (currentMode === 'opus' && activeCompressedKind !== 'adpcm') {
     syncOpusLivePlayback();
@@ -734,6 +801,10 @@ function updateBuffered() {
 }
 
 function updateBrowserBandwidth() {
+  if (streamPaused) {
+    browserBandwidthEl.textContent = 'Idle';
+    return;
+  }
   const now = Date.now();
   const elapsedSeconds = Math.max(0.001, (now - lastBandwidthAt) / 1000);
   const bitsPerSecond = Math.max(0, (receivedBytes - lastBandwidthBytes) * 8 / elapsedSeconds);
@@ -773,7 +844,8 @@ function applyLanguage() {
   });
   updateAudioButton();
   updateModeButton();
-  statusText.textContent = t(currentStatusKey);
+  titleLink.title = t('returnHome');
+  updateStatusLabel();
   lastHeardEl.textContent = localizeLastHeard(lastHeardLabel);
 }
 

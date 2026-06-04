@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.3 - 2026-06-04
+
+Release focused on documentation, operational readiness, safer public status output, and service-friendly configuration/logging.
+
+### Added
+
+- Added `tools/tone.py` for sending a continuous 1 kHz f32le UDP test tone to the example `test` stream.
+- Added `tools/file-to-udp.py` for converting audio files through `ffmpeg` and sending them as timed f32le UDP chunks.
+- Added English and Spanish tool documentation with descriptions, execution examples, and argument reference.
+- Added full English and Spanish README documentation covering RTLSDR-Airband, UDP audio, server configuration, RTLSDR-Airband `udp_stream` setup, HTTPS/TLS, self-signed certificates, logging, and test tools.
+- Added `server.conf` as the default editable server configuration file.
+- Added a built-in fallback `test` stream on UDP port `8690` when `streams.json` is missing.
+- Added favicon support for all pages.
+- Added project/version footer on the main page linked to the GitHub repository.
+- Added startup log lines showing each stream bind, route, label, channel count, and sample rate.
+- Added configurable service logging with levels, optional timestamps, optional colors, and a manual `-D` debug mode.
+- Added ffmpeg process logging for Opus/AAC/HLS debugging, including stderr capture in debug mode.
+- Added security headers for HTML, JSON, assets, and error responses.
+- Added `package-lock.json` so dependency auditing can run reproducibly.
+
+### Changed
+
+- Updated the software version to `1.3`.
+- Updated the second example stream from `atis` to `test` with label `Testing UDP Input`, UDP port `8690`, 8000 Hz, mono.
+- Updated the main README with concise descriptions of the project files and moved test-tool instructions to `tools/README.md`.
+- Matched the main page user counter and language selector styling to the stream page.
+- Changed SSL behavior so enabling SSL switches the web player to HTTPS on the same `[web].port` instead of starting a second HTTPS listener. If certificates are missing or invalid, the server logs a warning and falls back to HTTP.
+- Changed startup summary logging so the final `INFO startup` line appears after the `Web player` line.
+- Changed `INFO` and `DEBUG` console logs to remain uncolored; `WARN` is yellow and `ERROR` is red when colors are enabled.
+- Changed missing `server.conf` handling to warn and continue with built-in defaults, while the repository now ships with `server.conf` by default.
+
+### Security
+
+- Removed UDP bind host, UDP port, raw client counts, packet counters, byte counters, listener lists, and client IDs from public `/status`, `/status/:stream`, and control WebSocket config/stats payloads.
+- Added safe handling for malformed percent-encoded request paths; invalid paths now return `400 Bad Request` instead of being decoded unsafely.
+- Added `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and a Content Security Policy header.
+
+### Verified
+
+- Ran syntax checks for server and browser JavaScript.
+- Ran `npm audit --omit=dev` with zero reported vulnerabilities.
+- Dynamically verified public status and control WebSocket payloads do not expose UDP IP/port or listener identifiers.
+- Verified malformed URL handling, security headers, HLS segment path rejection, and SSL fallback behavior.
+
 ## 1.2 - 2026-06-04
 
 Production release focused on making compressed mobile playback usable without relying on the experimental HLS/AAC path.
