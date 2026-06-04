@@ -34,6 +34,7 @@ const COMPRESSED_CODECS = new Set(['adpcm', 'opus', 'aac', 'hls']);
 
 const args = parseArgs(process.argv.slice(2));
 const serverConfigPath = args.serverConfig || args.serverConf || 'server.conf';
+const serverConfigExists = fs.existsSync(path.resolve(serverConfigPath));
 const serverConfig = loadServerConfig(serverConfigPath, fs, path);
 const defaultUdpHost = args.udpHost || getSetting(serverConfig, 'udp.host', '0.0.0.0');
 const httpHost = args.httpHost || getSetting(serverConfig, 'web.host', '0.0.0.0');
@@ -108,8 +109,22 @@ const compressed = createCompressedManager({
 });
 const compressedAvailable = compressedEnabled && compressed.isCodecAvailable(compressedCodec);
 const opusAvailable = compressedEnabled && compressed.ffmpegAvailable;
-const streams = loadStreams({ configPath, defaultUdpHost, fs, opusKeepaliveMs, path });
-validateStreams(streams);
+if (!serverConfigExists) {
+  logger.warn('server_config_missing', { path: serverConfigPath, fallback: 'built-in defaults' });
+}
+
+const streamsConfigExists = fs.existsSync(path.resolve(configPath));
+if (!streamsConfigExists) {
+  logger.warn('streams_config_missing', { path: configPath, action: 'server cannot start without streams' });
+}
+
+let streams;
+try {
+  streams = loadStreams({ configPath, defaultUdpHost, fs, opusKeepaliveMs, path });
+  validateStreams(streams);
+} catch (err) {
+  fatal(err.message);
+}
 const streamsByName = new Map(streams.map((stream) => [stream.name, stream]));
 
 const httpServer = http.createServer((req, res) => {
@@ -298,7 +313,9 @@ function startWebServers() {
   logger.info('startup', {
     version: SOFTWARE_VERSION,
     serverConfig: serverConfigPath,
+    serverConfigLoaded: serverConfigExists,
     streamsConfig: configPath,
+    streamsConfigLoaded: streamsConfigExists,
     logLevel: logger.level,
   });
   httpServer.listen(httpPort, httpHost, () => {
