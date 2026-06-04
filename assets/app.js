@@ -22,10 +22,10 @@ const ctx = canvas.getContext('2d');
 
 const translations = {
   en: {
-    users: 'Users', gain: 'Gain', startAudio: 'Start Audio', mute: 'Mute', unmute: 'Unmute', buffered: 'Buffered', bandwidth: 'Bandwidth', lastHeardTime: 'Last Heard Time', mode: 'Mode', level: 'Level', localTime: 'Local Time', disconnected: 'Disconnected', waitingUdp: 'Waiting for UDP', connected: 'Connected', opusUnavailable: 'Compressed unavailable', compressed: 'Compressed', uncompressed: 'Uncompressed', switchMode: 'Switch compressed/uncompressed audio', opusNeedsFfmpeg: 'Compressed mode is unavailable on the server', never: 'never', now: 'Now',
+    users: 'Users', gain: 'Gain', startAudio: 'Start Audio', mute: 'Mute', unmute: 'Unmute', buffered: 'Buffered', bandwidth: 'Bandwidth', lastHeardTime: 'Last Heard Time', mode: 'Mode', level: 'Level', localTime: 'Local Time', disconnected: 'Disconnected', waitingUdp: 'Waiting for UDP', connected: 'Connected', idle: 'Reconnect', opusUnavailable: 'Compressed unavailable', compressed: 'Compressed', uncompressed: 'Uncompressed', switchMode: 'Switch compressed/uncompressed audio', opusNeedsFfmpeg: 'Compressed mode is unavailable on the server', never: 'never', now: 'Now',
   },
   es: {
-    users: 'Usuarios', gain: 'Ganancia', startAudio: 'Iniciar audio', mute: 'Silenciar', unmute: 'Activar audio', buffered: 'Buffer', bandwidth: 'Ancho de banda', lastHeardTime: 'Ultima transmision', mode: 'Modo', level: 'Nivel', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP', connected: 'Conectado', opusUnavailable: 'Comprimido no disponible', compressed: 'Comprimido', uncompressed: 'Sin comprimir', switchMode: 'Cambiar audio comprimido/sin comprimir', opusNeedsFfmpeg: 'El modo comprimido no esta disponible en el servidor', never: 'nunca', now: 'Ahora',
+    users: 'Usuarios', gain: 'Ganancia', startAudio: 'Iniciar audio', mute: 'Silenciar', unmute: 'Activar audio', buffered: 'Buffer', bandwidth: 'Ancho de banda', lastHeardTime: 'Ultima transmision', mode: 'Modo', level: 'Nivel', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP', connected: 'Conectado', idle: 'Reconectar', opusUnavailable: 'Comprimido no disponible', compressed: 'Comprimido', uncompressed: 'Sin comprimir', switchMode: 'Cambiar audio comprimido/sin comprimir', opusNeedsFfmpeg: 'El modo comprimido no esta disponible en el servidor', never: 'nunca', now: 'Ahora',
   },
 };
 
@@ -68,11 +68,12 @@ let compressedTransport = null;
 let activeCompressedKind = null;
 let usingNativeHls = false;
 let currentMode = 'raw';
-let preferredMode = 'opus';
+let preferredMode = isMobileDevice() ? 'opus' : 'raw';
 let opusAvailable = false;
 let compressedAvailable = false;
 let audioStarted = false;
 let muted = false;
+let streamPaused = false;
 let receivedBytes = 0;
 let lastBandwidthBytes = 0;
 let lastBandwidthAt = Date.now();
@@ -130,6 +131,16 @@ modeButton.addEventListener('click', () => {
   updateModeButton();
 });
 
+statusEl.addEventListener('click', () => {
+  if (streamPaused) {
+    resumeStream();
+    return;
+  }
+  if (streamConfirmed && controlWs && controlWs.readyState === WebSocket.OPEN) {
+    pauseStream();
+  }
+});
+
 startButton.addEventListener('click', async () => {
   if (audioStarted) {
     muted = !muted;
@@ -149,6 +160,7 @@ startButton.addEventListener('click', async () => {
 
   await audioContext.resume();
   connectControlWebSocket();
+  streamPaused = false;
   startSelectedMode();
   audioStarted = true;
   updateAudioButton();
@@ -217,6 +229,10 @@ function connectControlWebSocket() {
 }
 
 function updateConnectionState() {
+  if (streamPaused) {
+    setStatus('idle', 'idle');
+    return;
+  }
   if (!controlWs || controlWs.readyState !== WebSocket.OPEN) {
     setStatus('', 'disconnected');
     return;
@@ -225,12 +241,35 @@ function updateConnectionState() {
 }
 
 function startSelectedMode() {
+  if (streamPaused) return;
   if (preferredMode === 'opus' && isCompressedAvailable()) {
     startOpus();
   } else {
     startRaw();
   }
   updateModeButton();
+}
+
+function pauseStream() {
+  streamPaused = true;
+  stopRaw();
+  stopOpus();
+  queuedFrames = 0;
+  latestWave = new Float32Array(0);
+  lastPeak = 0;
+  updateConnectionState();
+  updateBuffered();
+}
+
+function resumeStream() {
+  streamPaused = false;
+  if (audioContext) {
+    nextPlayTime = audioContext.currentTime + targetLatencySeconds;
+  }
+  if (audioStarted) {
+    startSelectedMode();
+  }
+  updateConnectionState();
 }
 
 function startRaw() {

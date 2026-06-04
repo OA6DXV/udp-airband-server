@@ -147,6 +147,8 @@ h1 {
   align-items: center;
   gap: 8px;
   min-width: 148px;
+  width: auto;
+  height: auto;
   justify-content: center;
   border: 1px solid var(--line);
   background: var(--panel);
@@ -154,6 +156,8 @@ h1 {
   border-radius: 8px;
   color: var(--muted);
   font-size: 14px;
+  font-weight: 500;
+  cursor: default;
 }
 
 .active-users {
@@ -192,6 +196,30 @@ h1 {
   box-shadow: 0 0 0 4px rgb(79 180 119 / 18%);
 }
 
+.status.live {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #07110c;
+  cursor: pointer;
+}
+
+.status.live .dot {
+  background: #07110c;
+  box-shadow: 0 0 0 4px rgb(7 17 12 / 16%);
+}
+
+.status.idle {
+  border-color: var(--warn);
+  background: var(--warn);
+  color: #171006;
+  cursor: pointer;
+}
+
+.status.idle .dot {
+  background: #171006;
+  box-shadow: 0 0 0 4px rgb(23 16 6 / 16%);
+}
+
 .controls,
 .meters {
   border: 1px solid var(--line);
@@ -205,7 +233,7 @@ h1 {
   grid-template-columns: 1fr auto;
   align-items: end;
   gap: 18px;
-  margin-bottom: 16px;
+  margin-top: 16px;
 }
 
 label {

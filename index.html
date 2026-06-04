@@ -12,7 +12,7 @@
       <h1 id="title">UDP Airband Monitor</h1>
       <div class="header-status">
         <div class="active-users"><span data-i18n="users">Users</span><strong id="activeUsers">0</strong></div>
-        <div id="status" class="status"><span class="dot"></span><span id="statusText">Disconnected</span></div>
+        <button id="status" class="status" type="button"><span class="dot"></span><span id="statusText">Disconnected</span></button>
         <div class="language-switch">
           <button id="languageToggle" class="language-button" type="button" aria-haspopup="true" aria-expanded="false">
             <span id="languageCode">EN</span><span class="caret"></span>
@@ -25,19 +25,19 @@
       </div>
     </header>
 
+    <section class="meters">
+      <div class="meter"><span data-i18n="buffered">Buffered</span><strong id="buffered">0 ms</strong></div>
+      <div class="meter"><span data-i18n="bandwidth">Bandwidth</span><strong id="browserBandwidth">0 bps</strong></div>
+      <div class="meter"><span data-i18n="lastHeardTime">Last Heard Time</span><strong id="lastHeard">never</strong></div>
+      <div class="meter"><span data-i18n="mode">Mode</span><button id="mode" class="mode-button" type="button">Uncompressed</button></div>
+    </section>
+
     <section class="controls">
       <label id="gainLabel">
         <span><span data-i18n="gain">Gain</span> <output id="gainValue">100%</output></span>
         <input id="gain" type="range" min="0" max="1.5" step="0.01" value="1">
       </label>
       <button id="start">Start Audio</button>
-    </section>
-
-    <section class="meters">
-      <div class="meter"><span data-i18n="buffered">Buffered</span><strong id="buffered">0 ms</strong></div>
-      <div class="meter"><span data-i18n="bandwidth">Bandwidth</span><strong id="browserBandwidth">0 bps</strong></div>
-      <div class="meter"><span data-i18n="lastHeardTime">Last Heard Time</span><strong id="lastHeard">never</strong></div>
-      <div class="meter"><span data-i18n="mode">Mode</span><button id="mode" class="mode-button" type="button">Uncompressed</button></div>
     </section>
 
     <canvas id="scope" width="1200" height="240" aria-label="waveform scope"></canvas>
