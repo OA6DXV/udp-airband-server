@@ -71,6 +71,10 @@ port = 8585
 [streams]
 file = streams.json
 
+[logging]
+level = info
+timestamps = false
+
 [ssl]
 enabled = false
 host = 0.0.0.0
@@ -94,6 +98,8 @@ Important fields:
 - `[udp].host`: default UDP bind address used by streams that do not define their own `udpHost`.
 - `[web].host` and `[web].port`: HTTP bind address and port for the browser interface.
 - `[streams].file`: JSON file that defines the feeds.
+- `[logging].level`: service-friendly logging level. Supported values are `off`, `error`, `warn`, `info`, and `debug`. The default is `info`.
+- `[logging].timestamps`: set to `true` to prepend ISO timestamps. With `systemd`, this can usually stay `false` because `journalctl` already adds timestamps.
 - `[ssl]`: optional HTTPS listener. Enable it and provide `key` and `cert` paths when you want Node.js to serve TLS directly.
 - `[compressed].enabled`: set to `false` to disable all compressed modes and their transcoding/framing logic.
 - `[compressed].codec`: compressed mode backend. `adpcm` is the default low-latency option and does not require `ffmpeg`.
@@ -210,6 +216,35 @@ node server.js -D \
 ```
 
 Use `-D` only when running the server directly in a terminal. It can produce a lot of ffmpeg output and is not recommended for the normal `systemd` service command.
+
+## Logging
+
+The server logs to stdout/stderr, so `systemd` automatically stores the output in `journalctl`.
+
+The default `info` level is intentionally soft enough for service use. It shows startup lines, stream binds, player URLs, connection/disconnection events, warnings, and errors. It does not print full ffmpeg encoder debug output.
+
+Configure the normal service log level in `server.conf`:
+
+```conf
+[logging]
+level = info
+timestamps = false
+```
+
+Use `warn` or `error` for quieter service logs:
+
+```conf
+[logging]
+level = warn
+```
+
+Use `debug` in the config only if you really want persistent debug logs in `journalctl`. For temporary troubleshooting, prefer running manually with `-D`:
+
+```bash
+node server.js -D --server-config server.conf --config streams.json
+```
+
+When `-D` is active, ffmpeg-backed encoders such as Opus, AAC, and HLS are started with ffmpeg debug logging and their `stderr` output is printed. Without `-D`, ffmpeg stays at error-level logging so service logs do not get flooded.
 
 Then open the home page:
 

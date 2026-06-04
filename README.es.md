@@ -71,6 +71,10 @@ port = 8585
 [streams]
 file = streams.json
 
+[logging]
+level = info
+timestamps = false
+
 [ssl]
 enabled = false
 host = 0.0.0.0
@@ -94,6 +98,8 @@ Campos importantes:
 - `[udp].host`: direccion UDP predeterminada para streams que no definan su propio `udpHost`.
 - `[web].host` y `[web].port`: direccion y puerto HTTP para la interfaz web.
 - `[streams].file`: archivo JSON que define los feeds.
+- `[logging].level`: nivel de logging amigable para servicio. Valores soportados: `off`, `error`, `warn`, `info` y `debug`. El valor predeterminado es `info`.
+- `[logging].timestamps`: usa `true` para anteponer timestamps ISO. Con `systemd`, normalmente puede quedar en `false` porque `journalctl` ya agrega timestamps.
 - `[ssl]`: listener HTTPS opcional. Activalo y define las rutas `key` y `cert` cuando quieras que Node.js sirva TLS directamente.
 - `[compressed].enabled`: usa `false` para desactivar todos los modos comprimidos y su logica de transcoding/framing.
 - `[compressed].codec`: backend del modo comprimido. `adpcm` es la opcion predeterminada de baja latencia y no requiere `ffmpeg`.
@@ -210,6 +216,35 @@ node server.js -D \
 ```
 
 Usa `-D` solo cuando ejecutes el servidor directamente en una terminal. Puede generar mucha salida de ffmpeg y no se recomienda para el comando normal del servicio `systemd`.
+
+## Logging
+
+El servidor escribe logs en stdout/stderr, asi que `systemd` guarda automaticamente esa salida en `journalctl`.
+
+El nivel predeterminado `info` es intencionalmente suave para uso como servicio. Muestra lineas de arranque, streams cargados, URLs del player, conexiones/desconexiones, warnings y errores. No imprime todo el debug de los encoders ffmpeg.
+
+Configura el nivel normal del servicio en `server.conf`:
+
+```conf
+[logging]
+level = info
+timestamps = false
+```
+
+Usa `warn` o `error` para logs mas silenciosos en servicio:
+
+```conf
+[logging]
+level = warn
+```
+
+Usa `debug` en la configuracion solo si realmente quieres logs debug persistentes en `journalctl`. Para diagnostico temporal, es mejor correr manualmente con `-D`:
+
+```bash
+node server.js -D --server-config server.conf --config streams.json
+```
+
+Cuando `-D` esta activo, los encoders basados en ffmpeg como Opus, AAC y HLS se inician con logging debug de ffmpeg y su salida `stderr` se imprime. Sin `-D`, ffmpeg queda en nivel de errores para que los logs del servicio no se inunden.
 
 Luego abre la pagina principal:
 

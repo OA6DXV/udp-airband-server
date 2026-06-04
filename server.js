@@ -46,6 +46,8 @@ const opusBitrate = args.opusBitrate || getSetting(serverConfig, 'compressed.opu
 const aacBitrate = args.aacBitrate || getSetting(serverConfig, 'compressed.aacBitrate', '32k');
 const opusKeepaliveMs = Number(args.opusKeepaliveMs || getSetting(serverConfig, 'compressed.keepaliveMs', 1000));
 const ffmpegPath = args.ffmpeg || getSetting(serverConfig, 'compressed.ffmpeg', 'ffmpeg');
+const logLevel = args.logLevel || getSetting(serverConfig, 'logging.level', 'info');
+const logTimestamps = parseBoolean(args.logTimestamps !== undefined ? args.logTimestamps : getSetting(serverConfig, 'logging.timestamps', false));
 const tlsKeyPath = args.tlsKey || args.httpsKey || getSetting(serverConfig, 'ssl.key', '');
 const tlsCertPath = args.tlsCert || args.httpsCert || getSetting(serverConfig, 'ssl.cert', '');
 const tlsConfigured = Boolean(tlsKeyPath || tlsCertPath);
@@ -55,7 +57,7 @@ const httpsHost = args.httpsHost || getSetting(serverConfig, 'ssl.host', httpHos
 const httpsPort = Number(args.httpsPort || getSetting(serverConfig, 'ssl.port', httpPort));
 const redirectHttpToHttps = parseBoolean(args.redirectHttpToHttps !== undefined ? args.redirectHttpToHttps : getSetting(serverConfig, 'ssl.redirectHttpToHttps', false));
 const debugEnabled = Boolean(args.debug);
-const logger = createLogger({ debug: debugEnabled });
+const logger = createLogger({ debug: debugEnabled, level: logLevel, timestamps: logTimestamps });
 
 if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) {
   fatal('--http-port must be a valid port');
@@ -132,7 +134,7 @@ function startUdpServers() {
     udpServer.on('message', (msg) => handleUdpMessage(stream, msg));
     udpServer.on('error', (err) => fatal(`UDP error on ${stream.name}: ${err.message}`));
     udpServer.bind(stream.udpPort, stream.udpHost, () => {
-      console.log(formatStreamStartupLine(stream));
+      logger.plain('info', formatStreamStartupLine(stream));
       pendingUdpBinds -= 1;
       if (pendingUdpBinds === 0) {
         startWebServers();
@@ -152,6 +154,7 @@ function handleUdpMessage(stream, msg) {
 
   for (const [client, clientId] of stream.rawClients) {
     if (client.destroyed || client.writableLength > MAX_SOCKET_BUFFER_BYTES) {
+      logger.warn('raw_client_backpressure', { stream: stream.name, client: clientId, writableLength: client.writableLength });
       client.destroy();
       removeWsClient(stream, client);
       continue;
@@ -248,6 +251,7 @@ function attachUpgradeHandler(server) {
     const requestUrl = new URL(req.url, `${socket.encrypted ? 'https' : 'http'}://${req.headers.host || 'localhost'}`);
     const match = normalizePath(requestUrl.pathname).match(/^\/([^/]+)\/(audio|control|adpcm|opus|aac)$/);
     if (!match) {
+      logger.warn('websocket_rejected', { path: requestUrl.pathname, reason: 'invalid_route' });
       socket.destroy();
       return;
     }
@@ -255,6 +259,7 @@ function attachUpgradeHandler(server) {
     const stream = streamsByName.get(match[1]);
     const socketType = match[2];
     if (!stream || !acceptWebSocket(req, socket, crypto)) {
+      logger.warn('websocket_rejected', { path: requestUrl.pathname, reason: stream ? 'invalid_handshake' : 'unknown_stream' });
       socket.destroy();
       return;
     }
@@ -264,15 +269,24 @@ function attachUpgradeHandler(server) {
       stream.controlClients.set(socket, clientId);
       addListenerMode(stream, clientId, 'control');
       sendWsJson(socket, streamConfig(stream));
+      logger.info('client_connected', { stream: stream.name, mode: 'control', client: clientId, remote: socket.remoteAddress });
     } else if (socketType === 'adpcm' || socketType === 'opus' || socketType === 'aac') {
       compressed.serveWebSocket(stream, clientId, socket, socketType);
+      logger.info('client_connected', { stream: stream.name, mode: socketType, client: clientId, remote: socket.remoteAddress });
     } else {
       stream.rawClients.set(socket, clientId);
       addListenerMode(stream, clientId, 'raw');
+      logger.info('client_connected', { stream: stream.name, mode: 'raw', client: clientId, remote: socket.remoteAddress });
     }
 
-    socket.on('error', () => removeWsClient(stream, socket));
-    socket.on('close', () => removeWsClient(stream, socket));
+    socket.on('error', (err) => {
+      logger.warn('client_socket_error', { stream: stream.name, mode: socketType, client: clientId, error: err.message });
+      removeWsClient(stream, socket);
+    });
+    socket.on('close', () => {
+      logger.info('client_disconnected', { stream: stream.name, mode: socketType, client: clientId });
+      removeWsClient(stream, socket);
+    });
     socket.on('data', () => {});
   });
 }
@@ -281,18 +295,27 @@ function startWebServers() {
   if (debugEnabled) {
     logger.debug('debug_enabled', { flag: '-D' });
   }
+  logger.info('startup', {
+    version: SOFTWARE_VERSION,
+    serverConfig: serverConfigPath,
+    streamsConfig: configPath,
+    logLevel: logger.level,
+  });
   httpServer.listen(httpPort, httpHost, () => {
     const mode = tlsEnabled && redirectHttpToHttps ? 'HTTP redirect' : 'Web player';
-    console.log(`${mode}: ${formatUrl('http', httpHost, httpPort)}/`);
+    logger.plain('info', `${mode}: ${formatUrl('http', httpHost, httpPort)}/`);
   });
 
   if (httpsServer) {
     httpsServer.listen(httpsPort, httpsHost, () => {
-      console.log(`TLS player: ${formatUrl('https', httpsHost, httpsPort)}/`);
+      logger.plain('info', `TLS player: ${formatUrl('https', httpsHost, httpsPort)}/`);
     });
   }
 
-  console.log(`Compressed: ${compressedEnabled ? formatCompressedStatus() : 'disabled by config'}`);
+  logger.plain('info', `Compressed: ${compressedEnabled ? formatCompressedStatus() : 'disabled by config'}`);
+  if (compressedEnabled && !compressedAvailable) {
+    logger.warn('compressed_unavailable', { codec: compressedCodec, ffmpeg: ffmpegPath });
+  }
   setInterval(broadcastStreamStats, 1000);
   if (compressedEnabled) {
     setInterval(() => compressed.writeSilenceKeepalive(streams, opusKeepaliveMs), opusKeepaliveMs);
@@ -374,6 +397,7 @@ function broadcastStreamStats() {
 
     for (const [client, clientId] of stream.controlClients) {
       if (client.destroyed || client.writableLength > MAX_SOCKET_BUFFER_BYTES) {
+        logger.warn('control_client_backpressure', { stream: stream.name, client: clientId, writableLength: client.writableLength });
         client.destroy();
         removeWsClient(stream, client);
         continue;
@@ -479,6 +503,6 @@ function normalizePath(value) {
 }
 
 function fatal(message) {
-  console.error(message);
+  logger.error('fatal', { message });
   process.exit(1);
 }
