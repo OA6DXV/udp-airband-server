@@ -136,15 +136,19 @@ function armMobileAutostartGesture() {
       .filter((player) => player.autoStartPending)
       .forEach((player) => player.autoStartIfReady(true));
   };
-  window.addEventListener('pointerdown', startPending, { capture: true });
+  window.addEventListener('click', startPending, { capture: true });
   window.addEventListener('touchend', startPending, { capture: true });
   window.addEventListener('keydown', startPending, { capture: true });
 }
 
 function removeMobileAutostartListeners(listener) {
-  window.removeEventListener('pointerdown', listener, { capture: true });
+  window.removeEventListener('click', listener, { capture: true });
   window.removeEventListener('touchend', listener, { capture: true });
   window.removeEventListener('keydown', listener, { capture: true });
+}
+
+function hasActiveUserGesture() {
+  return !navigator.userActivation || navigator.userActivation.isActive;
 }
 
 function updateHeader() {
@@ -335,7 +339,7 @@ class MultiStreamPlayer {
   autoStartIfReady(fromUserGesture = false) {
     if (!autoStartMobile || this.started || !this.configReady) return;
     this.autoStartPending = true;
-    if (!fromUserGesture) {
+    if (!fromUserGesture || !hasActiveUserGesture()) {
       armMobileAutostartGesture();
       return;
     }
