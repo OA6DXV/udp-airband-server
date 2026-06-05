@@ -229,10 +229,6 @@ function handleHttpRequest(req, res) {
     sendAsset(res, multiJs, 'application/javascript; charset=utf-8');
     return;
   }
-  if (pathname === '/ui/status') {
-    sendJsonResponse(res, streams.map(publicStreamStatus));
-    return;
-  }
   if (pathname === '/status') {
     if (!apiEnabled) {
       sendNotFound(res);

@@ -15,8 +15,9 @@
 - The main page now shows a Multi Stream card only when two or more streams are configured.
 - Expected client/proxy socket closes such as `EPIPE` and `ECONNRESET` are now logged as debug-only `client_socket_closed` events instead of production warnings.
 - Multi Stream selection now uses a slower border-only breathing animation on stream cards, and the `/multi` page now embeds stream configuration as valid JSON.
-- Once a stream is selected, the `Start Multi Stream` card turns green and pulses every 3 seconds.
-- Public `/status` endpoints are disabled by default; the web UI now uses an internal status endpoint for its own home-page counters.
+- Once a stream is selected, the `Start Multi Stream` card pulses from its normal background to green every 2 seconds.
+- Public `/status` endpoints are disabled by default, and the home page no longer polls status over HTTP.
+- Multi Stream now counts the same browser session as one user across selected streams, shows dB on the level meter, and only reveals the gain percentage while hovering or interacting with the slider.
 
 ## 1.3 - 2026-06-04
 

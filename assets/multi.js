@@ -98,9 +98,10 @@ function renderPlayers() {
         <span data-i18n="level">Level</span>
         <div class="level-track gain-level-track">
           <div class="level-mask" data-role="level-mask"></div>
+          <span class="gain-value" data-role="gain-value">100%</span>
           <input data-role="gain" type="range" min="0" max="1.5" step="0.01" value="1" aria-label="gain">
         </div>
-        <span data-role="gain-value">100%</span>
+        <span data-role="level-db">-\u221e dB</span>
       </label>
     `;
     container.appendChild(card);
@@ -119,7 +120,7 @@ function ensureAudioContext() {
 }
 
 function updateHeader() {
-  activeUsersEl.textContent = String(players.reduce((total, player) => total + (player.activeListeners || 0), 0));
+  activeUsersEl.textContent = String(players.reduce((max, player) => Math.max(max, player.activeListeners || 0), 0));
   const totalBps = players.reduce((total, player) => total + player.bandwidth, 0);
   totalBandwidthEl.textContent = globalPaused || totalBps <= 0 ? 'Idle' : formatBandwidth(totalBps);
   if (globalPaused) {
@@ -198,6 +199,7 @@ class MultiStreamPlayer {
     this.startButton = card.querySelector('[data-role="start"]');
     this.gainInput = card.querySelector('[data-role="gain"]');
     this.gainValue = card.querySelector('[data-role="gain-value"]');
+    this.levelDb = card.querySelector('[data-role="level-db"]');
     this.levelMask = card.querySelector('[data-role="level-mask"]');
     this.nameEl.textContent = this.stream.label;
     this.modeButton.addEventListener('click', () => {
@@ -355,6 +357,7 @@ class MultiStreamPlayer {
     const db = this.peak * this.gain > 0 ? 20 * Math.log10(this.peak * this.gain) : -60;
     const percent = (Math.max(-60, Math.min(0, db)) + 60) / 60 * 100;
     this.levelMask.style.width = `${100 - percent}%`;
+    this.levelDb.textContent = db <= -60 ? '-\u221e dB' : `${db.toFixed(1)} dB`;
   }
 
   updateLabels() {
@@ -428,8 +431,8 @@ function formatBandwidth(bitsPerSecond) {
   return `${Math.round(bitsPerSecond)} bps`;
 }
 
-function getClientId(name) {
-  const key = `udp-airband-multi-client-id-${name}`;
+function getClientId() {
+  const key = 'udp-airband-multi-client-id';
   let value = localStorage.getItem(key);
   if (!value) {
     value = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
