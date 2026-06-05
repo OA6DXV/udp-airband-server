@@ -96,8 +96,10 @@ function renderPlayers() {
       </section>
       <div class="level gain-level">
         <span class="level-label" data-i18n="level">Level</span>
-        <span class="compact-stream-title" data-role="compact-name"></span>
-        <button class="compact-toggle" data-role="toggle" type="button" aria-expanded="false" aria-label="toggle stream controls"></button>
+        <span class="compact-stream-heading">
+          <span class="compact-stream-title" data-role="compact-name"></span>
+          <button class="compact-toggle" data-role="toggle" type="button" aria-expanded="false" aria-label="toggle stream controls"></button>
+        </span>
         <div class="level-track gain-level-track">
           <div class="level-mask" data-role="level-mask"></div>
           <span class="gain-value" data-role="gain-value">100%</span>
@@ -231,8 +233,28 @@ class MultiStreamPlayer {
       this.gain = Number(this.gainInput.value);
       this.gainValue.textContent = `${Math.round(this.gain * 100)}%`;
       this.applyGain();
+      this.showGainValue();
     });
+    this.gainInput.addEventListener('pointerdown', () => this.showGainValue());
+    this.gainInput.addEventListener('pointerup', () => this.hideGainValueLater());
+    this.gainInput.addEventListener('pointercancel', () => this.hideGainValueLater());
+    this.gainInput.addEventListener('focus', () => this.showGainValue());
+    this.gainInput.addEventListener('blur', () => this.hideGainValueLater());
+    this.gainInput.addEventListener('mouseenter', () => this.showGainValue());
+    this.gainInput.addEventListener('mouseleave', () => this.hideGainValueLater());
     this.updateLabels();
+  }
+
+  showGainValue() {
+    clearTimeout(this.gainValueTimer);
+    this.card.classList.add('show-gain-value');
+  }
+
+  hideGainValueLater() {
+    clearTimeout(this.gainValueTimer);
+    this.gainValueTimer = setTimeout(() => {
+      this.card.classList.remove('show-gain-value');
+    }, 2000);
   }
 
   connectControl() {
