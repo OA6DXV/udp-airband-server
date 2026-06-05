@@ -38,6 +38,7 @@ let audioContext;
 let globalPaused = false;
 let statusHovering = false;
 let players = [];
+const autoStartMobile = isMobileDevice();
 
 languageToggle.addEventListener('click', () => {
   const open = languageMenu.hidden;
@@ -187,6 +188,8 @@ class MultiStreamPlayer {
     this.started = false;
     this.muted = false;
     this.paused = false;
+    this.configReady = false;
+    this.autoStartAttempted = false;
     this.gain = 1;
     this.peak = 0;
     this.bandwidth = 0;
@@ -274,6 +277,8 @@ class MultiStreamPlayer {
       const message = JSON.parse(event.data);
       if (message.type === 'config') {
         this.config = { ...this.config, ...message };
+        this.configReady = true;
+        this.autoStartIfReady();
       } else if (message.type === 'stats') {
         this.activeListeners = message.activeListeners || 0;
         this.lastHeardAt = message.lastHeardAt || 0;
@@ -303,6 +308,15 @@ class MultiStreamPlayer {
     }
     this.applyGain();
     this.updateLabels();
+  }
+
+  autoStartIfReady() {
+    if (!autoStartMobile || this.autoStartAttempted || this.started || !this.configReady) return;
+    this.autoStartAttempted = true;
+    this.startAudio().catch(() => {
+      this.started = false;
+      this.updateLabels();
+    });
   }
 
   startRaw() {

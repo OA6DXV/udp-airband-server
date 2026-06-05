@@ -593,27 +593,27 @@ canvas {
     border: 0;
     background: transparent;
     padding: 0;
-    color: var(--text);
+    color: var(--muted);
     cursor: pointer;
   }
 
   .compact-stream-title {
     display: block;
     min-width: 0;
-    color: var(--text);
-    font-size: 24px;
-    font-weight: 500;
+    color: var(--muted);
+    font-size: 17px;
+    font-weight: 400;
     line-height: 1.1;
   }
 
   .compact-stream-heading::after {
     flex: 0 0 auto;
     content: "";
-    width: 0.48em;
-    height: 0.48em;
+    width: 0.58em;
+    height: 0.58em;
     border-right: 0.12em solid var(--muted);
     border-bottom: 0.12em solid var(--muted);
-    transform: translateY(-0.16em) rotate(45deg);
+    transform: translateY(-0.18em) rotate(45deg);
     transition: transform 140ms ease;
   }
 
