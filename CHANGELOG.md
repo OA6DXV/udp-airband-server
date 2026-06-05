@@ -19,6 +19,7 @@
 - Public `/status` endpoints are disabled by default, and the home page no longer polls status over HTTP.
 - Multi Stream now counts the same browser session as one user across selected streams, shows dB on the level meter, and only reveals the gain percentage while hovering or interacting with the slider.
 - Pressing `Select streams` again exits Multi Stream selection when no streams have been selected.
+- Multi Stream cards now use a compact mobile portrait layout by default, with a chevron control to expand each stream into the full control view.
 
 ## 1.3 - 2026-06-04
 

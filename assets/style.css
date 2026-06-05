@@ -436,6 +436,11 @@ canvas {
   margin-top: 14px;
 }
 
+.compact-stream-title,
+.compact-toggle {
+  display: none;
+}
+
 .gain-level-track {
   height: 20px;
   overflow: visible;
@@ -533,5 +538,83 @@ canvas {
   button,
   .status {
     width: 100%;
+  }
+}
+
+@media (max-width: 600px) and (orientation: portrait) {
+  .multi-streams {
+    gap: 10px;
+  }
+
+  .multi-stream-card {
+    padding: 12px;
+  }
+
+  .multi-stream-card .multi-meters {
+    display: none;
+  }
+
+  .multi-stream-card.expanded .multi-meters {
+    display: grid;
+    margin-bottom: 12px;
+  }
+
+  .multi-stream-card .gain-level {
+    grid-template-columns: 1fr auto;
+    gap: 8px 12px;
+    margin-top: 0;
+  }
+
+  .multi-stream-card .level-label {
+    display: none;
+  }
+
+  .compact-stream-title {
+    display: block;
+    min-width: 0;
+    color: var(--text);
+    font-size: 18px;
+    font-weight: 800;
+    line-height: 1.1;
+  }
+
+  .compact-toggle {
+    width: 42px;
+    height: 34px;
+    display: inline-grid;
+    place-items: center;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #202631;
+    cursor: pointer;
+  }
+
+  .compact-toggle::before {
+    content: "";
+    width: 11px;
+    height: 11px;
+    border-right: 2px solid var(--muted);
+    border-bottom: 2px solid var(--muted);
+    transform: translateY(-3px) rotate(45deg);
+    transition: transform 140ms ease;
+  }
+
+  .multi-stream-card.expanded .compact-toggle::before {
+    transform: translateY(3px) rotate(225deg);
+  }
+
+  .multi-stream-card .gain-level-track,
+  .multi-stream-card [data-role="level-db"] {
+    grid-column: 1 / -1;
+  }
+
+  .multi-stream-card .gain-level-track {
+    height: 28px;
+  }
+
+  .multi-stream-card [data-role="level-db"] {
+    justify-self: end;
+    font-size: 13px;
+    font-weight: 700;
   }
 }

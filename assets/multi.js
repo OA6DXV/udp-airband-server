@@ -94,15 +94,17 @@ function renderPlayers() {
         <div class="meter"><span data-i18n="mode">Mode</span><button class="mode-button" data-role="mode" type="button">Uncompressed</button></div>
         <div class="meter"><span data-i18n="audio">Audio</span><button data-role="start" type="button">Start</button></div>
       </section>
-      <label class="level gain-level">
-        <span data-i18n="level">Level</span>
+      <div class="level gain-level">
+        <span class="level-label" data-i18n="level">Level</span>
+        <span class="compact-stream-title" data-role="compact-name"></span>
+        <button class="compact-toggle" data-role="toggle" type="button" aria-expanded="false" aria-label="toggle stream controls"></button>
         <div class="level-track gain-level-track">
           <div class="level-mask" data-role="level-mask"></div>
           <span class="gain-value" data-role="gain-value">100%</span>
           <input data-role="gain" type="range" min="0" max="1.5" step="0.01" value="1" aria-label="gain">
         </div>
         <span data-role="level-db">-\u221e dB</span>
-      </label>
+      </div>
     `;
     container.appendChild(card);
     player.bind(card);
@@ -194,14 +196,23 @@ class MultiStreamPlayer {
   bind(card) {
     this.card = card;
     this.nameEl = card.querySelector('[data-role="name"]');
+    this.compactNameEl = card.querySelector('[data-role="compact-name"]');
     this.lastEl = card.querySelector('[data-role="last"]');
     this.modeButton = card.querySelector('[data-role="mode"]');
     this.startButton = card.querySelector('[data-role="start"]');
+    this.toggleButton = card.querySelector('[data-role="toggle"]');
     this.gainInput = card.querySelector('[data-role="gain"]');
     this.gainValue = card.querySelector('[data-role="gain-value"]');
     this.levelDb = card.querySelector('[data-role="level-db"]');
     this.levelMask = card.querySelector('[data-role="level-mask"]');
     this.nameEl.textContent = this.stream.label;
+    this.compactNameEl.textContent = this.stream.label;
+    this.toggleButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      const expanded = !this.card.classList.contains('expanded');
+      this.card.classList.toggle('expanded', expanded);
+      this.toggleButton.setAttribute('aria-expanded', String(expanded));
+    });
     this.modeButton.addEventListener('click', () => {
       this.mode = this.mode === 'raw' ? 'opus' : 'raw';
       if (this.started && !this.paused) this.startAudio();
