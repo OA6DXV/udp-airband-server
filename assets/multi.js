@@ -39,6 +39,7 @@ let globalPaused = false;
 let statusHovering = false;
 let players = [];
 const autoStartMobile = isMobileDevice();
+let mobileAutostartArmed = false;
 
 languageToggle.addEventListener('click', () => {
   const open = languageMenu.hidden;
@@ -125,6 +126,27 @@ function ensureAudioContext() {
   return audioContext;
 }
 
+function armMobileAutostartGesture() {
+  if (!autoStartMobile || mobileAutostartArmed) return;
+  mobileAutostartArmed = true;
+  const startPending = () => {
+    mobileAutostartArmed = false;
+    removeMobileAutostartListeners(startPending);
+    players
+      .filter((player) => player.autoStartPending)
+      .forEach((player) => player.autoStartIfReady(true));
+  };
+  window.addEventListener('pointerdown', startPending, { capture: true });
+  window.addEventListener('touchend', startPending, { capture: true });
+  window.addEventListener('keydown', startPending, { capture: true });
+}
+
+function removeMobileAutostartListeners(listener) {
+  window.removeEventListener('pointerdown', listener, { capture: true });
+  window.removeEventListener('touchend', listener, { capture: true });
+  window.removeEventListener('keydown', listener, { capture: true });
+}
+
 function updateHeader() {
   activeUsersEl.textContent = String(players.reduce((max, player) => Math.max(max, player.activeListeners || 0), 0));
   const totalBps = players.reduce((total, player) => total + player.bandwidth, 0);
@@ -189,7 +211,7 @@ class MultiStreamPlayer {
     this.muted = false;
     this.paused = false;
     this.configReady = false;
-    this.autoStartAttempted = false;
+    this.autoStartPending = false;
     this.gain = 1;
     this.peak = 0;
     this.bandwidth = 0;
@@ -310,12 +332,19 @@ class MultiStreamPlayer {
     this.updateLabels();
   }
 
-  autoStartIfReady() {
-    if (!autoStartMobile || this.autoStartAttempted || this.started || !this.configReady) return;
-    this.autoStartAttempted = true;
+  autoStartIfReady(fromUserGesture = false) {
+    if (!autoStartMobile || this.started || !this.configReady) return;
+    this.autoStartPending = true;
+    if (!fromUserGesture) {
+      armMobileAutostartGesture();
+      return;
+    }
+    this.autoStartPending = false;
     this.startAudio().catch(() => {
       this.started = false;
+      this.autoStartPending = true;
       this.updateLabels();
+      armMobileAutostartGesture();
     });
   }
 
