@@ -23,13 +23,13 @@ const {
   removeListenerMode,
 } = require('./lib/listeners');
 const { createLogger } = require('./lib/logger');
-const { DEFAULT_STREAMS, loadStreams, renderStreamList, validateStreams } = require('./lib/streams');
+const { DEFAULT_STREAMS, loadStreams, renderMultiStreamPage, renderStreamList, validateStreams } = require('./lib/streams');
 const { acceptWebSocket, sendWsBinary, sendWsJson } = require('./lib/websocket');
 const { createCompressedManager } = require('./lib/compressed');
 
 const MAX_SOCKET_BUFFER_BYTES = 1024 * 1024;
 const MAX_OPUS_STDIN_BUFFER_BYTES = 512 * 1024;
-const SOFTWARE_VERSION = '1.3';
+const SOFTWARE_VERSION = '1.4-preview';
 const COMPRESSED_CODECS = new Set(['adpcm', 'opus', 'aac', 'hls']);
 
 const args = parseArgs(process.argv.slice(2));
@@ -73,6 +73,7 @@ const publicDir = __dirname;
 const indexHtml = fs.readFileSync(path.join(publicDir, 'index.html'));
 const appJs = fs.readFileSync(path.join(publicDir, 'assets', 'app.js'));
 const styleCss = fs.readFileSync(path.join(publicDir, 'assets', 'style.css'));
+const multiJs = fs.readFileSync(path.join(publicDir, 'assets', 'multi.js'));
 const faviconIco = fs.readFileSync(path.join(publicDir, 'assets', 'favicon.ico'));
 const tlsOptions = sslRequested ? loadTlsOptions() : null;
 const tlsEnabled = Boolean(tlsOptions);
@@ -192,6 +193,10 @@ function handleHttpRequest(req, res) {
     sendHtml(res, renderStreamList(streams, { softwareVersion: SOFTWARE_VERSION }));
     return;
   }
+  if (pathname === '/multi') {
+    sendHtml(res, renderMultiStreamPage(streams, { softwareVersion: SOFTWARE_VERSION }));
+    return;
+  }
   if (pathname === '/favicon.ico') {
     sendAsset(res, faviconIco, 'image/x-icon', 'public, max-age=86400');
     return;
@@ -206,6 +211,10 @@ function handleHttpRequest(req, res) {
   }
   if (pathname === '/assets/app.js') {
     sendAsset(res, appJs, 'application/javascript; charset=utf-8');
+    return;
+  }
+  if (pathname === '/assets/multi.js') {
+    sendAsset(res, multiJs, 'application/javascript; charset=utf-8');
     return;
   }
   if (pathname === '/status') {

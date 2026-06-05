@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.4-preview - Unreleased
+
+### Added
+
+- Added the first Multi Stream preview workflow for selecting two or more configured streams from the main page.
+- Added a dedicated `/multi` player page with per-stream cards, shared status controls, total playback bandwidth, users, language selection, and local/UTC time.
+- Added per-stream audio controls for mode selection, start/mute, last heard, and a combined level meter plus gain slider.
+
+### Changed
+
+- Updated the software version to `1.4-preview`.
+- The main page now shows a Multi Stream card only when two or more streams are configured.
+
 ## 1.3 - 2026-06-04
 
 Release focused on documentation, operational readiness, safer public status output, and service-friendly configuration/logging.
