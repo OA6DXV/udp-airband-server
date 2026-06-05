@@ -94,11 +94,13 @@ function renderPlayers() {
         <div class="meter"><span data-i18n="mode">Mode</span><button class="mode-button" data-role="mode" type="button">Uncompressed</button></div>
         <div class="meter"><span data-i18n="audio">Audio</span><button data-role="start" type="button">Start</button></div>
       </section>
-      <div class="level gain-level">
-        <span class="level-label" data-i18n="level">Level</span>
+      <div class="compact-stream-header">
         <button class="compact-stream-heading" data-role="toggle" type="button" aria-expanded="false" aria-label="toggle stream controls">
           <span class="compact-stream-title" data-role="compact-name"></span>
         </button>
+      </div>
+      <div class="level gain-level">
+        <span class="level-label" data-i18n="level">Level</span>
         <div class="level-track gain-level-track">
           <div class="level-mask" data-role="level-mask"></div>
           <span class="gain-value" data-role="gain-value">100%</span>

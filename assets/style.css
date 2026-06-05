@@ -436,6 +436,7 @@ canvas {
   margin-top: 14px;
 }
 
+.compact-stream-header,
 .compact-stream-heading {
   display: none;
 }
@@ -567,11 +568,16 @@ canvas {
     display: none;
   }
 
+  .compact-stream-header {
+    display: block;
+    margin-bottom: 18px;
+  }
+
   .compact-stream-heading {
     display: inline-flex;
     align-items: center;
     justify-content: flex-start;
-    gap: 8px;
+    gap: 9px;
     min-width: 0;
     width: fit-content;
     max-width: 100%;
@@ -586,7 +592,7 @@ canvas {
     display: block;
     min-width: 0;
     color: var(--text);
-    font-size: 30px;
+    font-size: 32px;
     font-weight: 900;
     line-height: 1.1;
   }
@@ -594,8 +600,8 @@ canvas {
   .compact-stream-heading::after {
     flex: 0 0 auto;
     content: "";
-    width: 11px;
-    height: 11px;
+    width: 12px;
+    height: 12px;
     border-right: 3px solid var(--muted);
     border-bottom: 3px solid var(--muted);
     transform: translateY(-4px) rotate(45deg);
