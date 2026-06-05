@@ -546,19 +546,27 @@ canvas {
   }
 
   .multi-stream-card {
+    display: flex;
+    flex-direction: column;
     padding: 12px;
   }
 
   .multi-stream-card .multi-meters {
+    order: 3;
     display: none;
+    margin-top: 12px;
   }
 
   .multi-stream-card.expanded .multi-meters {
     display: grid;
-    margin-bottom: 12px;
+  }
+
+  .multi-stream-card .stream-name-meter {
+    display: none;
   }
 
   .multi-stream-card .gain-level {
+    order: 2;
     grid-template-columns: 1fr;
     gap: 8px 12px;
     margin-top: 0;
@@ -569,8 +577,9 @@ canvas {
   }
 
   .compact-stream-header {
+    order: 1;
     display: block;
-    margin-bottom: 18px;
+    margin-bottom: 16px;
   }
 
   .compact-stream-heading {
@@ -592,24 +601,24 @@ canvas {
     display: block;
     min-width: 0;
     color: var(--text);
-    font-size: 32px;
-    font-weight: 900;
+    font-size: 24px;
+    font-weight: 500;
     line-height: 1.1;
   }
 
   .compact-stream-heading::after {
     flex: 0 0 auto;
     content: "";
-    width: 12px;
-    height: 12px;
-    border-right: 3px solid var(--muted);
-    border-bottom: 3px solid var(--muted);
-    transform: translateY(-4px) rotate(45deg);
+    width: 0.48em;
+    height: 0.48em;
+    border-right: 0.12em solid var(--muted);
+    border-bottom: 0.12em solid var(--muted);
+    transform: translateY(-0.16em) rotate(45deg);
     transition: transform 140ms ease;
   }
 
   .multi-stream-card.expanded .compact-stream-heading::after {
-    transform: translateY(3px) rotate(225deg);
+    transform: translateY(0.12em) rotate(225deg);
   }
 
   .multi-stream-card .gain-level-track,

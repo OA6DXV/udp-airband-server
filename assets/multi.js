@@ -89,7 +89,7 @@ function renderPlayers() {
     card.dataset.stream = player.stream.name;
     card.innerHTML = `
       <section class="meters multi-meters">
-        <div class="meter"><span data-i18n="streamName">Stream</span><strong data-role="name"></strong></div>
+        <div class="meter stream-name-meter"><span data-i18n="streamName">Stream</span><strong data-role="name"></strong></div>
         <div class="meter"><span data-i18n="lastHeard">Last Heard</span><strong data-role="last">never</strong></div>
         <div class="meter"><span data-i18n="mode">Mode</span><button class="mode-button" data-role="mode" type="button">Uncompressed</button></div>
         <div class="meter"><span data-i18n="audio">Audio</span><button data-role="start" type="button">Start</button></div>
