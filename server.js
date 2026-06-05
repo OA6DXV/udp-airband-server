@@ -302,7 +302,12 @@ function attachUpgradeHandler(server) {
     }
 
     socket.on('error', (err) => {
-      logger.warn('client_socket_error', { stream: stream.name, mode: socketType, client: clientId, error: err.message });
+      const fields = { stream: stream.name, mode: socketType, client: clientId, error: err.message };
+      if (isExpectedClientSocketError(err)) {
+        logger.debug('client_socket_closed', fields);
+      } else {
+        logger.warn('client_socket_error', fields);
+      }
       removeWsClient(stream, socket);
     });
     socket.on('close', () => {
@@ -507,6 +512,10 @@ function formatUrl(protocol, host, port) {
 function formatStreamStartupLine(stream) {
   const channelLabel = stream.channels === 1 ? 'mono' : 'stereo';
   return `Stream: ${stream.name} ( ${stream.udpHost}:${stream.udpPort} ) -> /${stream.name} (${stream.label}) ${channelLabel} @ ${stream.sampleRate} Hz`;
+}
+
+function isExpectedClientSocketError(err) {
+  return ['EPIPE', 'ECONNRESET', 'ECONNABORTED', 'ERR_STREAM_DESTROYED'].includes(err && err.code);
 }
 
 function normalizePath(value) {

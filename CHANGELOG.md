@@ -12,6 +12,7 @@
 
 - Updated the software version to `1.4-preview`.
 - The main page now shows a Multi Stream card only when two or more streams are configured.
+- Expected client/proxy socket closes such as `EPIPE` and `ECONNRESET` are now logged as debug-only `client_socket_closed` events instead of production warnings.
 
 ## 1.3 - 2026-06-04
 
