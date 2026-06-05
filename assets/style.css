@@ -573,19 +573,18 @@ canvas {
     display: block;
     min-width: 0;
     color: var(--text);
-    font-size: 18px;
-    font-weight: 800;
+    font-size: 22px;
+    font-weight: 850;
     line-height: 1.1;
   }
 
   .compact-toggle {
-    width: 42px;
-    height: 34px;
+    width: 32px;
+    height: 32px;
     display: inline-grid;
     place-items: center;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: #202631;
+    border: 0;
+    background: transparent;
     cursor: pointer;
   }
 
