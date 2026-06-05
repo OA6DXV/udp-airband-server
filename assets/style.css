@@ -436,8 +436,7 @@ canvas {
   margin-top: 14px;
 }
 
-.compact-stream-heading,
-.compact-toggle {
+.compact-stream-heading {
   display: none;
 }
 
@@ -572,8 +571,15 @@ canvas {
     display: inline-flex;
     align-items: center;
     justify-content: flex-start;
-    gap: 10px;
+    gap: 8px;
     min-width: 0;
+    width: fit-content;
+    max-width: 100%;
+    border: 0;
+    background: transparent;
+    padding: 0;
+    color: var(--text);
+    cursor: pointer;
   }
 
   .compact-stream-title {
@@ -585,27 +591,18 @@ canvas {
     line-height: 1.1;
   }
 
-  .compact-toggle {
-    width: 28px;
-    height: 28px;
-    display: inline-grid;
-    place-items: center;
-    border: 0;
-    background: transparent;
-    cursor: pointer;
-  }
-
-  .compact-toggle::before {
+  .compact-stream-heading::after {
+    flex: 0 0 auto;
     content: "";
-    width: 12px;
-    height: 12px;
+    width: 11px;
+    height: 11px;
     border-right: 3px solid var(--muted);
     border-bottom: 3px solid var(--muted);
-    transform: translateY(-3px) rotate(45deg);
+    transform: translateY(-4px) rotate(45deg);
     transition: transform 140ms ease;
   }
 
-  .multi-stream-card.expanded .compact-toggle::before {
+  .multi-stream-card.expanded .compact-stream-heading::after {
     transform: translateY(3px) rotate(225deg);
   }
 

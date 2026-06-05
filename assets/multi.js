@@ -96,10 +96,9 @@ function renderPlayers() {
       </section>
       <div class="level gain-level">
         <span class="level-label" data-i18n="level">Level</span>
-        <span class="compact-stream-heading">
+        <button class="compact-stream-heading" data-role="toggle" type="button" aria-expanded="false" aria-label="toggle stream controls">
           <span class="compact-stream-title" data-role="compact-name"></span>
-          <button class="compact-toggle" data-role="toggle" type="button" aria-expanded="false" aria-label="toggle stream controls"></button>
-        </span>
+        </button>
         <div class="level-track gain-level-track">
           <div class="level-mask" data-role="level-mask"></div>
           <span class="gain-value" data-role="gain-value">100%</span>
