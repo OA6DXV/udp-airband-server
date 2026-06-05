@@ -11,7 +11,7 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 
 const { normalizeClientId } = require('./lib/clients');
-const { getSetting, loadServerConfig, parseArgs, parseBoolean } = require('./lib/config');
+const { ensureServerConfigDefaults, getSetting, loadServerConfig, parseArgs, parseBoolean } = require('./lib/config');
 const {
   addListenerBytes,
   addListenerMode,
@@ -35,11 +35,20 @@ const COMPRESSED_CODECS = new Set(['adpcm', 'opus', 'aac', 'hls']);
 const args = parseArgs(process.argv.slice(2));
 const serverConfigPath = args.serverConfig || args.serverConf || 'server.conf';
 const serverConfigExists = fs.existsSync(path.resolve(serverConfigPath));
+const serverConfigUpdated = ensureServerConfigDefaults(serverConfigPath, [
+  {
+    name: 'api',
+    comments: ['Public status API. Keep disabled unless you explicitly want /status endpoints.'],
+    keys: [{ key: 'enabled', value: 'false' }],
+  },
+], fs, path);
 const serverConfig = loadServerConfig(serverConfigPath, fs, path);
 const defaultUdpHost = args.udpHost || getSetting(serverConfig, 'udp.host', '0.0.0.0');
 const httpHost = args.httpHost || getSetting(serverConfig, 'web.host', '0.0.0.0');
 const httpPort = Number(args.httpPort || args.http || getSetting(serverConfig, 'web.port', 8585));
 const configPath = args.config || getSetting(serverConfig, 'streams.file', 'streams.json');
+const apiEnabledSetting = args.api ? true : (args.apiEnabled !== undefined ? args.apiEnabled : getSetting(serverConfig, 'api.enabled', false));
+const apiEnabled = parseBoolean(apiEnabledSetting);
 const compressedEnabled = parseBoolean(args.compressedEnabled !== undefined ? args.compressedEnabled : getSetting(serverConfig, 'compressed.enabled', true));
 const compressedCodec = String(args.compressedCodec || args.codec || getSetting(serverConfig, 'compressed.codec', 'adpcm')).trim().toLowerCase();
 const adpcmFrameMs = Number(args.adpcmFrameMs || getSetting(serverConfig, 'compressed.adpcmFrameMs', 40));
@@ -103,6 +112,9 @@ const compressedAvailable = compressedEnabled && compressed.isCodecAvailable(com
 const opusAvailable = compressedEnabled && compressed.ffmpegAvailable;
 if (!serverConfigExists) {
   logger.warn('server_config_missing', { path: serverConfigPath, fallback: 'built-in defaults' });
+}
+if (serverConfigUpdated) {
+  logger.info('server_config_updated', { path: serverConfigPath, added: 'api.enabled=false' });
 }
 
 const streamsConfigExists = fs.existsSync(path.resolve(configPath));
@@ -217,11 +229,23 @@ function handleHttpRequest(req, res) {
     sendAsset(res, multiJs, 'application/javascript; charset=utf-8');
     return;
   }
+  if (pathname === '/ui/status') {
+    sendJsonResponse(res, streams.map(publicStreamStatus));
+    return;
+  }
   if (pathname === '/status') {
+    if (!apiEnabled) {
+      sendNotFound(res);
+      return;
+    }
     sendJsonResponse(res, streams.map(publicStreamStatus));
     return;
   }
   if (pathname.startsWith('/status/')) {
+    if (!apiEnabled) {
+      sendNotFound(res);
+      return;
+    }
     const streamName = pathname.slice('/status/'.length);
     const stream = streamsByName.get(streamName);
     if (!stream) {
@@ -330,6 +354,7 @@ function startWebServers() {
       serverConfigLoaded: serverConfigExists,
       streamsConfig: configPath,
       streamsConfigLoaded: streamsConfigExists,
+      apiEnabled,
       logLevel: logger.level,
     });
   });

@@ -7,6 +7,7 @@
 - Added the first Multi Stream preview workflow for selecting two or more configured streams from the main page.
 - Added a dedicated `/multi` player page with per-stream cards, shared status controls, total playback bandwidth, users, language selection, and local/UTC time.
 - Added per-stream audio controls for mode selection, start/mute, last heard, and a combined level meter plus gain slider.
+- Added `[api] enabled = false` to `server.conf`, automatic config migration for missing default settings, and `-A` to manually enable public `/status` endpoints.
 
 ### Changed
 
@@ -14,6 +15,8 @@
 - The main page now shows a Multi Stream card only when two or more streams are configured.
 - Expected client/proxy socket closes such as `EPIPE` and `ECONNRESET` are now logged as debug-only `client_socket_closed` events instead of production warnings.
 - Multi Stream selection now uses a slower border-only breathing animation on stream cards, and the `/multi` page now embeds stream configuration as valid JSON.
+- Once a stream is selected, the `Start Multi Stream` card turns green and pulses every 3 seconds.
+- Public `/status` endpoints are disabled by default; the web UI now uses an internal status endpoint for its own home-page counters.
 
 ## 1.3 - 2026-06-04
 
