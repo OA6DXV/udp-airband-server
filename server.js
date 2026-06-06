@@ -111,16 +111,6 @@ const compressed = createCompressedManager({
 });
 const compressedAvailable = compressedEnabled && compressed.isCodecAvailable(compressedCodec);
 const opusAvailable = compressedEnabled && compressed.ffmpegAvailable;
-const nativeMultiAac = createNativeMultiAac({
-  aacBitrate,
-  addListenerBytes,
-  addListenerMode,
-  ffmpegPath,
-  logger,
-  removeListenerMode,
-  spawn,
-  streamsByName,
-});
 if (!serverConfigExists) {
   logger.warn('server_config_missing', { path: serverConfigPath, fallback: 'built-in defaults' });
 }
@@ -144,6 +134,16 @@ try {
   fatal(err.message);
 }
 const streamsByName = new Map(streams.map((stream) => [stream.name, stream]));
+const nativeMultiAac = createNativeMultiAac({
+  aacBitrate,
+  addListenerBytes,
+  addListenerMode,
+  ffmpegPath,
+  logger,
+  removeListenerMode,
+  spawn,
+  streamsByName,
+});
 
 const webProtocol = tlsEnabled ? 'https' : 'http';
 const webServer = tlsEnabled
