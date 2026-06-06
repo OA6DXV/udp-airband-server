@@ -180,7 +180,10 @@ async function startNativeMultiAudio() {
   updateMediaSessionMetadata();
   await nativeMultiAudio.play();
   nativeAudioStarted = true;
-  players.forEach((player) => player.started = true);
+  players.forEach((player) => {
+    player.started = true;
+    player.paused = false;
+  });
   players.forEach((player) => player.sendNativeGain());
   updateHeader();
 }
@@ -294,6 +297,8 @@ class MultiStreamPlayer {
     this.lastBandwidthBytes = 0;
     this.lastBandwidthAt = Date.now();
     this.nextPlayTime = 0;
+    this.socketGeneration = 0;
+    this.scheduledSources = new Set();
   }
 
   bind(card) {
@@ -373,6 +378,10 @@ class MultiStreamPlayer {
       } else if (message.type === 'stats') {
         this.activeListeners = message.activeListeners || 0;
         this.bandwidth = message.listenerBitsPerSecond || this.bandwidth || 0;
+        if (globalMode === 'opus') {
+          this.peak = Number(message.levelPeak) || 0;
+          this.lastAudioAt = this.peak > 0 ? Date.now() : 0;
+        }
         this.lastHeardAt = message.lastHeardAt || 0;
         this.lastHeardLabel = message.lastHeardLabel || 'never';
         if (message.hasUdp || this.lastHeardAt) this.confirmed = true;
@@ -413,10 +422,12 @@ class MultiStreamPlayer {
   }
 
   startRaw() {
+    const generation = this.socketGeneration;
     this.currentMode = 'raw';
     this.rawWs = new WebSocket(`${wsProtocol()}://${location.host}/${encodeURIComponent(this.stream.name)}/audio?clientId=${encodeURIComponent(this.clientId)}`);
     this.rawWs.binaryType = 'arraybuffer';
     this.rawWs.addEventListener('message', (event) => {
+      if (generation !== this.socketGeneration) return;
       const samples = new Float32Array(event.data);
       const frames = samples.length / this.config.channels;
       if (!Number.isInteger(frames)) return;
@@ -427,15 +438,17 @@ class MultiStreamPlayer {
       this.schedule(samples, frames);
     });
     this.rawWs.addEventListener('close', () => {
-      if (this.started && !this.paused && this.currentMode === 'raw') setTimeout(() => this.startRaw(), 1000);
+      if (generation === this.socketGeneration && this.started && !this.paused && this.currentMode === 'raw') setTimeout(() => this.startRaw(), 1000);
     });
   }
 
   startAdpcm() {
+    const generation = this.socketGeneration;
     this.currentMode = 'opus';
     this.adpcmWs = new WebSocket(`${wsProtocol()}://${location.host}/${encodeURIComponent(this.stream.name)}/adpcm?clientId=${encodeURIComponent(this.clientId)}`);
     this.adpcmWs.binaryType = 'arraybuffer';
     this.adpcmWs.addEventListener('message', (event) => {
+      if (generation !== this.socketGeneration) return;
       const decoded = decodeAdpcmFrame(event.data);
       if (!decoded) return;
       this.config.sampleRate = decoded.sampleRate;
@@ -447,7 +460,7 @@ class MultiStreamPlayer {
       this.schedule(decoded.samples, decoded.frames);
     });
     this.adpcmWs.addEventListener('close', () => {
-      if (this.started && !this.paused && this.currentMode === 'opus') setTimeout(() => this.startAdpcm(), 1000);
+      if (generation === this.socketGeneration && this.started && !this.paused && this.currentMode === 'opus') setTimeout(() => this.startAdpcm(), 1000);
     });
   }
 
@@ -463,6 +476,8 @@ class MultiStreamPlayer {
     const source = context.createBufferSource();
     source.buffer = buffer;
     source.connect(this.gainNode);
+    this.scheduledSources.add(source);
+    source.addEventListener('ended', () => this.scheduledSources.delete(source));
     source.start(this.nextPlayTime);
     this.nextPlayTime += buffer.duration;
   }
@@ -470,7 +485,10 @@ class MultiStreamPlayer {
   pause() {
     this.paused = true;
     this.stopAudioSockets();
+    this.stopScheduledSources();
     this.bandwidth = 0;
+    this.peak = 0;
+    this.lastAudioAt = 0;
     this.updateLabels();
   }
 
@@ -480,10 +498,23 @@ class MultiStreamPlayer {
   }
 
   stopAudioSockets() {
+    this.socketGeneration += 1;
     if (this.rawWs) this.rawWs.close();
     if (this.adpcmWs) this.adpcmWs.close();
     this.rawWs = null;
     this.adpcmWs = null;
+  }
+
+  stopScheduledSources() {
+    for (const source of this.scheduledSources) {
+      try {
+        source.stop();
+      } catch {
+        // The source may already have ended.
+      }
+    }
+    this.scheduledSources.clear();
+    this.nextPlayTime = 0;
   }
 
   applyGain() {
@@ -498,9 +529,9 @@ class MultiStreamPlayer {
     }
     this.lastBandwidthBytes = this.receivedBytes;
     this.lastBandwidthAt = now;
-    if (!this.lastAudioAt || now - this.lastAudioAt > 350) {
+    if (!this.lastAudioAt || now - this.lastAudioAt > 400) {
       this.peak = 0;
-    } else {
+    } else if (globalMode !== 'opus') {
       this.peak *= 0.985;
     }
     const db = this.peak * this.gain > 0 ? 20 * Math.log10(this.peak * this.gain) : -60;

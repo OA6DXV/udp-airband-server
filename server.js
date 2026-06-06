@@ -179,6 +179,8 @@ function handleUdpMessage(stream, msg) {
   stream.packetCount += 1;
   stream.byteCount += msg.length;
   stream.lastUdpAt = Date.now();
+  stream.levelPeak = Math.max(stream.levelPeak * 0.75, peakOfFloatPcm(msg));
+  stream.levelPeakAt = stream.lastUdpAt;
   nativeMultiAac.pushPcm(stream, msg);
 
   for (const [client, clientId] of stream.rawClients) {
@@ -387,7 +389,7 @@ function startWebServers() {
   if (compressedEnabled && !compressedAvailable) {
     logger.warn('compressed_unavailable', { codec: compressedCodec, ffmpeg: ffmpegPath });
   }
-  setInterval(broadcastStreamStats, 1000);
+  setInterval(broadcastStreamStats, 250);
   if (compressedEnabled) {
     setInterval(() => compressed.writeSilenceKeepalive(streams, opusKeepaliveMs), opusKeepaliveMs);
   }
@@ -469,6 +471,7 @@ function broadcastStreamStats() {
         lastHeardAt: lastHeard.at,
         lastHeardLabel: lastHeard.label,
         secondsSinceLastHeard: lastHeard.secondsSince,
+        levelPeak: now - stream.levelPeakAt > 400 ? 0 : stream.levelPeak,
         hasUdp: stream.packetCount > 0,
         activeListeners: getActiveListeners(stream).length,
         compressedCodec,
@@ -476,6 +479,15 @@ function broadcastStreamStats() {
       });
     }
   }
+}
+
+function peakOfFloatPcm(buffer) {
+  let peak = 0;
+  for (let offset = 0; offset + 4 <= buffer.length; offset += 4) {
+    const value = Math.abs(buffer.readFloatLE(offset));
+    if (Number.isFinite(value) && value > peak) peak = value;
+  }
+  return Math.min(1, peak);
 }
 
 function formatCompressedStatus() {
