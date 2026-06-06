@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.4-preview - Unreleased
+## 1.4-testing - Unreleased
 
 ### Added
 
@@ -8,10 +8,12 @@
 - Added a dedicated `/multi` player page with per-stream cards, shared status controls, total playback bandwidth, users, language selection, and local/UTC time.
 - Added per-stream audio controls for mode selection, start/mute, last heard, and a combined level meter plus gain slider.
 - Added `[api] enabled = false` to `server.conf`, automatic config migration for missing default settings, and `-A` to manually enable public `/status` endpoints.
+- Added an unstable native AAC background-audio path for `/multi` that mixes selected streams server-side and plays them through a real `<audio>` element.
+- Added server-side per-stream gain updates for the native `/multi` AAC mixer as a first step toward independent background-mode volume control.
 
 ### Changed
 
-- Updated the software version to `1.4-preview`.
+- Updated the software version to `1.4-testing`.
 - The main page now shows a Multi Stream card only when two or more streams are configured.
 - Expected client/proxy socket closes such as `EPIPE` and `ECONNRESET` are now logged as debug-only `client_socket_closed` events instead of production warnings.
 - Multi Stream selection now uses a slower border-only breathing animation on stream cards, and the `/multi` page now embeds stream configuration as valid JSON.
@@ -19,7 +21,8 @@
 - Public `/status` endpoints are disabled by default, and the home page no longer polls status over HTTP.
 - Multi Stream now counts the same browser session as one user across selected streams, shows dB on the level meter, and only reveals the gain percentage while hovering or interacting with the slider.
 - Pressing `Select streams` again exits Multi Stream selection when no streams have been selected.
-- Multi Stream cards now use a compact mobile portrait layout by default, with a chevron control to expand each stream into the full control view.
+- Multi Stream cards now use a compact mobile portrait layout and show stream name plus last heard in one line.
+- Multi Stream now exposes global Uncompressed/Compressed mode buttons above the stream list.
 
 ## 1.3 - 2026-06-04
 

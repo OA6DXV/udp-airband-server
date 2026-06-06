@@ -26,10 +26,11 @@ const { createLogger } = require('./lib/logger');
 const { DEFAULT_STREAMS, loadStreams, renderMultiStreamPage, renderStreamList, validateStreams } = require('./lib/streams');
 const { acceptWebSocket, sendWsBinary, sendWsJson } = require('./lib/websocket');
 const { createCompressedManager } = require('./lib/compressed');
+const { createNativeMultiAac } = require('./lib/native-multi-aac');
 
 const MAX_SOCKET_BUFFER_BYTES = 1024 * 1024;
 const MAX_OPUS_STDIN_BUFFER_BYTES = 512 * 1024;
-const SOFTWARE_VERSION = '1.4-preview';
+const SOFTWARE_VERSION = '1.4-testing';
 const COMPRESSED_CODECS = new Set(['adpcm', 'opus', 'aac', 'hls']);
 
 const args = parseArgs(process.argv.slice(2));
@@ -110,6 +111,16 @@ const compressed = createCompressedManager({
 });
 const compressedAvailable = compressedEnabled && compressed.isCodecAvailable(compressedCodec);
 const opusAvailable = compressedEnabled && compressed.ffmpegAvailable;
+const nativeMultiAac = createNativeMultiAac({
+  aacBitrate,
+  addListenerBytes,
+  addListenerMode,
+  ffmpegPath,
+  logger,
+  removeListenerMode,
+  spawn,
+  streamsByName,
+});
 if (!serverConfigExists) {
   logger.warn('server_config_missing', { path: serverConfigPath, fallback: 'built-in defaults' });
 }
@@ -168,6 +179,7 @@ function handleUdpMessage(stream, msg) {
   stream.packetCount += 1;
   stream.byteCount += msg.length;
   stream.lastUdpAt = Date.now();
+  nativeMultiAac.pushPcm(stream, msg);
 
   for (const [client, clientId] of stream.rawClients) {
     if (client.destroyed || client.writableLength > MAX_SOCKET_BUFFER_BYTES) {
@@ -207,6 +219,21 @@ function handleHttpRequest(req, res) {
   }
   if (pathname === '/multi') {
     sendHtml(res, renderMultiStreamPage(streams, { softwareVersion: SOFTWARE_VERSION }));
+    return;
+  }
+  if (pathname === '/multi/native.aac') {
+    if (!compressed.ffmpegAvailable) {
+      res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('Native AAC unavailable: ffmpeg not found\n');
+      return;
+    }
+    nativeMultiAac.serve(requestUrl, res, (value) => normalizeClientId(value, crypto));
+    return;
+  }
+  if (pathname === '/multi/native-gain') {
+    const clientId = normalizeClientId(requestUrl.searchParams.get('clientId'), crypto);
+    const ok = nativeMultiAac.setGain(clientId, requestUrl.searchParams.get('stream'), requestUrl.searchParams.get('gain'));
+    sendJsonResponse(res, { ok });
     return;
   }
   if (pathname === '/favicon.ico') {

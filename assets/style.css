@@ -418,6 +418,29 @@ canvas {
   gap: 16px;
 }
 
+.multi-mode-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.multi-mode-button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 12px 14px;
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.multi-mode-button.active {
+  border-color: var(--wave);
+  background: var(--wave);
+  color: #160500;
+}
+
 .multi-stream-card {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -436,8 +459,7 @@ canvas {
   margin-top: 14px;
 }
 
-.compact-stream-header,
-.compact-stream-heading {
+.compact-stream-header {
   display: none;
 }
 
@@ -644,21 +666,6 @@ canvas {
     margin-bottom: 16px;
   }
 
-  .compact-stream-heading {
-    display: inline-flex;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 9px;
-    min-width: 0;
-    width: fit-content;
-    max-width: 100%;
-    border: 0;
-    background: transparent;
-    padding: 0;
-    color: var(--muted);
-    cursor: pointer;
-  }
-
   .compact-stream-title {
     display: block;
     min-width: 0;
@@ -666,21 +673,6 @@ canvas {
     font-size: 17px;
     font-weight: 400;
     line-height: 1.1;
-  }
-
-  .compact-stream-heading::after {
-    flex: 0 0 auto;
-    content: "";
-    width: 0.58em;
-    height: 0.58em;
-    border-right: 0.12em solid var(--muted);
-    border-bottom: 0.12em solid var(--muted);
-    transform: translateY(-0.18em) rotate(45deg);
-    transition: transform 140ms ease;
-  }
-
-  .multi-stream-card.expanded .compact-stream-heading::after {
-    transform: translateY(0.12em) rotate(225deg);
   }
 
   .multi-stream-card .gain-level-track,
