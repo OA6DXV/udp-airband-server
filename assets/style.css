@@ -468,6 +468,64 @@ canvas {
   opacity: 1;
 }
 
+.multi-start-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgb(17 19 24 / 78%);
+  backdrop-filter: blur(3px);
+}
+
+.multi-start-overlay[hidden] {
+  display: none;
+}
+
+.multi-start-button {
+  width: auto;
+  min-width: 0;
+  display: inline-grid;
+  place-items: center;
+  gap: 18px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 0;
+  font-size: 32px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.multi-start-icon {
+  width: 132px;
+  height: 132px;
+  display: grid;
+  place-items: center;
+  border: 8px solid rgb(238 242 246 / 92%);
+  border-radius: 50%;
+}
+
+.multi-start-icon::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 30px solid transparent;
+  border-bottom: 30px solid transparent;
+  border-left: 48px solid rgb(238 242 246 / 94%);
+  transform: translateX(5px);
+}
+
+.multi-start-button:hover .multi-start-icon,
+.multi-start-button:focus-visible .multi-start-icon {
+  border-color: var(--accent);
+}
+
+.multi-start-button:hover .multi-start-icon::before,
+.multi-start-button:focus-visible .multi-start-icon::before {
+  border-left-color: var(--accent);
+}
+
 .gain-level input[type="range"] {
   position: absolute;
   inset: -11px 5px auto;
@@ -537,6 +595,10 @@ canvas {
   button,
   .status {
     width: 100%;
+  }
+
+  .multi-start-button {
+    width: auto;
   }
 }
 

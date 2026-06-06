@@ -16,6 +16,8 @@ const languageToggle = document.getElementById('languageToggle');
 const languageCode = document.getElementById('languageCode');
 const languageMenu = document.getElementById('languageMenu');
 const languageOptions = Array.from(document.querySelectorAll('.language-option'));
+const multiStartOverlay = document.getElementById('multiStartOverlay');
+const multiStartButton = document.getElementById('multiStartButton');
 
 const translations = {
   en: {
@@ -38,8 +40,7 @@ let audioContext;
 let globalPaused = false;
 let statusHovering = false;
 let players = [];
-const autoStartMobile = isMobileDevice();
-let mobileAutostartArmed = false;
+let multiPlaybackRequested = false;
 
 languageToggle.addEventListener('click', () => {
   const open = languageMenu.hidden;
@@ -82,6 +83,12 @@ statusEl.addEventListener('mouseleave', () => {
   statusHovering = false;
   updateHeader();
 });
+
+if (multiStartButton) {
+  multiStartButton.addEventListener('click', () => {
+    startMultiPlayback();
+  });
+}
 
 function renderPlayers() {
   container.textContent = '';
@@ -126,29 +133,18 @@ function ensureAudioContext() {
   return audioContext;
 }
 
-function armMobileAutostartGesture() {
-  if (!autoStartMobile || mobileAutostartArmed) return;
-  mobileAutostartArmed = true;
-  const startPending = () => {
-    mobileAutostartArmed = false;
-    removeMobileAutostartListeners(startPending);
-    players
-      .filter((player) => player.autoStartPending)
-      .forEach((player) => player.autoStartIfReady(true));
-  };
-  window.addEventListener('click', startPending, { capture: true });
-  window.addEventListener('touchend', startPending, { capture: true });
-  window.addEventListener('keydown', startPending, { capture: true });
-}
-
-function removeMobileAutostartListeners(listener) {
-  window.removeEventListener('click', listener, { capture: true });
-  window.removeEventListener('touchend', listener, { capture: true });
-  window.removeEventListener('keydown', listener, { capture: true });
-}
-
-function hasActiveUserGesture() {
-  return !navigator.userActivation || navigator.userActivation.isActive;
+async function startMultiPlayback() {
+  try {
+    const context = ensureAudioContext();
+    if (context.state !== 'running') await context.resume();
+    if (context.state !== 'running') throw new Error('AudioContext is not running');
+    multiPlaybackRequested = true;
+    if (multiStartOverlay) multiStartOverlay.hidden = true;
+    await Promise.all(players.map((player) => player.startIfReady()));
+  } catch {
+    multiPlaybackRequested = false;
+    if (multiStartOverlay) multiStartOverlay.hidden = false;
+  }
 }
 
 function updateHeader() {
@@ -215,7 +211,6 @@ class MultiStreamPlayer {
     this.muted = false;
     this.paused = false;
     this.configReady = false;
-    this.autoStartPending = false;
     this.gain = 1;
     this.peak = 0;
     this.bandwidth = 0;
@@ -304,7 +299,7 @@ class MultiStreamPlayer {
       if (message.type === 'config') {
         this.config = { ...this.config, ...message };
         this.configReady = true;
-        this.autoStartIfReady();
+        this.startIfReady();
       } else if (message.type === 'stats') {
         this.activeListeners = message.activeListeners || 0;
         this.lastHeardAt = message.lastHeardAt || 0;
@@ -318,7 +313,7 @@ class MultiStreamPlayer {
 
   async startAudio() {
     const context = ensureAudioContext();
-    await context.resume();
+    if (context.state !== 'running') await context.resume();
     if (!this.gainNode) {
       this.gainNode = context.createGain();
       this.gainNode.connect(context.destination);
@@ -336,20 +331,14 @@ class MultiStreamPlayer {
     this.updateLabels();
   }
 
-  autoStartIfReady(fromUserGesture = false) {
-    if (!autoStartMobile || this.started || !this.configReady) return;
-    this.autoStartPending = true;
-    if (!fromUserGesture || !hasActiveUserGesture()) {
-      armMobileAutostartGesture();
-      return;
-    }
-    this.autoStartPending = false;
-    this.startAudio().catch(() => {
+  async startIfReady() {
+    if (!multiPlaybackRequested || this.started || !this.configReady) return;
+    try {
+      await this.startAudio();
+    } catch {
       this.started = false;
-      this.autoStartPending = true;
       this.updateLabels();
-      armMobileAutostartGesture();
-    });
+    }
   }
 
   startRaw() {
