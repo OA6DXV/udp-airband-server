@@ -308,10 +308,11 @@ function attachUpgradeHandler(server) {
 
     const clientId = normalizeClientId(requestUrl.searchParams.get('clientId'), crypto);
     if (socketType === 'control') {
+      const monitorOnly = requestUrl.searchParams.get('monitor') === '1';
       stream.controlClients.set(socket, clientId);
-      addListenerMode(stream, clientId, 'control');
+      if (!monitorOnly) addListenerMode(stream, clientId, 'control');
       sendWsJson(socket, streamConfig(stream));
-      logger.info('client_connected', { stream: stream.name, mode: 'control', client: clientId, remote: socket.remoteAddress });
+      logger.info('client_connected', { stream: stream.name, mode: monitorOnly ? 'control-monitor' : 'control', client: clientId, remote: socket.remoteAddress });
     } else if (socketType === 'adpcm' || socketType === 'opus' || socketType === 'aac') {
       compressed.serveWebSocket(stream, clientId, socket, socketType);
       logger.info('client_connected', { stream: stream.name, mode: socketType, client: clientId, remote: socket.remoteAddress });

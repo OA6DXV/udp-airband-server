@@ -213,6 +213,7 @@ class MultiStreamPlayer {
     this.configReady = false;
     this.gain = 1;
     this.peak = 0;
+    this.lastAudioAt = 0;
     this.bandwidth = 0;
     this.receivedBytes = 0;
     this.lastBandwidthBytes = 0;
@@ -351,6 +352,7 @@ class MultiStreamPlayer {
       if (!Number.isInteger(frames)) return;
       this.receivedBytes += event.data.byteLength || 0;
       this.confirmed = true;
+      this.lastAudioAt = Date.now();
       this.peak = Math.max(this.peak * 0.92, peakOf(samples));
       this.schedule(samples, frames);
     });
@@ -370,6 +372,7 @@ class MultiStreamPlayer {
       this.config.channels = decoded.channels;
       this.receivedBytes += event.data.byteLength || 0;
       this.confirmed = true;
+      this.lastAudioAt = Date.now();
       this.peak = Math.max(this.peak * 0.92, peakOf(decoded.samples));
       this.schedule(decoded.samples, decoded.frames);
     });
@@ -423,7 +426,11 @@ class MultiStreamPlayer {
     this.bandwidth = this.paused ? 0 : Math.max(0, (this.receivedBytes - this.lastBandwidthBytes) * 8 / elapsed);
     this.lastBandwidthBytes = this.receivedBytes;
     this.lastBandwidthAt = now;
-    this.peak *= 0.985;
+    if (!this.lastAudioAt || now - this.lastAudioAt > 350) {
+      this.peak = 0;
+    } else {
+      this.peak *= 0.985;
+    }
     const db = this.peak * this.gain > 0 ? 20 * Math.log10(this.peak * this.gain) : -60;
     const percent = (Math.max(-60, Math.min(0, db)) + 60) / 60 * 100;
     this.levelMask.style.width = `${100 - percent}%`;
