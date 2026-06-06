@@ -156,7 +156,7 @@ async function startMultiPlayback() {
 
 async function startSelectedGlobalMode() {
   if (globalMode === 'opus') {
-    players.forEach((player) => player.stopAudioSockets());
+    players.forEach((player) => player.stopRealtimeAudio());
     await startNativeMultiAudio();
     return;
   }
@@ -484,11 +484,7 @@ class MultiStreamPlayer {
 
   pause() {
     this.paused = true;
-    this.stopAudioSockets();
-    this.stopScheduledSources();
-    this.bandwidth = 0;
-    this.peak = 0;
-    this.lastAudioAt = 0;
+    this.stopRealtimeAudio();
     this.updateLabels();
   }
 
@@ -503,6 +499,14 @@ class MultiStreamPlayer {
     if (this.adpcmWs) this.adpcmWs.close();
     this.rawWs = null;
     this.adpcmWs = null;
+  }
+
+  stopRealtimeAudio() {
+    this.stopAudioSockets();
+    this.stopScheduledSources();
+    this.bandwidth = 0;
+    this.peak = 0;
+    this.lastAudioAt = 0;
   }
 
   stopScheduledSources() {
