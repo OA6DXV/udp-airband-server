@@ -78,6 +78,9 @@ let opusAnalyserBuffer;
 let opusWs;
 let suppressOpusReconnect = false;
 let compatibleAudio;
+let compatibleSourceNode;
+let compatibleAnalyser;
+let compatibleAnalyserBuffer;
 let opusMediaSource;
 let opusSourceBuffer;
 let opusObjectUrl;
@@ -228,8 +231,8 @@ function applyOutputGain() {
   if (gainNode) gainNode.gain.value = muted ? 0 : gain;
   if (opusAudio) opusAudio.muted = muted && !opusSourceNode;
   if (compatibleAudio) {
-    compatibleAudio.muted = muted;
-    compatibleAudio.volume = clamp(gain, 0, 1);
+    compatibleAudio.muted = muted && !compatibleSourceNode;
+    compatibleAudio.volume = compatibleSourceNode ? 1 : clamp(gain, 0, 1);
   }
 }
 
@@ -509,6 +512,7 @@ function startCompatible() {
   stopRaw();
   stopOpus();
   ensureCompatibleAudio();
+  setupCompatibleAudioGraph();
   compatibleAudio.src = `/multi/native.aac?streams=${encodeURIComponent(streamName)}&clientId=${encodeURIComponent(clientId)}&t=${Date.now()}`;
   compatibleAudio.load();
   compatibleAudio.play().catch(() => setStatus('', 'compatibleUnavailable'));
@@ -532,6 +536,8 @@ function stopCompatible() {
   compatibleAudio.pause();
   compatibleAudio.removeAttribute('src');
   compatibleAudio.load();
+  latestWave = new Float32Array(0);
+  lastPeak = 0;
 }
 
 function updateMediaSessionMetadata() {
@@ -541,6 +547,17 @@ function updateMediaSessionMetadata() {
     artist: titleLink.textContent || streamName,
     album: 'UDP Airband Server',
   });
+}
+
+function setupCompatibleAudioGraph() {
+  if (!audioContext || !gainNode || !compatibleAudio || compatibleSourceNode) return;
+  compatibleSourceNode = audioContext.createMediaElementSource(compatibleAudio);
+  compatibleAnalyser = audioContext.createAnalyser();
+  compatibleAnalyser.fftSize = 1024;
+  compatibleAnalyserBuffer = new Float32Array(compatibleAnalyser.fftSize);
+  compatibleSourceNode.connect(compatibleAnalyser);
+  compatibleAnalyser.connect(gainNode);
+  applyOutputGain();
 }
 
 function ensureOpusAudio() {
@@ -802,6 +819,10 @@ function draw() {
     opusAnalyser.getFloatTimeDomainData(opusAnalyserBuffer);
     latestWave = opusAnalyserBuffer;
     lastPeak = Math.max(lastPeak * 0.92, peakOf(opusAnalyserBuffer));
+  } else if (currentMode === 'compatible' && compatibleAnalyser && compatibleAnalyserBuffer) {
+    compatibleAnalyser.getFloatTimeDomainData(compatibleAnalyserBuffer);
+    latestWave = compatibleAnalyserBuffer;
+    lastPeak = Math.max(lastPeak * 0.92, peakOf(compatibleAnalyserBuffer));
   } else if ((currentMode === 'raw' || activeCompressedKind === 'adpcm') && lastAudioAt && Date.now() - lastAudioAt > 350) {
     latestWave = new Float32Array(0);
     lastPeak = 0;
@@ -819,7 +840,7 @@ function drawBarWaveform() {
   const centerY = canvas.height / 2;
   const barStride = waveformBarWidth + waveformBarGap;
   const barCount = Math.max(1, Math.floor((canvas.width + waveformBarGap) / barStride));
-  const channels = currentMode === 'opus' && activeCompressedKind === 'media' ? 1 : config.channels;
+  const channels = (currentMode === 'opus' && activeCompressedKind === 'media') || currentMode === 'compatible' ? 1 : config.channels;
   const frames = channels ? Math.floor(latestWave.length / channels) : 0;
   const totalWidth = barCount * waveformBarWidth + (barCount - 1) * waveformBarGap;
   let x = Math.max(0, (canvas.width - totalWidth) / 2);
@@ -987,7 +1008,7 @@ function selectMode(mode) {
   if (!['raw', 'opus', 'compatible'].includes(mode) || !getAvailableModes().includes(mode)) return;
   closeModeMenu();
   if (mode === preferredMode && (!audioStarted || currentMode === mode)) return;
-  if (mode === 'compatible' || preferredMode === 'compatible') {
+  if (mode === 'compatible' || (preferredMode === 'compatible' && isMobileDevice())) {
     showModeNotice(mode);
     return;
   }
