@@ -522,46 +522,43 @@ canvas {
 
 .multi-start-button {
   width: auto;
-  min-width: 0;
-  display: inline-grid;
-  place-items: center;
-  gap: 18px;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  padding: 0;
-  font-size: 32px;
+  min-width: 150px;
+  border: 1px solid rgb(92 199 134 / 55%);
+  background: var(--accent);
+  color: #06100b;
+  padding: 13px 22px;
+  border-radius: 8px;
+  font-size: 16px;
   font-weight: 700;
   cursor: pointer;
 }
 
-.multi-start-icon {
-  width: 132px;
-  height: 132px;
+.multi-start-button:hover,
+.multi-start-button:focus-visible {
+  background: #69d88d;
+}
+
+.multi-mode-notice {
+  width: min(420px, calc(100vw - 40px));
   display: grid;
-  place-items: center;
-  border: 8px solid rgb(238 242 246 / 92%);
-  border-radius: 50%;
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgb(23 29 38 / 96%);
+  box-shadow: 0 24px 70px rgb(0 0 0 / 38%);
 }
 
-.multi-start-icon::before {
-  content: "";
-  width: 0;
-  height: 0;
-  border-top: 30px solid transparent;
-  border-bottom: 30px solid transparent;
-  border-left: 48px solid rgb(238 242 246 / 94%);
-  transform: translateX(5px);
+.multi-mode-notice h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 24px;
 }
 
-.multi-start-button:hover .multi-start-icon,
-.multi-start-button:focus-visible .multi-start-icon {
-  border-color: var(--accent);
-}
-
-.multi-start-button:hover .multi-start-icon::before,
-.multi-start-button:focus-visible .multi-start-icon::before {
-  border-left-color: var(--accent);
+.multi-mode-notice p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
 }
 
 .gain-level input[type="range"] {

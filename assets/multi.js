@@ -18,6 +18,8 @@ const languageMenu = document.getElementById('languageMenu');
 const languageOptions = Array.from(document.querySelectorAll('.language-option'));
 const multiStartOverlay = document.getElementById('multiStartOverlay');
 const multiStartButton = document.getElementById('multiStartButton');
+const multiNoticeTitle = document.getElementById('multiNoticeTitle');
+const multiNoticeBody = document.getElementById('multiNoticeBody');
 const nativeMultiAudio = document.getElementById('nativeMultiAudio');
 const modeButtons = Array.from(document.querySelectorAll('.multi-mode-button'));
 
@@ -27,12 +29,22 @@ const translations = {
     connected: 'Connected', idle: 'Push to Reconnect', stopStream: 'Stop stream', lastHeard: 'Last Heard',
     mode: 'Mode', audio: 'Audio', startAudio: 'Start', mute: 'Mute', unmute: 'Unmute', compressed: 'Compressed',
     uncompressed: 'Uncompressed', streamName: 'Stream', level: 'Level', never: 'never', now: 'Now',
+    realTimeMode: 'RealTime Mode', compatibleMode: 'Compatible Mode', accept: 'Accept',
+    realTimeNoticeTitle: 'RealTime Mode',
+    realTimeNoticeBody: 'This mode uses realtime per-stream audio with the lowest latency. It cannot keep playing in the background, so keep this page open and the device active.',
+    compatibleNoticeTitle: 'Compatible Mode',
+    compatibleNoticeBody: 'This mode uses one mixed AAC stream. It can keep playing with the phone locked or in the background, but delay is variable and usually around 5 seconds.',
   },
   es: {
     users: 'Usuarios', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP',
     connected: 'Conectado', idle: 'Presiona para reconectar', stopStream: 'Detener stream', lastHeard: 'Ultima transmision',
     mode: 'Modo', audio: 'Audio', startAudio: 'Iniciar', mute: 'Silenciar', unmute: 'Activar', compressed: 'Comprimido',
     uncompressed: 'Sin comprimir', streamName: 'Stream', level: 'Nivel', never: 'nunca', now: 'Ahora',
+    realTimeMode: 'Modo RealTime', compatibleMode: 'Modo Compatible', accept: 'Aceptar',
+    realTimeNoticeTitle: 'Modo RealTime',
+    realTimeNoticeBody: 'Este modo usa audio por stream en tiempo real con la menor latencia. No puede seguir sonando en segundo plano, asi que manten esta pagina abierta y el dispositivo activo.',
+    compatibleNoticeTitle: 'Modo Compatible',
+    compatibleNoticeBody: 'Este modo usa un stream AAC mezclado. Puede seguir sonando con el telefono bloqueado o en segundo plano, pero el delay es variable y suele rondar los 5 segundos.',
   },
 };
 
@@ -46,8 +58,10 @@ let multiPlaybackRequested = false;
 let globalMode = isMobileDevice() ? 'opus' : 'raw';
 let nativeAudioStarted = false;
 let nativeStopExpected = false;
+let nativePreloadActive = false;
 let nativeReconnectTimer = null;
 let nativeReconnectInFlight = false;
+let pendingNoticeMode = globalMode;
 
 languageToggle.addEventListener('click', () => {
   const open = languageMenu.hidden;
@@ -101,7 +115,7 @@ if (multiStartButton) {
 
 modeButtons.forEach((button) => {
   button.addEventListener('click', () => {
-    setGlobalMode(button.dataset.mode);
+    showModeNotice(button.dataset.mode);
   });
 });
 
@@ -188,6 +202,7 @@ function ensureAudioContext() {
 async function startMultiPlayback() {
   try {
     multiPlaybackRequested = true;
+    if (pendingNoticeMode) setGlobalMode(pendingNoticeMode, { deferStart: true });
     if (multiStartOverlay) multiStartOverlay.hidden = true;
     await startSelectedGlobalMode();
   } catch {
@@ -211,16 +226,12 @@ async function startSelectedGlobalMode() {
 
 async function startNativeMultiAudio() {
   if (!nativeMultiAudio) throw new Error('native audio element missing');
-  const clientId = getClientId();
-  const query = new URLSearchParams({
-    streams: streams.map((stream) => stream.name).join(','),
-    clientId,
-    t: String(Date.now()),
-  });
   nativeStopExpected = true;
-  nativeMultiAudio.preload = 'auto';
-  nativeMultiAudio.src = `/multi/native.aac?${query.toString()}`;
-  nativeMultiAudio.load();
+  if (!nativePreloadActive || !nativeMultiAudio.getAttribute('src')) {
+    nativeMultiAudio.preload = 'auto';
+    nativeMultiAudio.src = buildNativeMultiAudioUrl();
+    nativeMultiAudio.load();
+  }
   updateMediaSessionMetadata();
   try {
     await nativeMultiAudio.play();
@@ -230,6 +241,7 @@ async function startNativeMultiAudio() {
   }
   nativeAudioStarted = true;
   nativeStopExpected = false;
+  nativePreloadActive = false;
   players.forEach((player) => {
     player.started = true;
     player.paused = false;
@@ -237,6 +249,26 @@ async function startNativeMultiAudio() {
   });
   players.forEach((player) => player.sendNativeGain());
   updateHeader();
+}
+
+function preloadNativeMultiAudio() {
+  if (!nativeMultiAudio || multiPlaybackRequested || nativePreloadActive) return;
+  nativeStopExpected = true;
+  nativeMultiAudio.preload = 'auto';
+  nativeMultiAudio.src = buildNativeMultiAudioUrl();
+  nativeMultiAudio.load();
+  updateMediaSessionMetadata();
+  nativePreloadActive = true;
+  nativeStopExpected = false;
+}
+
+function buildNativeMultiAudioUrl() {
+  const query = new URLSearchParams({
+    streams: streams.map((stream) => stream.name).join(','),
+    clientId: getClientId(),
+    t: String(Date.now()),
+  });
+  return `/multi/native.aac?${query.toString()}`;
 }
 
 function updateMediaSessionMetadata() {
@@ -256,22 +288,42 @@ function stopNativeMultiAudio() {
   nativeMultiAudio.removeAttribute('src');
   nativeMultiAudio.load();
   nativeAudioStarted = false;
+  nativePreloadActive = false;
   players.forEach((player) => player.resetNativeLevelSync());
 }
 
-function setGlobalMode(mode) {
-  if (!['raw', 'opus'].includes(mode) || globalMode === mode) return;
+function setGlobalMode(mode, options = {}) {
+  if (!['raw', 'opus'].includes(mode)) return;
+  const changed = globalMode !== mode;
   globalMode = mode;
   players.forEach((player) => {
-    player.mode = mode;
-    player.started = false;
+    if (changed) player.started = false;
     player.resetNativeLevelSync();
     player.updateLabels();
   });
   updateModeControls();
-  if (multiPlaybackRequested) {
+  if (changed && multiPlaybackRequested && !options.deferStart) {
     startSelectedGlobalMode().catch(() => {});
   }
+}
+
+function showModeNotice(mode) {
+  if (!['raw', 'opus'].includes(mode)) return;
+  pendingNoticeMode = mode;
+  setGlobalMode(mode, { deferStart: true });
+  if (multiNoticeTitle) multiNoticeTitle.textContent = t(mode === 'opus' ? 'compatibleNoticeTitle' : 'realTimeNoticeTitle');
+  if (multiNoticeBody) multiNoticeBody.textContent = t(mode === 'opus' ? 'compatibleNoticeBody' : 'realTimeNoticeBody');
+  if (multiStartButton) multiStartButton.textContent = t('accept');
+  if (multiStartOverlay) multiStartOverlay.hidden = false;
+  if (mode === 'opus') preloadNativeMultiAudio();
+  else stopNativeMultiAudio();
+}
+
+function updateModeNotice() {
+  if (!pendingNoticeMode) return;
+  if (multiNoticeTitle) multiNoticeTitle.textContent = t(pendingNoticeMode === 'opus' ? 'compatibleNoticeTitle' : 'realTimeNoticeTitle');
+  if (multiNoticeBody) multiNoticeBody.textContent = t(pendingNoticeMode === 'opus' ? 'compatibleNoticeBody' : 'realTimeNoticeBody');
+  if (multiStartButton) multiStartButton.textContent = t('accept');
 }
 
 function shouldRecoverNativeAudio() {
@@ -318,6 +370,7 @@ async function recoverNativeAudio() {
 
 function updateModeControls() {
   modeButtons.forEach((button) => {
+    button.textContent = t(button.dataset.mode === 'opus' ? 'compatibleMode' : 'realTimeMode');
     button.classList.toggle('active', button.dataset.mode === globalMode);
   });
 }
@@ -367,6 +420,8 @@ function applyLanguage() {
   });
   languageOptions.forEach((option) => option.classList.toggle('active', option.dataset.lang === language));
   players.forEach((player) => player.updateLabels());
+  updateModeControls();
+  updateModeNotice();
   updateHeader();
 }
 
@@ -375,7 +430,7 @@ class MultiStreamPlayer {
     this.stream = stream;
     this.config = { ...stream, compressedCodec: 'adpcm', compressedAvailable: false };
     this.clientId = getClientId(stream.name);
-    this.mode = globalMode;
+    this.mode = 'raw';
     this.currentMode = '';
     this.controlOpen = false;
     this.confirmed = false;
@@ -657,7 +712,7 @@ class MultiStreamPlayer {
   updateLabels() {
     this.lastEl.textContent = localizeLastHeard(this.lastHeardLabel);
     this.updateCompactLabel();
-    this.modeButton.textContent = globalMode === 'opus' ? t('compressed') : t('uncompressed');
+    this.modeButton.textContent = this.mode === 'opus' ? t('compressed') : t('uncompressed');
     this.startButton.textContent = this.started ? (this.muted ? t('unmute') : t('mute')) : t('startAudio');
     this.updateCardModeState();
   }
@@ -788,6 +843,7 @@ function init() {
   connectPlayers();
   updateHeader();
   updateClocks();
+  showModeNotice(globalMode);
   setInterval(updateClocks, 1000);
   setInterval(updateMeters, 250);
 }
