@@ -9,6 +9,8 @@ const browserBandwidthEl = document.getElementById('browserBandwidth');
 const lastHeardEl = document.getElementById('lastHeard');
 const activeUsersEl = document.getElementById('activeUsers');
 const modeButton = document.getElementById('mode');
+const modeMenu = document.getElementById('modeMenu');
+const modeOptions = Array.from(document.querySelectorAll('[data-mode-option]'));
 const titleLink = document.getElementById('title');
 const levelMaskEl = document.getElementById('levelMask');
 const levelValueEl = document.getElementById('levelValue');
@@ -141,6 +143,9 @@ document.addEventListener('click', (event) => {
     languageMenu.hidden = true;
     languageToggle.setAttribute('aria-expanded', 'false');
   }
+  if (modeMenu && !modeMenu.hidden && !event.target.closest('.mode-meter')) {
+    closeModeMenu();
+  }
 });
 
 gainInput.addEventListener('input', () => {
@@ -150,15 +155,16 @@ gainInput.addEventListener('input', () => {
 });
 
 modeButton.addEventListener('click', () => {
-  const nextMode = getNextAvailableMode(preferredMode);
-  if (nextMode === preferredMode) return;
-  if (nextMode === 'compatible' || preferredMode === 'compatible') {
-    showModeNotice(nextMode);
-    return;
-  }
-  preferredMode = nextMode;
-  if (audioStarted) startSelectedMode();
-  updateModeButton();
+  if (!modeMenu) return;
+  const open = modeMenu.hidden;
+  modeMenu.hidden = !open;
+  modeButton.setAttribute('aria-expanded', String(open));
+});
+
+modeOptions.forEach((option) => {
+  option.addEventListener('click', () => {
+    selectMode(option.dataset.modeOption);
+  });
 });
 
 if (modeNoticeAccept) {
@@ -650,6 +656,7 @@ function updateModeButton() {
   modeButton.textContent = modeLabel(visibleMode);
   modeButton.disabled = getAvailableModes().length <= 1;
   modeButton.title = getAvailableModes().length > 1 ? t('switchMode') : t('modeUnavailable');
+  updateModeMenu();
 }
 
 function scheduleAudio(samples, frames) {
@@ -970,16 +977,40 @@ function getAvailableModes() {
   return modes;
 }
 
-function getNextAvailableMode(mode) {
-  const modes = getAvailableModes();
-  const index = modes.indexOf(mode);
-  return modes[(index + 1) % modes.length] || 'raw';
-}
-
 function modeLabel(mode) {
   if (mode === 'compatible') return t('compatible');
   if (mode === 'opus') return t('compressed');
   return t('uncompressed');
+}
+
+function selectMode(mode) {
+  if (!['raw', 'opus', 'compatible'].includes(mode) || !getAvailableModes().includes(mode)) return;
+  closeModeMenu();
+  if (mode === preferredMode && (!audioStarted || currentMode === mode)) return;
+  if (mode === 'compatible' || preferredMode === 'compatible') {
+    showModeNotice(mode);
+    return;
+  }
+  preferredMode = mode;
+  if (audioStarted) startSelectedMode();
+  updateModeButton();
+}
+
+function updateModeMenu() {
+  const availableModes = getAvailableModes();
+  const visibleMode = audioStarted ? currentMode : preferredMode;
+  modeOptions.forEach((option) => {
+    const mode = option.dataset.modeOption;
+    option.textContent = modeLabel(mode);
+    option.disabled = !availableModes.includes(mode);
+    option.classList.toggle('active', mode === visibleMode);
+  });
+}
+
+function closeModeMenu() {
+  if (!modeMenu) return;
+  modeMenu.hidden = true;
+  modeButton.setAttribute('aria-expanded', 'false');
 }
 
 function showModeNotice(mode) {
