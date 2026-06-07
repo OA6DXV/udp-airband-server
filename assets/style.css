@@ -510,10 +510,62 @@ canvas {
 }
 
 .multi-stream-card {
+  position: relative;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
   padding: 16px;
+}
+
+.native-mute-button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 34px;
+  height: 34px;
+  min-width: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #202733;
+  color: var(--text);
+  padding: 0;
+}
+
+.native-mute-button svg {
+  width: 19px;
+  height: 19px;
+  fill: currentColor;
+}
+
+.native-mute-button path {
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.native-mute-button .speaker-wave,
+.native-mute-button .mute-slash {
+  fill: none;
+}
+
+.native-mute-button .mute-slash {
+  display: none;
+}
+
+.native-mute-button.muted .speaker-wave {
+  display: none;
+}
+
+.native-mute-button.muted .mute-slash {
+  display: block;
+}
+
+.multi-stream-card.compressed-mode .native-mute-button {
+  display: inline-flex;
 }
 
 .multi-meters {

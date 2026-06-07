@@ -175,6 +175,14 @@ function renderPlayers() {
           <span class="compact-chevron" aria-hidden="true"></span>
         </button>
       </div>
+      <button class="native-mute-button" data-role="native-mute" type="button" aria-label="Mute">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 9v6h4l5 4V5L8 9H4z"></path>
+          <path class="speaker-wave" d="M16 9.5c.9 1.4.9 3.6 0 5"></path>
+          <path class="speaker-wave" d="M18.5 7c1.9 2.8 1.9 7.2 0 10"></path>
+          <path class="mute-slash" d="M4 4l16 16"></path>
+        </svg>
+      </button>
       <div class="level gain-level">
         <span class="level-label" data-i18n="level">Level</span>
         <div class="level-track gain-level-track">
@@ -256,7 +264,7 @@ async function startNativeMultiAudioOnce() {
     player.paused = false;
     player.resetNativeLevelSync();
   });
-  players.forEach((player) => player.sendNativeGain());
+  players.forEach((player) => player.sendNativeGain({ immediate: true }));
   updateHeader();
 }
 
@@ -464,6 +472,7 @@ class MultiStreamPlayer {
     this.nextPlayTime = 0;
     this.socketGeneration = 0;
     this.scheduledSources = new Set();
+    this.nativeGainTimer = null;
   }
 
   bind(card) {
@@ -474,6 +483,7 @@ class MultiStreamPlayer {
     this.lastEl = card.querySelector('[data-role="last"]');
     this.modeButton = card.querySelector('[data-role="mode"]');
     this.startButton = card.querySelector('[data-role="start"]');
+    this.nativeMuteButton = card.querySelector('[data-role="native-mute"]');
     this.gainInput = card.querySelector('[data-role="gain"]');
     this.gainValue = card.querySelector('[data-role="gain-value"]');
     this.levelDb = card.querySelector('[data-role="level-db"]');
@@ -497,6 +507,12 @@ class MultiStreamPlayer {
         this.muted = !this.muted;
         this.applyGain();
       }
+      this.updateLabels();
+    });
+    this.nativeMuteButton.addEventListener('click', () => {
+      this.muted = !this.muted;
+      this.applyGain();
+      this.sendNativeGain({ immediate: true });
       this.updateLabels();
     });
     this.gainInput.addEventListener('input', () => {
@@ -727,6 +743,8 @@ class MultiStreamPlayer {
     this.updateCompactLabel();
     this.modeButton.textContent = this.mode === 'opus' ? t('compressed') : t('uncompressed');
     this.startButton.textContent = this.started ? (this.muted ? t('unmute') : t('mute')) : t('startAudio');
+    this.nativeMuteButton.classList.toggle('muted', this.muted);
+    this.nativeMuteButton.setAttribute('aria-label', this.muted ? t('unmute') : t('mute'));
     this.updateCardModeState();
   }
 
@@ -747,14 +765,27 @@ class MultiStreamPlayer {
     }
   }
 
-  sendNativeGain() {
+  sendNativeGain(options = {}) {
     if (globalMode !== 'opus' || !multiPlaybackRequested) return;
-    const query = new URLSearchParams({
-      clientId: getClientId(),
-      stream: this.stream.name,
-      gain: String(this.gain),
-    });
-    fetch(`/multi/native-gain?${query.toString()}`).catch(() => {});
+    const send = () => {
+      const query = new URLSearchParams({
+        clientId: getClientId(),
+        stream: this.stream.name,
+        gain: String(this.muted ? 0 : this.gain),
+      });
+      fetch(`/multi/native-gain?${query.toString()}`).catch(() => {});
+    };
+    if (options.immediate) {
+      clearTimeout(this.nativeGainTimer);
+      this.nativeGainTimer = null;
+      send();
+      return;
+    }
+    if (this.nativeGainTimer) return;
+    this.nativeGainTimer = setTimeout(() => {
+      this.nativeGainTimer = null;
+      send();
+    }, 500);
   }
 }
 
