@@ -81,6 +81,7 @@ let compatibleAudio;
 let compatibleSourceNode;
 let compatibleAnalyser;
 let compatibleAnalyserBuffer;
+let compatibleAudioReady = false;
 let opusMediaSource;
 let opusSourceBuffer;
 let opusObjectUrl;
@@ -279,7 +280,7 @@ function connectControlWebSocket() {
         updateModeButton();
         updateConnectionState();
       } else if (message.type === 'stats') {
-        if (!streamPaused) {
+        if (!streamPaused && currentMode !== 'compatible') {
           browserBandwidthEl.textContent = formatBandwidth(message.listenerBitsPerSecond || 0);
         }
         activeUsersEl.textContent = String(message.activeListeners || message.clients || 0);
@@ -509,6 +510,8 @@ function startHlsCompressed() {
 
 function startCompatible() {
   currentMode = 'compatible';
+  compatibleAudioReady = false;
+  browserBandwidthEl.textContent = 'Loading';
   stopRaw();
   stopOpus();
   ensureCompatibleAudio();
@@ -524,8 +527,14 @@ function ensureCompatibleAudio() {
   compatibleAudio = new Audio();
   compatibleAudio.preload = 'auto';
   compatibleAudio.addEventListener('playing', () => {
+    compatibleAudioReady = true;
     streamConfirmed = true;
+    updateBrowserBandwidth();
     updateConnectionState();
+  });
+  compatibleAudio.addEventListener('canplay', () => {
+    compatibleAudioReady = true;
+    updateBrowserBandwidth();
   });
   compatibleAudio.addEventListener('waiting', updateConnectionState);
   compatibleAudio.addEventListener('error', () => setStatus('', 'compatibleUnavailable'));
@@ -536,6 +545,7 @@ function stopCompatible() {
   compatibleAudio.pause();
   compatibleAudio.removeAttribute('src');
   compatibleAudio.load();
+  compatibleAudioReady = false;
   latestWave = new Float32Array(0);
   lastPeak = 0;
 }
@@ -921,12 +931,26 @@ function updateBrowserBandwidth() {
     browserBandwidthEl.textContent = 'Idle';
     return;
   }
+  if (currentMode === 'compatible') {
+    browserBandwidthEl.textContent = compatibleAudioReady ? formatBandwidth(parseBitrate(config.aacBitrate || '32k')) : 'Loading';
+    return;
+  }
   const now = Date.now();
   const elapsedSeconds = Math.max(0.001, (now - lastBandwidthAt) / 1000);
   const bitsPerSecond = Math.max(0, (receivedBytes - lastBandwidthBytes) * 8 / elapsedSeconds);
   lastBandwidthBytes = receivedBytes;
   lastBandwidthAt = now;
   browserBandwidthEl.textContent = formatBandwidth(bitsPerSecond);
+}
+
+function parseBitrate(value) {
+  const match = String(value || '').trim().match(/^(\d+(?:\.\d+)?)([kKmM]?)$/);
+  if (!match) return 0;
+  const amount = Number(match[1]);
+  const unit = match[2].toLowerCase();
+  if (unit === 'm') return amount * 1_000_000;
+  if (unit === 'k') return amount * 1_000;
+  return amount;
 }
 
 function getOpusBufferedMs() {
