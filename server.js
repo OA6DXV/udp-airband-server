@@ -141,8 +141,8 @@ const nativeMultiAac = createNativeMultiAac({
   addListenerMode,
   ffmpegPath,
   logger,
-  onClientConnected: (clientId) => recordClientActivity('connected', 'multi', 'native-aac', clientId, ''),
-  onClientDisconnected: (clientId) => recordClientActivity('disconnected', 'multi', 'native-aac', clientId, ''),
+  onClientConnected: (clientId, remote) => recordClientActivity('connected', 'multi', 'native-aac', clientId, remote),
+  onClientDisconnected: (clientId, remote) => recordClientActivity('disconnected', 'multi', 'native-aac', clientId, remote),
   removeListenerMode,
   spawn,
   streamsByName,
@@ -232,7 +232,7 @@ function handleHttpRequest(req, res) {
       res.end('Native AAC unavailable: ffmpeg not found\n');
       return;
     }
-    nativeMultiAac.serve(requestUrl, res, (value) => normalizeClientId(value, crypto));
+    nativeMultiAac.serve(requestUrl, res, (value) => normalizeClientId(value, crypto), getRemoteAddress(req, req.socket));
     return;
   }
   if (pathname === '/multi/native-gain') {
@@ -308,7 +308,7 @@ function handleHttpRequest(req, res) {
 
   const streamName = pathname.slice(1);
   if (streamsByName.has(streamName)) {
-    sendHtml(res, indexHtml);
+    sendHtml(res, renderPlayerPage(indexHtml, SOFTWARE_VERSION));
     return;
   }
 
@@ -317,6 +317,8 @@ function handleHttpRequest(req, res) {
 
 function attachUpgradeHandler(server) {
   server.on('upgrade', (req, socket) => {
+    const remoteAddress = getRemoteAddress(req, socket);
+    if (typeof socket.setNoDelay === 'function') socket.setNoDelay(true);
     const requestUrl = new URL(req.url, `${socket.encrypted ? 'https' : 'http'}://${req.headers.host || 'localhost'}`);
     const pathname = normalizePath(requestUrl.pathname);
     if (pathname === null) {
@@ -325,7 +327,7 @@ function attachUpgradeHandler(server) {
     }
     const match = pathname.match(/^\/([^/]+)\/(audio|control|adpcm|opus|aac)$/);
     if (!match) {
-      logger.warn('websocket_rejected', { path: requestUrl.pathname, reason: 'invalid_route' });
+      logger.warn('websocket_rejected', { path: requestUrl.pathname, reason: 'invalid_route', remote: remoteAddress });
       socket.destroy();
       return;
     }
@@ -333,7 +335,7 @@ function attachUpgradeHandler(server) {
     const stream = streamsByName.get(match[1]);
     const socketType = match[2];
     if (!stream || !acceptWebSocket(req, socket, crypto)) {
-      logger.warn('websocket_rejected', { path: requestUrl.pathname, reason: stream ? 'invalid_handshake' : 'unknown_stream' });
+      logger.warn('websocket_rejected', { path: requestUrl.pathname, reason: stream ? 'invalid_handshake' : 'unknown_stream', remote: remoteAddress });
       socket.destroy();
       return;
     }
@@ -346,14 +348,14 @@ function attachUpgradeHandler(server) {
       stream.controlClients.set(socket, clientId);
       if (!monitorOnly) addListenerMode(stream, clientId, 'control');
       sendWsJson(socket, streamConfig(stream));
-      recordClientActivity('connected', stream.name, connectionLogMode, clientId, socket.remoteAddress);
+      recordClientActivity('connected', stream.name, connectionLogMode, clientId, remoteAddress);
     } else if (socketType === 'adpcm' || socketType === 'opus' || socketType === 'aac') {
       compressed.serveWebSocket(stream, clientId, socket, socketType);
-      recordClientActivity('connected', stream.name, socketType, clientId, socket.remoteAddress);
+      recordClientActivity('connected', stream.name, socketType, clientId, remoteAddress);
     } else {
       stream.rawClients.set(socket, clientId);
       addListenerMode(stream, clientId, 'raw');
-      recordClientActivity('connected', stream.name, 'raw', clientId, socket.remoteAddress);
+      recordClientActivity('connected', stream.name, 'raw', clientId, remoteAddress);
     }
 
     socket.on('error', (err) => {
@@ -366,7 +368,7 @@ function attachUpgradeHandler(server) {
       removeWsClient(stream, socket);
     });
     socket.on('close', () => {
-      recordClientActivity('disconnected', stream.name, connectionLogMode, clientId, socket.remoteAddress);
+      recordClientActivity('disconnected', stream.name, connectionLogMode, clientId, remoteAddress);
       removeWsClient(stream, socket);
     });
     socket.on('data', () => {});
@@ -571,6 +573,10 @@ function sendHtml(res, body) {
   res.end(body);
 }
 
+function renderPlayerPage(template, softwareVersion) {
+  return String(template).replace(/__SOFTWARE_VERSION__/g, softwareVersion);
+}
+
 function sendAsset(res, body, contentType, cacheControl = 'no-store') {
   res.writeHead(200, {
     'content-type': contentType,
@@ -635,6 +641,23 @@ function formatUrl(protocol, host, port) {
 function formatStreamStartupLine(stream) {
   const channelLabel = stream.channels === 1 ? 'mono' : 'stereo';
   return `Stream: ${stream.name} ( ${stream.udpHost}:${stream.udpPort} ) -> /${stream.name} (${stream.label}) ${channelLabel} @ ${stream.sampleRate} Hz`;
+}
+
+function getRemoteAddress(req, socket) {
+  const headers = req && req.headers ? req.headers : {};
+  const forwarded = firstHeaderValue(headers['cf-connecting-ip'])
+    || firstHeaderValue(headers['x-real-ip'])
+    || firstForwardedFor(headers['x-forwarded-for']);
+  return forwarded || (socket && socket.remoteAddress) || '';
+}
+
+function firstHeaderValue(value) {
+  if (Array.isArray(value)) return firstHeaderValue(value[0]);
+  return String(value || '').split(',')[0].trim();
+}
+
+function firstForwardedFor(value) {
+  return firstHeaderValue(value);
 }
 
 function isExpectedClientSocketError(err) {
