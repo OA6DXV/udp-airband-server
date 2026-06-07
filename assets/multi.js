@@ -45,6 +45,7 @@ let players = [];
 let multiPlaybackRequested = false;
 let globalMode = isMobileDevice() ? 'opus' : 'raw';
 let nativeAudioStarted = false;
+const nativeLevelSyncMs = 60 * 1000;
 
 languageToggle.addEventListener('click', () => {
   const open = languageMenu.hidden;
@@ -100,6 +101,16 @@ modeButtons.forEach((button) => {
   button.addEventListener('click', () => {
     setGlobalMode(button.dataset.mode);
   });
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    players.forEach((player) => player.resetNativeLevelSync());
+    updateMeters();
+    return;
+  }
+  players.forEach((player) => player.resetNativeLevelSync());
+  requestNativeLevelSync();
 });
 
 function renderPlayers() {
@@ -184,8 +195,10 @@ async function startNativeMultiAudio() {
   players.forEach((player) => {
     player.started = true;
     player.paused = false;
+    player.resetNativeLevelSync();
   });
   players.forEach((player) => player.sendNativeGain());
+  requestNativeLevelSync();
   updateHeader();
 }
 
@@ -204,6 +217,7 @@ function stopNativeMultiAudio() {
   nativeMultiAudio.removeAttribute('src');
   nativeMultiAudio.load();
   nativeAudioStarted = false;
+  players.forEach((player) => player.resetNativeLevelSync());
 }
 
 function setGlobalMode(mode) {
@@ -212,12 +226,22 @@ function setGlobalMode(mode) {
   players.forEach((player) => {
     player.mode = mode;
     player.started = false;
+    player.resetNativeLevelSync();
     player.updateLabels();
   });
   updateModeControls();
   if (multiPlaybackRequested) {
     startSelectedGlobalMode().catch(() => {});
   }
+}
+
+function requestNativeLevelSync() {
+  if (globalMode !== 'opus' || !nativeAudioStarted || document.visibilityState === 'hidden') return;
+  const query = new URLSearchParams({
+    clientId: getClientId(),
+    t: String(Date.now()),
+  });
+  fetch(`/multi/native-sync?${query.toString()}`).catch(() => {});
 }
 
 function updateModeControls() {
@@ -292,6 +316,8 @@ class MultiStreamPlayer {
     this.configReady = false;
     this.gain = 1;
     this.peak = 0;
+    this.nativeLevelDelayMs = 0;
+    this.nativeLevelHistory = [];
     this.lastAudioAt = 0;
     this.bandwidth = 0;
     this.receivedBytes = 0;
@@ -380,8 +406,9 @@ class MultiStreamPlayer {
         this.activeListeners = message.activeListeners || 0;
         this.bandwidth = message.listenerBitsPerSecond || this.bandwidth || 0;
         if (globalMode === 'opus') {
-          this.peak = Number(message.levelPeak) || 0;
-          this.lastAudioAt = this.peak > 0 ? Date.now() : 0;
+          const nativeDelayMs = Number(message.nativeAacDelayMs) || 0;
+          this.setNativeLevelDelay(nativeDelayMs);
+          if (nativeDelayMs > 0) this.queueNativeLevel(Number(message.levelPeak) || 0);
         }
         this.lastHeardAt = message.lastHeardAt || 0;
         this.lastHeardLabel = message.lastHeardLabel || 'never';
@@ -507,6 +534,7 @@ class MultiStreamPlayer {
     this.stopScheduledSources();
     this.bandwidth = 0;
     this.peak = 0;
+    this.resetNativeLevelSync();
     this.lastAudioAt = 0;
   }
 
@@ -526,6 +554,42 @@ class MultiStreamPlayer {
     if (this.gainNode) this.gainNode.gain.value = this.muted ? 0 : this.gain;
   }
 
+  setNativeLevelDelay(delayMs) {
+    const value = Number(delayMs);
+    if (!Number.isFinite(value) || value <= 0) return;
+    this.nativeLevelDelayMs = clamp(Math.round(value), 0, 5000);
+  }
+
+  queueNativeLevel(peak) {
+    if (document.visibilityState === 'hidden') return;
+    const now = Date.now();
+    this.nativeLevelHistory.push({ at: now, peak: clamp(peak, 0, 1) });
+    const oldestAllowed = now - Math.max(8000, this.nativeLevelDelayMs + 3000);
+    while (this.nativeLevelHistory.length && this.nativeLevelHistory[0].at < oldestAllowed) {
+      this.nativeLevelHistory.shift();
+    }
+  }
+
+  readNativeLevel(now) {
+    if (!this.nativeLevelHistory.length) return 0;
+    const targetAt = now - this.nativeLevelDelayMs;
+    let index = -1;
+    for (let i = 0; i < this.nativeLevelHistory.length; i += 1) {
+      if (this.nativeLevelHistory[i].at <= targetAt) index = i;
+      else break;
+    }
+    if (index < 0) return 0;
+    const peak = this.nativeLevelHistory[index].peak;
+    if (index > 0) this.nativeLevelHistory.splice(0, index);
+    return peak;
+  }
+
+  resetNativeLevelSync() {
+    this.nativeLevelHistory = [];
+    this.peak = 0;
+    this.lastAudioAt = 0;
+  }
+
   updateMeter() {
     const now = Date.now();
     const elapsed = Math.max(0.001, (now - this.lastBandwidthAt) / 1000);
@@ -534,9 +598,11 @@ class MultiStreamPlayer {
     }
     this.lastBandwidthBytes = this.receivedBytes;
     this.lastBandwidthAt = now;
-    if (!this.lastAudioAt || now - this.lastAudioAt > 400) {
+    if (globalMode === 'opus') {
+      this.peak = document.visibilityState === 'hidden' || globalPaused || !nativeAudioStarted ? 0 : this.readNativeLevel(now);
+    } else if (!this.lastAudioAt || now - this.lastAudioAt > 400) {
       this.peak = 0;
-    } else if (globalMode !== 'opus') {
+    } else {
       this.peak *= 0.985;
     }
     const db = this.peak * this.gain > 0 ? 20 * Math.log10(this.peak * this.gain) : -60;
@@ -668,6 +734,7 @@ function init() {
   updateClocks();
   setInterval(updateClocks, 1000);
   setInterval(updateMeters, 250);
+  setInterval(requestNativeLevelSync, nativeLevelSyncMs);
 }
 
 init();
