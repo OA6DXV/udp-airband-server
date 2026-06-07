@@ -48,7 +48,6 @@ let nativeAudioStarted = false;
 let nativeStopExpected = false;
 let nativeReconnectTimer = null;
 let nativeReconnectInFlight = false;
-const nativeLevelSyncMs = 60 * 1000;
 
 languageToggle.addEventListener('click', () => {
   const open = languageMenu.hidden;
@@ -127,8 +126,6 @@ document.addEventListener('visibilitychange', () => {
   players.forEach((player) => player.resetNativeLevelSync());
   if (nativeNeedsReconnect()) {
     scheduleNativeReconnect(0);
-  } else {
-    requestNativeLevelSync();
   }
 });
 
@@ -239,7 +236,6 @@ async function startNativeMultiAudio() {
     player.resetNativeLevelSync();
   });
   players.forEach((player) => player.sendNativeGain());
-  requestNativeLevelSync();
   updateHeader();
 }
 
@@ -276,15 +272,6 @@ function setGlobalMode(mode) {
   if (multiPlaybackRequested) {
     startSelectedGlobalMode().catch(() => {});
   }
-}
-
-function requestNativeLevelSync() {
-  if (globalMode !== 'opus' || !nativeAudioStarted || document.visibilityState === 'hidden') return;
-  const query = new URLSearchParams({
-    clientId: getClientId(),
-    t: String(Date.now()),
-  });
-  fetch(`/multi/native-sync?${query.toString()}`).catch(() => {});
 }
 
 function shouldRecoverNativeAudio() {
@@ -401,7 +388,6 @@ class MultiStreamPlayer {
     this.configReady = false;
     this.gain = 1;
     this.peak = 0;
-    this.nativeLevelDelayMs = 0;
     this.nativeLevelHistory = [];
     this.lastAudioAt = 0;
     this.bandwidth = 0;
@@ -498,9 +484,7 @@ class MultiStreamPlayer {
         this.activeListeners = message.activeListeners || 0;
         this.bandwidth = message.listenerBitsPerSecond || this.bandwidth || 0;
         if (globalMode === 'opus') {
-          const nativeDelayMs = Number(message.nativeAacDelayMs) || 0;
-          this.setNativeLevelDelay(nativeDelayMs);
-          if (nativeDelayMs > 0) this.queueNativeLevel(Number(message.levelPeak) || 0);
+          this.queueNativeLevel(message.nativeAacTimelineMs, message.nativeAacLevelPeak);
         }
         this.lastHeardAt = message.lastHeardAt || 0;
         this.lastHeardLabel = message.lastHeardLabel || 'never';
@@ -646,28 +630,23 @@ class MultiStreamPlayer {
     if (this.gainNode) this.gainNode.gain.value = this.muted ? 0 : this.gain;
   }
 
-  setNativeLevelDelay(delayMs) {
-    const value = Number(delayMs);
-    if (!Number.isFinite(value) || value <= 0) return;
-    this.nativeLevelDelayMs = clamp(Math.round(value), 0, 5000);
-  }
-
-  queueNativeLevel(peak) {
-    if (document.visibilityState === 'hidden') return;
-    const now = Date.now();
-    this.nativeLevelHistory.push({ at: now, peak: clamp(peak, 0, 1) });
-    const oldestAllowed = now - Math.max(8000, this.nativeLevelDelayMs + 3000);
-    while (this.nativeLevelHistory.length && this.nativeLevelHistory[0].at < oldestAllowed) {
+  queueNativeLevel(timelineMs, peak) {
+    if (document.visibilityState === 'hidden' || globalPaused || !nativeAudioStarted) return;
+    const timeline = Number(timelineMs);
+    if (!Number.isFinite(timeline) || timeline < 0) return;
+    this.nativeLevelHistory.push({ timelineMs: timeline, peak: clamp(Number(peak) || 0, 0, 1) });
+    const oldestAllowed = getNativeAudioTimelineMs() - 3000;
+    while (this.nativeLevelHistory.length > 1 && this.nativeLevelHistory[0].timelineMs < oldestAllowed) {
       this.nativeLevelHistory.shift();
     }
   }
 
-  readNativeLevel(now) {
+  readNativeLevel() {
     if (!this.nativeLevelHistory.length) return 0;
-    const targetAt = now - this.nativeLevelDelayMs;
+    const targetAt = getNativeAudioTimelineMs();
     let index = -1;
     for (let i = 0; i < this.nativeLevelHistory.length; i += 1) {
-      if (this.nativeLevelHistory[i].at <= targetAt) index = i;
+      if (this.nativeLevelHistory[i].timelineMs <= targetAt) index = i;
       else break;
     }
     if (index < 0) return 0;
@@ -691,7 +670,7 @@ class MultiStreamPlayer {
     this.lastBandwidthBytes = this.receivedBytes;
     this.lastBandwidthAt = now;
     if (globalMode === 'opus') {
-      this.peak = document.visibilityState === 'hidden' || globalPaused || !nativeAudioStarted ? 0 : this.readNativeLevel(now);
+      this.peak = document.visibilityState === 'hidden' || globalPaused || !nativeAudioStarted ? 0 : this.readNativeLevel();
     } else if (!this.lastAudioAt || now - this.lastAudioAt > 400) {
       this.peak = 0;
     } else {
@@ -803,6 +782,11 @@ function formatBandwidth(bitsPerSecond) {
   return `${Math.round(bitsPerSecond)} bps`;
 }
 
+function getNativeAudioTimelineMs() {
+  if (!nativeMultiAudio || !Number.isFinite(nativeMultiAudio.currentTime)) return 0;
+  return Math.max(0, nativeMultiAudio.currentTime * 1000);
+}
+
 function getClientId() {
   const key = 'udp-airband-multi-client-id';
   let value = localStorage.getItem(key);
@@ -839,7 +823,6 @@ function init() {
   updateClocks();
   setInterval(updateClocks, 1000);
   setInterval(updateMeters, 250);
-  setInterval(requestNativeLevelSync, nativeLevelSyncMs);
 }
 
 init();

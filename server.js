@@ -241,12 +241,6 @@ function handleHttpRequest(req, res) {
     sendJsonResponse(res, { ok });
     return;
   }
-  if (pathname === '/multi/native-sync') {
-    const clientId = normalizeClientId(requestUrl.searchParams.get('clientId'), crypto);
-    const ok = nativeMultiAac.requestResync(clientId);
-    sendJsonResponse(res, { ok });
-    return;
-  }
   if (pathname === '/favicon.ico') {
     sendAsset(res, faviconIco, 'image/x-icon', 'public, max-age=86400');
     return;
@@ -533,6 +527,7 @@ function broadcastStreamStats() {
       const listenerStats = ensureListenerStats(stream, clientId);
       const listenerBitsPerSecond = Math.max(0, (listenerStats.bytes - listenerStats.lastBytes) * 8 / elapsedSeconds);
       listenerStats.lastBytes = listenerStats.bytes;
+      const nativeAacLevel = nativeMultiAac.getLevel(clientId, stream.name);
       sendWsJson(client, {
         type: 'stats',
         listenerBitsPerSecond,
@@ -540,7 +535,8 @@ function broadcastStreamStats() {
         lastHeardLabel: lastHeard.label,
         secondsSinceLastHeard: lastHeard.secondsSince,
         levelPeak: now - stream.levelPeakAt > 400 ? 0 : stream.levelPeak,
-        nativeAacDelayMs: nativeMultiAac.getDelayMs(clientId, stream.name),
+        nativeAacTimelineMs: nativeAacLevel.timelineMs,
+        nativeAacLevelPeak: nativeAacLevel.peak,
         hasUdp: stream.packetCount > 0,
         activeListeners: getActiveListeners(stream).length,
         compressedCodec,
