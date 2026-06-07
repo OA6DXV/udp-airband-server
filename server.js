@@ -42,6 +42,11 @@ const serverConfigUpdated = ensureServerConfigDefaults(serverConfigPath, [
     comments: ['Public status API. Keep disabled unless you explicitly want /status endpoints.'],
     keys: [{ key: 'enabled', value: 'false' }],
   },
+  {
+    name: 'logging',
+    comments: ['Connection logs are summarized at info level. Use -D for per-socket details.'],
+    keys: [{ key: 'client_summary_ms', value: '10000' }],
+  },
 ], fs, path);
 const serverConfig = loadServerConfig(serverConfigPath, fs, path);
 const defaultUdpHost = args.udpHost || getSetting(serverConfig, 'udp.host', '0.0.0.0');
@@ -58,6 +63,7 @@ const aacBitrate = args.aacBitrate || getSetting(serverConfig, 'compressed.aacBi
 const opusKeepaliveMs = Number(args.opusKeepaliveMs || getSetting(serverConfig, 'compressed.keepaliveMs', 1000));
 const ffmpegPath = args.ffmpeg || getSetting(serverConfig, 'compressed.ffmpeg', 'ffmpeg');
 const logLevel = args.logLevel || getSetting(serverConfig, 'logging.level', 'info');
+const clientSummaryMs = Number(args.clientSummaryMs || args.clientLogSummaryMs || getSetting(serverConfig, 'logging.clientSummaryMs', 10000));
 const tlsKeyPath = args.tlsKey || args.httpsKey || getSetting(serverConfig, 'ssl.key', '');
 const tlsCertPath = args.tlsCert || args.httpsCert || getSetting(serverConfig, 'ssl.cert', '');
 const sslEnabledSetting = args.sslEnabled !== undefined ? args.sslEnabled : (args.tlsEnabled !== undefined ? args.tlsEnabled : getSetting(serverConfig, 'ssl.enabled', false));
@@ -66,6 +72,7 @@ const debugEnabled = Boolean(args.debug);
 const logTimestamps = parseBoolean(args.logTimestamps !== undefined ? args.logTimestamps : (debugEnabled ? true : getSetting(serverConfig, 'logging.timestamps', false)));
 const logColors = parseBoolean(args.logColors !== undefined ? args.logColors : (debugEnabled ? true : getSetting(serverConfig, 'logging.colors', false)));
 const logger = createLogger({ debug: debugEnabled, level: logLevel, timestamps: logTimestamps, colors: logColors });
+const clientActivityLog = createClientActivityLog(logger, clientSummaryMs);
 
 if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) {
   fatal('--http-port must be a valid port');
@@ -78,6 +85,9 @@ if (!COMPRESSED_CODECS.has(compressedCodec)) {
 }
 if (!Number.isInteger(adpcmFrameMs) || adpcmFrameMs < 10 || adpcmFrameMs > 100) {
   fatal('--adpcm-frame-ms must be between 10 and 100');
+}
+if (!Number.isFinite(clientSummaryMs) || clientSummaryMs < 0 || (clientSummaryMs > 0 && clientSummaryMs < 1000)) {
+  fatal('--client-summary-ms must be 0 or at least 1000');
 }
 const publicDir = __dirname;
 const indexHtml = fs.readFileSync(path.join(publicDir, 'index.html'));
@@ -115,7 +125,7 @@ if (!serverConfigExists) {
   logger.warn('server_config_missing', { path: serverConfigPath, fallback: 'built-in defaults' });
 }
 if (serverConfigUpdated) {
-  logger.info('server_config_updated', { path: serverConfigPath, added: 'api.enabled=false' });
+  logger.info('server_config_updated', { path: serverConfigPath, added: 'missing defaults' });
 }
 
 const streamsConfigExists = fs.existsSync(path.resolve(configPath));
@@ -342,23 +352,25 @@ function attachUpgradeHandler(server) {
     }
 
     const clientId = normalizeClientId(requestUrl.searchParams.get('clientId'), crypto);
+    let connectionLogMode = socketType === 'audio' ? 'raw' : socketType;
     if (socketType === 'control') {
       const monitorOnly = requestUrl.searchParams.get('monitor') === '1';
+      connectionLogMode = monitorOnly ? 'control-monitor' : 'control';
       stream.controlClients.set(socket, clientId);
       if (!monitorOnly) addListenerMode(stream, clientId, 'control');
       sendWsJson(socket, streamConfig(stream));
-      logger.info('client_connected', { stream: stream.name, mode: monitorOnly ? 'control-monitor' : 'control', client: clientId, remote: socket.remoteAddress });
+      recordClientActivity('connected', stream.name, connectionLogMode, clientId, socket.remoteAddress);
     } else if (socketType === 'adpcm' || socketType === 'opus' || socketType === 'aac') {
       compressed.serveWebSocket(stream, clientId, socket, socketType);
-      logger.info('client_connected', { stream: stream.name, mode: socketType, client: clientId, remote: socket.remoteAddress });
+      recordClientActivity('connected', stream.name, socketType, clientId, socket.remoteAddress);
     } else {
       stream.rawClients.set(socket, clientId);
       addListenerMode(stream, clientId, 'raw');
-      logger.info('client_connected', { stream: stream.name, mode: 'raw', client: clientId, remote: socket.remoteAddress });
+      recordClientActivity('connected', stream.name, 'raw', clientId, socket.remoteAddress);
     }
 
     socket.on('error', (err) => {
-      const fields = { stream: stream.name, mode: socketType, client: clientId, error: err.message };
+      const fields = { stream: stream.name, mode: connectionLogMode, client: clientId, error: err.message };
       if (isExpectedClientSocketError(err)) {
         logger.debug('client_socket_closed', fields);
       } else {
@@ -367,11 +379,57 @@ function attachUpgradeHandler(server) {
       removeWsClient(stream, socket);
     });
     socket.on('close', () => {
-      logger.info('client_disconnected', { stream: stream.name, mode: socketType, client: clientId });
+      recordClientActivity('disconnected', stream.name, connectionLogMode, clientId, socket.remoteAddress);
       removeWsClient(stream, socket);
     });
     socket.on('data', () => {});
   });
+}
+
+function recordClientActivity(action, streamName, mode, clientId, remote) {
+  logger.debug(`client_${action}`, { stream: streamName, mode, client: clientId, remote });
+  clientActivityLog.record(action, streamName, mode, clientId, remote);
+}
+
+function createClientActivityLog(activityLogger, summaryMs) {
+  let connected = 0;
+  let disconnected = 0;
+  const clients = new Set();
+  const remotes = new Set();
+  const modes = new Map();
+  const streamCounts = new Map();
+
+  function record(action, streamName, mode, clientId, remote) {
+    if (summaryMs <= 0) return;
+    if (action === 'connected') connected += 1;
+    if (action === 'disconnected') disconnected += 1;
+    if (clientId) clients.add(clientId);
+    if (remote) remotes.add(remote);
+    incrementCount(modes, `${action}.${mode}`);
+    incrementCount(streamCounts, streamName);
+  }
+
+  function flush() {
+    const total = connected + disconnected;
+    if (total === 0) return;
+    activityLogger.info('client_activity', {
+      windowMs: summaryMs,
+      connected,
+      disconnected,
+      clients: clients.size,
+      remotes: remotes.size,
+      modes: formatTopCounts(modes),
+      streams: formatTopCounts(streamCounts),
+    });
+    connected = 0;
+    disconnected = 0;
+    clients.clear();
+    remotes.clear();
+    modes.clear();
+    streamCounts.clear();
+  }
+
+  return { flush, record };
 }
 
 function startWebServers() {
@@ -387,6 +445,7 @@ function startWebServers() {
       streamsConfig: configPath,
       streamsConfigLoaded: streamsConfigExists,
       apiEnabled,
+      clientSummaryMs,
       logLevel: logger.level,
     });
   });
@@ -396,6 +455,10 @@ function startWebServers() {
     logger.warn('compressed_unavailable', { codec: compressedCodec, ffmpeg: ffmpegPath });
   }
   setInterval(broadcastStreamStats, 250);
+  if (clientSummaryMs > 0) {
+    const clientActivityTimer = setInterval(() => clientActivityLog.flush(), clientSummaryMs);
+    if (typeof clientActivityTimer.unref === 'function') clientActivityTimer.unref();
+  }
   if (compressedEnabled) {
     setInterval(() => compressed.writeSilenceKeepalive(streams, opusKeepaliveMs), opusKeepaliveMs);
   }
@@ -584,6 +647,18 @@ function formatStreamStartupLine(stream) {
 
 function isExpectedClientSocketError(err) {
   return ['EPIPE', 'ECONNRESET', 'ECONNABORTED', 'ERR_STREAM_DESTROYED'].includes(err && err.code);
+}
+
+function incrementCount(map, key) {
+  if (!key) return;
+  map.set(key, (map.get(key) || 0) + 1);
+}
+
+function formatTopCounts(map, limit = 8) {
+  const entries = Array.from(map.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const shown = entries.slice(0, limit).map(([key, count]) => `${key}:${count}`);
+  if (entries.length > limit) shown.push(`+${entries.length - limit}`);
+  return shown.join(',');
 }
 
 function normalizePath(value) {
