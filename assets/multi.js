@@ -175,6 +175,7 @@ async function startNativeMultiAudio() {
     clientId,
     t: String(Date.now()),
   });
+  nativeMultiAudio.preload = 'auto';
   nativeMultiAudio.src = `/multi/native.aac?${query.toString()}`;
   nativeMultiAudio.load();
   updateMediaSessionMetadata();
