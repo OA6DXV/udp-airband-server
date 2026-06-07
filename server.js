@@ -26,10 +26,11 @@ const { createLogger } = require('./lib/logger');
 const { DEFAULT_STREAMS, loadStreams, renderMultiStreamPage, renderStreamList, validateStreams } = require('./lib/streams');
 const { acceptWebSocket, sendWsBinary, sendWsJson } = require('./lib/websocket');
 const { createCompressedManager } = require('./lib/compressed');
+const { createNativeMultiAac } = require('./lib/native-multi-aac');
 
 const MAX_SOCKET_BUFFER_BYTES = 1024 * 1024;
 const MAX_OPUS_STDIN_BUFFER_BYTES = 512 * 1024;
-const SOFTWARE_VERSION = '1.4-preview';
+const SOFTWARE_VERSION = '1.4-testing';
 const COMPRESSED_CODECS = new Set(['adpcm', 'opus', 'aac', 'hls']);
 
 const args = parseArgs(process.argv.slice(2));
@@ -65,6 +66,7 @@ const debugEnabled = Boolean(args.debug);
 const logTimestamps = parseBoolean(args.logTimestamps !== undefined ? args.logTimestamps : (debugEnabled ? true : getSetting(serverConfig, 'logging.timestamps', false)));
 const logColors = parseBoolean(args.logColors !== undefined ? args.logColors : (debugEnabled ? true : getSetting(serverConfig, 'logging.colors', false)));
 const logger = createLogger({ debug: debugEnabled, level: logLevel, timestamps: logTimestamps, colors: logColors });
+const clientLifecycleLog = createClientLifecycleLog(logger);
 
 if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) {
   fatal('--http-port must be a valid port');
@@ -114,7 +116,7 @@ if (!serverConfigExists) {
   logger.warn('server_config_missing', { path: serverConfigPath, fallback: 'built-in defaults' });
 }
 if (serverConfigUpdated) {
-  logger.info('server_config_updated', { path: serverConfigPath, added: 'api.enabled=false' });
+  logger.info('server_config_updated', { path: serverConfigPath, added: 'missing defaults' });
 }
 
 const streamsConfigExists = fs.existsSync(path.resolve(configPath));
@@ -133,6 +135,18 @@ try {
   fatal(err.message);
 }
 const streamsByName = new Map(streams.map((stream) => [stream.name, stream]));
+const nativeMultiAac = createNativeMultiAac({
+  aacBitrate,
+  addListenerBytes,
+  addListenerMode,
+  ffmpegPath,
+  logger,
+  onClientConnected: (clientId, remote) => recordClientActivity('connected', 'multi', 'native-aac', clientId, remote),
+  onClientDisconnected: (clientId, remote) => recordClientActivity('disconnected', 'multi', 'native-aac', clientId, remote),
+  removeListenerMode,
+  spawn,
+  streamsByName,
+});
 
 const webProtocol = tlsEnabled ? 'https' : 'http';
 const webServer = tlsEnabled
@@ -168,6 +182,9 @@ function handleUdpMessage(stream, msg) {
   stream.packetCount += 1;
   stream.byteCount += msg.length;
   stream.lastUdpAt = Date.now();
+  stream.levelPeak = Math.max(stream.levelPeak * 0.75, peakOfFloatPcm(msg));
+  stream.levelPeakAt = stream.lastUdpAt;
+  nativeMultiAac.pushPcm(stream, msg);
 
   for (const [client, clientId] of stream.rawClients) {
     if (client.destroyed || client.writableLength > MAX_SOCKET_BUFFER_BYTES) {
@@ -207,6 +224,21 @@ function handleHttpRequest(req, res) {
   }
   if (pathname === '/multi') {
     sendHtml(res, renderMultiStreamPage(streams, { softwareVersion: SOFTWARE_VERSION }));
+    return;
+  }
+  if (pathname === '/multi/native.aac') {
+    if (!compressed.ffmpegAvailable) {
+      res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('Native AAC unavailable: ffmpeg not found\n');
+      return;
+    }
+    nativeMultiAac.serve(requestUrl, res, (value) => normalizeClientId(value, crypto), getRemoteAddress(req, req.socket));
+    return;
+  }
+  if (pathname === '/multi/native-gain') {
+    const clientId = normalizeClientId(requestUrl.searchParams.get('clientId'), crypto);
+    const ok = nativeMultiAac.setGain(clientId, requestUrl.searchParams.get('stream'), requestUrl.searchParams.get('gain'));
+    sendJsonResponse(res, { ok });
     return;
   }
   if (pathname === '/favicon.ico') {
@@ -276,7 +308,7 @@ function handleHttpRequest(req, res) {
 
   const streamName = pathname.slice(1);
   if (streamsByName.has(streamName)) {
-    sendHtml(res, indexHtml);
+    sendHtml(res, renderPlayerPage(indexHtml, SOFTWARE_VERSION));
     return;
   }
 
@@ -285,6 +317,8 @@ function handleHttpRequest(req, res) {
 
 function attachUpgradeHandler(server) {
   server.on('upgrade', (req, socket) => {
+    const remoteAddress = getRemoteAddress(req, socket);
+    if (typeof socket.setNoDelay === 'function') socket.setNoDelay(true);
     const requestUrl = new URL(req.url, `${socket.encrypted ? 'https' : 'http'}://${req.headers.host || 'localhost'}`);
     const pathname = normalizePath(requestUrl.pathname);
     if (pathname === null) {
@@ -293,7 +327,7 @@ function attachUpgradeHandler(server) {
     }
     const match = pathname.match(/^\/([^/]+)\/(audio|control|adpcm|opus|aac)$/);
     if (!match) {
-      logger.warn('websocket_rejected', { path: requestUrl.pathname, reason: 'invalid_route' });
+      logger.warn('websocket_rejected', { path: requestUrl.pathname, reason: 'invalid_route', remote: remoteAddress });
       socket.destroy();
       return;
     }
@@ -301,29 +335,31 @@ function attachUpgradeHandler(server) {
     const stream = streamsByName.get(match[1]);
     const socketType = match[2];
     if (!stream || !acceptWebSocket(req, socket, crypto)) {
-      logger.warn('websocket_rejected', { path: requestUrl.pathname, reason: stream ? 'invalid_handshake' : 'unknown_stream' });
+      logger.warn('websocket_rejected', { path: requestUrl.pathname, reason: stream ? 'invalid_handshake' : 'unknown_stream', remote: remoteAddress });
       socket.destroy();
       return;
     }
 
     const clientId = normalizeClientId(requestUrl.searchParams.get('clientId'), crypto);
+    let connectionLogMode = socketType === 'audio' ? 'raw' : socketType;
     if (socketType === 'control') {
       const monitorOnly = requestUrl.searchParams.get('monitor') === '1';
+      connectionLogMode = monitorOnly ? 'control-monitor' : 'control';
       stream.controlClients.set(socket, clientId);
       if (!monitorOnly) addListenerMode(stream, clientId, 'control');
       sendWsJson(socket, streamConfig(stream));
-      logger.info('client_connected', { stream: stream.name, mode: monitorOnly ? 'control-monitor' : 'control', client: clientId, remote: socket.remoteAddress });
+      recordClientActivity('connected', stream.name, connectionLogMode, clientId, remoteAddress);
     } else if (socketType === 'adpcm' || socketType === 'opus' || socketType === 'aac') {
       compressed.serveWebSocket(stream, clientId, socket, socketType);
-      logger.info('client_connected', { stream: stream.name, mode: socketType, client: clientId, remote: socket.remoteAddress });
+      recordClientActivity('connected', stream.name, socketType, clientId, remoteAddress);
     } else {
       stream.rawClients.set(socket, clientId);
       addListenerMode(stream, clientId, 'raw');
-      logger.info('client_connected', { stream: stream.name, mode: 'raw', client: clientId, remote: socket.remoteAddress });
+      recordClientActivity('connected', stream.name, 'raw', clientId, remoteAddress);
     }
 
     socket.on('error', (err) => {
-      const fields = { stream: stream.name, mode: socketType, client: clientId, error: err.message };
+      const fields = { stream: stream.name, mode: connectionLogMode, client: clientId, error: err.message };
       if (isExpectedClientSocketError(err)) {
         logger.debug('client_socket_closed', fields);
       } else {
@@ -332,11 +368,68 @@ function attachUpgradeHandler(server) {
       removeWsClient(stream, socket);
     });
     socket.on('close', () => {
-      logger.info('client_disconnected', { stream: stream.name, mode: socketType, client: clientId });
+      recordClientActivity('disconnected', stream.name, connectionLogMode, clientId, remoteAddress);
       removeWsClient(stream, socket);
     });
     socket.on('data', () => {});
   });
+}
+
+function recordClientActivity(action, streamName, mode, clientId, remote) {
+  logger.debug(`client_${action}`, { stream: streamName, mode, client: clientId, remote });
+  clientLifecycleLog.record(action, clientId, remote);
+}
+
+function createClientLifecycleLog(activityLogger) {
+  const disconnectGraceMs = 2000;
+  const clients = new Map();
+
+  function record(action, clientId, remote) {
+    if (!clientId) return;
+    if (action === 'connected') {
+      recordConnect(clientId, remote);
+      return;
+    }
+    if (action === 'disconnected') {
+      recordDisconnect(clientId);
+    }
+  }
+
+  function recordConnect(clientId, remote) {
+    let entry = clients.get(clientId);
+    if (!entry) {
+      entry = { socketCount: 0, remote, connectedAt: Date.now(), disconnectTimer: null };
+      clients.set(clientId, entry);
+      activityLogger.info('client_connected', { client: clientId, remote, activeClients: clients.size });
+    }
+    if (entry.disconnectTimer) {
+      clearTimeout(entry.disconnectTimer);
+      entry.disconnectTimer = null;
+    }
+    entry.socketCount += 1;
+    if (remote) entry.remote = remote;
+  }
+
+  function recordDisconnect(clientId) {
+    const entry = clients.get(clientId);
+    if (!entry) return;
+    entry.socketCount = Math.max(0, entry.socketCount - 1);
+    if (entry.socketCount > 0 || entry.disconnectTimer) return;
+    entry.disconnectTimer = setTimeout(() => {
+      const latest = clients.get(clientId);
+      if (!latest || latest.socketCount > 0) return;
+      clients.delete(clientId);
+      activityLogger.info('client_disconnected', {
+        client: clientId,
+        remote: latest.remote,
+        durationSec: Math.max(0, Math.round((Date.now() - latest.connectedAt) / 1000)),
+        activeClients: clients.size,
+      });
+    }, disconnectGraceMs);
+    if (typeof entry.disconnectTimer.unref === 'function') entry.disconnectTimer.unref();
+  }
+
+  return { record };
 }
 
 function startWebServers() {
@@ -360,7 +453,7 @@ function startWebServers() {
   if (compressedEnabled && !compressedAvailable) {
     logger.warn('compressed_unavailable', { codec: compressedCodec, ffmpeg: ffmpegPath });
   }
-  setInterval(broadcastStreamStats, 1000);
+  setInterval(broadcastStreamStats, 250);
   if (compressedEnabled) {
     setInterval(() => compressed.writeSilenceKeepalive(streams, opusKeepaliveMs), opusKeepaliveMs);
   }
@@ -442,6 +535,7 @@ function broadcastStreamStats() {
         lastHeardAt: lastHeard.at,
         lastHeardLabel: lastHeard.label,
         secondsSinceLastHeard: lastHeard.secondsSince,
+        levelPeak: now - stream.levelPeakAt > 400 ? 0 : stream.levelPeak,
         hasUdp: stream.packetCount > 0,
         activeListeners: getActiveListeners(stream).length,
         compressedCodec,
@@ -449,6 +543,15 @@ function broadcastStreamStats() {
       });
     }
   }
+}
+
+function peakOfFloatPcm(buffer) {
+  let peak = 0;
+  for (let offset = 0; offset + 4 <= buffer.length; offset += 4) {
+    const value = Math.abs(buffer.readFloatLE(offset));
+    if (Number.isFinite(value) && value > peak) peak = value;
+  }
+  return Math.min(1, peak);
 }
 
 function formatCompressedStatus() {
@@ -468,6 +571,10 @@ function sendHtml(res, body) {
     ...securityHeaders(),
   });
   res.end(body);
+}
+
+function renderPlayerPage(template, softwareVersion) {
+  return String(template).replace(/__SOFTWARE_VERSION__/g, softwareVersion);
 }
 
 function sendAsset(res, body, contentType, cacheControl = 'no-store') {
@@ -536,6 +643,23 @@ function formatStreamStartupLine(stream) {
   return `Stream: ${stream.name} ( ${stream.udpHost}:${stream.udpPort} ) -> /${stream.name} (${stream.label}) ${channelLabel} @ ${stream.sampleRate} Hz`;
 }
 
+function getRemoteAddress(req, socket) {
+  const headers = req && req.headers ? req.headers : {};
+  const forwarded = firstHeaderValue(headers['cf-connecting-ip'])
+    || firstHeaderValue(headers['x-real-ip'])
+    || firstForwardedFor(headers['x-forwarded-for']);
+  return forwarded || (socket && socket.remoteAddress) || '';
+}
+
+function firstHeaderValue(value) {
+  if (Array.isArray(value)) return firstHeaderValue(value[0]);
+  return String(value || '').split(',')[0].trim();
+}
+
+function firstForwardedFor(value) {
+  return firstHeaderValue(value);
+}
+
 function isExpectedClientSocketError(err) {
   return ['EPIPE', 'ECONNRESET', 'ECONNABORTED', 'ERR_STREAM_DESTROYED'].includes(err && err.code);
 }
@@ -558,7 +682,7 @@ function securityHeaders() {
     'x-content-type-options': 'nosniff',
     'x-frame-options': 'DENY',
     'referrer-policy': 'no-referrer',
-    'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; media-src 'self' blob:; worker-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+    'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; media-src 'self' blob:; worker-src 'none'; frame-ancestors 'none'; base-uri 'none'",
   };
 }
 

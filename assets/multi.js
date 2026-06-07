@@ -18,6 +18,10 @@ const languageMenu = document.getElementById('languageMenu');
 const languageOptions = Array.from(document.querySelectorAll('.language-option'));
 const multiStartOverlay = document.getElementById('multiStartOverlay');
 const multiStartButton = document.getElementById('multiStartButton');
+const multiNoticeTitle = document.getElementById('multiNoticeTitle');
+const multiNoticeBody = document.getElementById('multiNoticeBody');
+const nativeMultiAudio = document.getElementById('nativeMultiAudio');
+const modeButtons = Array.from(document.querySelectorAll('.multi-mode-button'));
 
 const translations = {
   en: {
@@ -25,12 +29,22 @@ const translations = {
     connected: 'Connected', idle: 'Push to Reconnect', stopStream: 'Stop stream', lastHeard: 'Last Heard',
     mode: 'Mode', audio: 'Audio', startAudio: 'Start', mute: 'Mute', unmute: 'Unmute', compressed: 'Compressed',
     uncompressed: 'Uncompressed', streamName: 'Stream', level: 'Level', never: 'never', now: 'Now',
+    realTimeMode: 'RealTime Mode', compatibleMode: 'Compatible Mode', accept: 'Accept',
+    realTimeNoticeTitle: 'RealTime Mode',
+    realTimeNoticeBody: 'This mode uses realtime per-stream audio with the lowest latency. It cannot keep playing in the background, so keep this page open and the device active.',
+    compatibleNoticeTitle: 'Compatible Mode',
+    compatibleNoticeBody: 'This mode uses one mixed AAC stream. It can keep playing with the phone locked or in the background, but delay is variable and usually around 5 seconds.',
   },
   es: {
     users: 'Usuarios', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP',
     connected: 'Conectado', idle: 'Presiona para reconectar', stopStream: 'Detener stream', lastHeard: 'Ultima transmision',
     mode: 'Modo', audio: 'Audio', startAudio: 'Iniciar', mute: 'Silenciar', unmute: 'Activar', compressed: 'Comprimido',
     uncompressed: 'Sin comprimir', streamName: 'Stream', level: 'Nivel', never: 'nunca', now: 'Ahora',
+    realTimeMode: 'Modo RealTime', compatibleMode: 'Modo Compatible', accept: 'Aceptar',
+    realTimeNoticeTitle: 'Modo RealTime',
+    realTimeNoticeBody: 'Este modo usa audio por stream en tiempo real con la menor latencia. No puede seguir sonando en segundo plano, asi que manten esta pagina abierta y el dispositivo activo.',
+    compatibleNoticeTitle: 'Modo Compatible',
+    compatibleNoticeBody: 'Este modo usa un stream AAC mezclado. Puede seguir sonando con el telefono bloqueado o en segundo plano, pero el delay es variable y suele rondar los 5 segundos.',
   },
 };
 
@@ -41,6 +55,14 @@ let globalPaused = false;
 let statusHovering = false;
 let players = [];
 let multiPlaybackRequested = false;
+let globalMode = isMobileDevice() ? 'opus' : 'raw';
+let nativeAudioStarted = false;
+let nativeStopExpected = false;
+let nativePreloadActive = false;
+let nativeStartPromise = null;
+let nativeReconnectTimer = null;
+let nativeReconnectInFlight = false;
+let pendingNoticeMode = globalMode;
 
 languageToggle.addEventListener('click', () => {
   const open = languageMenu.hidden;
@@ -68,9 +90,11 @@ document.addEventListener('click', (event) => {
 statusEl.addEventListener('click', () => {
   if (globalPaused) {
     globalPaused = false;
-    players.forEach((player) => player.resume());
+    if (globalMode === 'opus') startNativeMultiAudio().catch(() => {});
+    else players.forEach((player) => player.resume());
   } else if (players.some((player) => player.confirmed)) {
     globalPaused = true;
+    if (globalMode === 'opus') stopNativeMultiAudio();
     players.forEach((player) => player.pause());
   }
   updateHeader();
@@ -90,6 +114,48 @@ if (multiStartButton) {
   });
 }
 
+modeButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    showModeNotice(button.dataset.mode);
+  });
+});
+
+if (nativeMultiAudio) {
+  ['abort', 'emptied', 'ended', 'error', 'pause', 'stalled'].forEach((eventName) => {
+    nativeMultiAudio.addEventListener(eventName, () => handleNativePlaybackInterrupted(eventName));
+  });
+  nativeMultiAudio.addEventListener('playing', () => {
+    nativeAudioStarted = true;
+    nativeStopExpected = false;
+    if (multiStartOverlay) multiStartOverlay.hidden = true;
+    updateHeader();
+  });
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    players.forEach((player) => player.resetNativeLevelSync());
+    updateMeters();
+    return;
+  }
+  players.forEach((player) => player.resetNativeLevelSync());
+  if (nativeNeedsReconnect()) {
+    scheduleNativeReconnect(0);
+  }
+});
+
+window.addEventListener('pageshow', () => {
+  if (nativeNeedsReconnect()) {
+    scheduleNativeReconnect(0);
+  }
+});
+
+window.addEventListener('focus', () => {
+  if (nativeNeedsReconnect()) {
+    scheduleNativeReconnect(0);
+  }
+});
+
 function renderPlayers() {
   container.textContent = '';
   for (const player of players) {
@@ -104,10 +170,19 @@ function renderPlayers() {
         <div class="meter"><span data-i18n="audio">Audio</span><button data-role="start" type="button">Start</button></div>
       </section>
       <div class="compact-stream-header">
-        <button class="compact-stream-heading" data-role="toggle" type="button" aria-expanded="false" aria-label="toggle stream controls">
+        <button class="compact-stream-toggle" data-role="compact-toggle" type="button" aria-expanded="false">
           <span class="compact-stream-title" data-role="compact-name"></span>
+          <span class="compact-chevron" aria-hidden="true"></span>
         </button>
       </div>
+      <button class="native-mute-button" data-role="native-mute" type="button" aria-label="Mute">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 9v6h4l5 4V5L8 9H4z"></path>
+          <path class="speaker-wave" d="M16 9.5c.9 1.4.9 3.6 0 5"></path>
+          <path class="speaker-wave" d="M18.5 7c1.9 2.8 1.9 7.2 0 10"></path>
+          <path class="mute-slash" d="M4 4l16 16"></path>
+        </svg>
+      </button>
       <div class="level gain-level">
         <span class="level-label" data-i18n="level">Level</span>
         <div class="level-track gain-level-track">
@@ -135,16 +210,190 @@ function ensureAudioContext() {
 
 async function startMultiPlayback() {
   try {
-    const context = ensureAudioContext();
-    if (context.state !== 'running') await context.resume();
-    if (context.state !== 'running') throw new Error('AudioContext is not running');
     multiPlaybackRequested = true;
+    if (pendingNoticeMode) setGlobalMode(pendingNoticeMode, { deferStart: true });
     if (multiStartOverlay) multiStartOverlay.hidden = true;
-    await Promise.all(players.map((player) => player.startIfReady()));
+    await startSelectedGlobalMode();
   } catch {
     multiPlaybackRequested = false;
     if (multiStartOverlay) multiStartOverlay.hidden = false;
   }
+}
+
+async function startSelectedGlobalMode() {
+  if (globalMode === 'opus') {
+    players.forEach((player) => player.stopRealtimeAudio());
+    await startNativeMultiAudio();
+    return;
+  }
+  stopNativeMultiAudio();
+  const context = ensureAudioContext();
+  if (context.state !== 'running') await context.resume();
+  if (context.state !== 'running') throw new Error('AudioContext is not running');
+  await Promise.all(players.map((player) => player.startIfReady()));
+}
+
+async function startNativeMultiAudio() {
+  if (nativeStartPromise) return nativeStartPromise;
+  nativeStartPromise = startNativeMultiAudioOnce().finally(() => {
+    nativeStartPromise = null;
+  });
+  return nativeStartPromise;
+}
+
+async function startNativeMultiAudioOnce() {
+  if (!nativeMultiAudio) throw new Error('native audio element missing');
+  nativeStopExpected = true;
+  if (!nativePreloadActive || !nativeMultiAudio.getAttribute('src')) {
+    nativeMultiAudio.preload = 'auto';
+    nativeMultiAudio.src = buildNativeMultiAudioUrl();
+    nativeMultiAudio.load();
+  }
+  updateMediaSessionMetadata();
+  try {
+    await nativeMultiAudio.play();
+  } catch (err) {
+    nativeStopExpected = false;
+    throw err;
+  }
+  nativeAudioStarted = true;
+  nativeStopExpected = false;
+  nativePreloadActive = false;
+  players.forEach((player) => {
+    player.started = true;
+    player.paused = false;
+    player.resetNativeLevelSync();
+  });
+  players.forEach((player) => player.sendNativeGain({ immediate: true }));
+  updateHeader();
+}
+
+function preloadNativeMultiAudio() {
+  if (!nativeMultiAudio || multiPlaybackRequested || nativePreloadActive) return;
+  nativeStopExpected = true;
+  nativeMultiAudio.preload = 'auto';
+  nativeMultiAudio.src = buildNativeMultiAudioUrl();
+  nativeMultiAudio.load();
+  updateMediaSessionMetadata();
+  nativePreloadActive = true;
+  nativeStopExpected = false;
+}
+
+function buildNativeMultiAudioUrl() {
+  const query = new URLSearchParams({
+    streams: streams.map((stream) => stream.name).join(','),
+    clientId: getClientId(),
+    t: String(Date.now()),
+  });
+  return `/multi/native.aac?${query.toString()}`;
+}
+
+function updateMediaSessionMetadata() {
+  if (!('mediaSession' in navigator) || !window.MediaMetadata) return;
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: 'Multi Stream',
+    artist: streams.map((stream) => stream.label).join(', '),
+    album: 'UDP Airband Server',
+  });
+}
+
+function stopNativeMultiAudio() {
+  if (!nativeMultiAudio) return;
+  nativeStopExpected = true;
+  clearTimeout(nativeReconnectTimer);
+  nativeMultiAudio.pause();
+  nativeMultiAudio.removeAttribute('src');
+  nativeMultiAudio.load();
+  nativeAudioStarted = false;
+  nativePreloadActive = false;
+  nativeStartPromise = null;
+  players.forEach((player) => player.resetNativeLevelSync());
+}
+
+function setGlobalMode(mode, options = {}) {
+  if (!['raw', 'opus'].includes(mode)) return;
+  const changed = globalMode !== mode;
+  globalMode = mode;
+  players.forEach((player) => {
+    if (changed) player.started = false;
+    player.resetNativeLevelSync();
+    player.updateLabels();
+  });
+  updateModeControls();
+  if (changed && multiPlaybackRequested && !options.deferStart) {
+    startSelectedGlobalMode().catch(() => {});
+  }
+}
+
+function showModeNotice(mode) {
+  if (!['raw', 'opus'].includes(mode)) return;
+  pendingNoticeMode = mode;
+  setGlobalMode(mode, { deferStart: true });
+  if (multiNoticeTitle) multiNoticeTitle.textContent = t(mode === 'opus' ? 'compatibleNoticeTitle' : 'realTimeNoticeTitle');
+  if (multiNoticeBody) multiNoticeBody.textContent = t(mode === 'opus' ? 'compatibleNoticeBody' : 'realTimeNoticeBody');
+  if (multiStartButton) multiStartButton.textContent = t('accept');
+  if (multiStartOverlay) multiStartOverlay.hidden = false;
+  if (mode === 'opus') preloadNativeMultiAudio();
+  else stopNativeMultiAudio();
+}
+
+function updateModeNotice() {
+  if (!pendingNoticeMode) return;
+  if (multiNoticeTitle) multiNoticeTitle.textContent = t(pendingNoticeMode === 'opus' ? 'compatibleNoticeTitle' : 'realTimeNoticeTitle');
+  if (multiNoticeBody) multiNoticeBody.textContent = t(pendingNoticeMode === 'opus' ? 'compatibleNoticeBody' : 'realTimeNoticeBody');
+  if (multiStartButton) multiStartButton.textContent = t('accept');
+}
+
+function shouldRecoverNativeAudio() {
+  return globalMode === 'opus' && multiPlaybackRequested && !globalPaused;
+}
+
+function nativeNeedsReconnect() {
+  return shouldRecoverNativeAudio()
+    && nativeMultiAudio
+    && !nativeStartPromise
+    && (!nativeAudioStarted || nativeMultiAudio.paused || nativeMultiAudio.error);
+}
+
+function handleNativePlaybackInterrupted(eventName) {
+  if (nativeStopExpected || !shouldRecoverNativeAudio()) return;
+  if (nativeStartPromise) return;
+  if (eventName === 'stalled' && nativeMultiAudio && !nativeMultiAudio.paused && !nativeMultiAudio.error) return;
+  nativeAudioStarted = false;
+  players.forEach((player) => player.resetNativeLevelSync());
+  updateHeader();
+  if (document.visibilityState === 'visible') {
+    scheduleNativeReconnect(500);
+  }
+}
+
+function scheduleNativeReconnect(delayMs) {
+  if (!shouldRecoverNativeAudio() || document.visibilityState === 'hidden') return;
+  clearTimeout(nativeReconnectTimer);
+  nativeReconnectTimer = setTimeout(() => {
+    recoverNativeAudio().catch(() => {});
+  }, delayMs);
+}
+
+async function recoverNativeAudio() {
+  if (!shouldRecoverNativeAudio() || nativeReconnectInFlight) return;
+  nativeReconnectInFlight = true;
+  try {
+    await startNativeMultiAudio();
+    if (multiStartOverlay) multiStartOverlay.hidden = true;
+  } catch {
+    nativeAudioStarted = false;
+    if (multiStartOverlay) multiStartOverlay.hidden = false;
+  } finally {
+    nativeReconnectInFlight = false;
+  }
+}
+
+function updateModeControls() {
+  modeButtons.forEach((button) => {
+    button.textContent = t(button.dataset.mode === 'opus' ? 'compatibleMode' : 'realTimeMode');
+    button.classList.toggle('active', button.dataset.mode === globalMode);
+  });
 }
 
 function updateHeader() {
@@ -192,6 +441,8 @@ function applyLanguage() {
   });
   languageOptions.forEach((option) => option.classList.toggle('active', option.dataset.lang === language));
   players.forEach((player) => player.updateLabels());
+  updateModeControls();
+  updateModeNotice();
   updateHeader();
 }
 
@@ -200,7 +451,7 @@ class MultiStreamPlayer {
     this.stream = stream;
     this.config = { ...stream, compressedCodec: 'adpcm', compressedAvailable: false };
     this.clientId = getClientId(stream.name);
-    this.mode = isMobileDevice() ? 'opus' : 'raw';
+    this.mode = 'raw';
     this.currentMode = '';
     this.controlOpen = false;
     this.confirmed = false;
@@ -219,27 +470,30 @@ class MultiStreamPlayer {
     this.lastBandwidthBytes = 0;
     this.lastBandwidthAt = Date.now();
     this.nextPlayTime = 0;
+    this.socketGeneration = 0;
+    this.scheduledSources = new Set();
+    this.nativeGainTimer = null;
   }
 
   bind(card) {
     this.card = card;
     this.nameEl = card.querySelector('[data-role="name"]');
+    this.compactToggle = card.querySelector('[data-role="compact-toggle"]');
     this.compactNameEl = card.querySelector('[data-role="compact-name"]');
     this.lastEl = card.querySelector('[data-role="last"]');
     this.modeButton = card.querySelector('[data-role="mode"]');
     this.startButton = card.querySelector('[data-role="start"]');
-    this.toggleButton = card.querySelector('[data-role="toggle"]');
+    this.nativeMuteButton = card.querySelector('[data-role="native-mute"]');
     this.gainInput = card.querySelector('[data-role="gain"]');
     this.gainValue = card.querySelector('[data-role="gain-value"]');
     this.levelDb = card.querySelector('[data-role="level-db"]');
     this.levelMask = card.querySelector('[data-role="level-mask"]');
     this.nameEl.textContent = this.stream.label;
-    this.compactNameEl.textContent = this.stream.label;
-    this.toggleButton.addEventListener('click', (event) => {
-      event.preventDefault();
-      const expanded = !this.card.classList.contains('expanded');
-      this.card.classList.toggle('expanded', expanded);
-      this.toggleButton.setAttribute('aria-expanded', String(expanded));
+    this.updateCompactLabel();
+    this.compactToggle.addEventListener('click', () => {
+      if (globalMode !== 'raw') return;
+      this.card.classList.toggle('expanded');
+      this.compactToggle.setAttribute('aria-expanded', String(this.card.classList.contains('expanded')));
     });
     this.modeButton.addEventListener('click', () => {
       this.mode = this.mode === 'raw' ? 'opus' : 'raw';
@@ -255,10 +509,17 @@ class MultiStreamPlayer {
       }
       this.updateLabels();
     });
+    this.nativeMuteButton.addEventListener('click', () => {
+      this.muted = !this.muted;
+      this.applyGain();
+      this.sendNativeGain({ immediate: true });
+      this.updateLabels();
+    });
     this.gainInput.addEventListener('input', () => {
       this.gain = Number(this.gainInput.value);
       this.gainValue.textContent = `${Math.round(this.gain * 100)}%`;
       this.applyGain();
+      this.sendNativeGain();
       this.showGainValue();
     });
     this.gainInput.addEventListener('pointerdown', () => this.showGainValue());
@@ -269,6 +530,7 @@ class MultiStreamPlayer {
     this.gainInput.addEventListener('mouseenter', () => this.showGainValue());
     this.gainInput.addEventListener('mouseleave', () => this.hideGainValueLater());
     this.updateLabels();
+    this.updateCardModeState();
   }
 
   showGainValue() {
@@ -303,6 +565,11 @@ class MultiStreamPlayer {
         this.startIfReady();
       } else if (message.type === 'stats') {
         this.activeListeners = message.activeListeners || 0;
+        this.bandwidth = message.listenerBitsPerSecond || this.bandwidth || 0;
+        if (globalMode === 'opus') {
+          this.peak = Number(message.levelPeak) || 0;
+          this.lastAudioAt = this.peak > 0 ? Date.now() : 0;
+        }
         this.lastHeardAt = message.lastHeardAt || 0;
         this.lastHeardLabel = message.lastHeardLabel || 'never';
         if (message.hasUdp || this.lastHeardAt) this.confirmed = true;
@@ -333,7 +600,7 @@ class MultiStreamPlayer {
   }
 
   async startIfReady() {
-    if (!multiPlaybackRequested || this.started || !this.configReady) return;
+    if (globalMode !== 'raw' || !multiPlaybackRequested || this.started || !this.configReady) return;
     try {
       await this.startAudio();
     } catch {
@@ -343,29 +610,33 @@ class MultiStreamPlayer {
   }
 
   startRaw() {
+    const generation = this.socketGeneration;
     this.currentMode = 'raw';
     this.rawWs = new WebSocket(`${wsProtocol()}://${location.host}/${encodeURIComponent(this.stream.name)}/audio?clientId=${encodeURIComponent(this.clientId)}`);
     this.rawWs.binaryType = 'arraybuffer';
     this.rawWs.addEventListener('message', (event) => {
+      if (generation !== this.socketGeneration) return;
       const samples = new Float32Array(event.data);
       const frames = samples.length / this.config.channels;
       if (!Number.isInteger(frames)) return;
       this.receivedBytes += event.data.byteLength || 0;
       this.confirmed = true;
       this.lastAudioAt = Date.now();
-      this.peak = Math.max(this.peak * 0.92, peakOf(samples));
+      this.peak = Math.max(this.peak * 0.55, peakOf(samples));
       this.schedule(samples, frames);
     });
     this.rawWs.addEventListener('close', () => {
-      if (this.started && !this.paused && this.currentMode === 'raw') setTimeout(() => this.startRaw(), 1000);
+      if (generation === this.socketGeneration && this.started && !this.paused && this.currentMode === 'raw') setTimeout(() => this.startRaw(), 1000);
     });
   }
 
   startAdpcm() {
+    const generation = this.socketGeneration;
     this.currentMode = 'opus';
     this.adpcmWs = new WebSocket(`${wsProtocol()}://${location.host}/${encodeURIComponent(this.stream.name)}/adpcm?clientId=${encodeURIComponent(this.clientId)}`);
     this.adpcmWs.binaryType = 'arraybuffer';
     this.adpcmWs.addEventListener('message', (event) => {
+      if (generation !== this.socketGeneration) return;
       const decoded = decodeAdpcmFrame(event.data);
       if (!decoded) return;
       this.config.sampleRate = decoded.sampleRate;
@@ -373,11 +644,11 @@ class MultiStreamPlayer {
       this.receivedBytes += event.data.byteLength || 0;
       this.confirmed = true;
       this.lastAudioAt = Date.now();
-      this.peak = Math.max(this.peak * 0.92, peakOf(decoded.samples));
+      this.peak = Math.max(this.peak * 0.55, peakOf(decoded.samples));
       this.schedule(decoded.samples, decoded.frames);
     });
     this.adpcmWs.addEventListener('close', () => {
-      if (this.started && !this.paused && this.currentMode === 'opus') setTimeout(() => this.startAdpcm(), 1000);
+      if (generation === this.socketGeneration && this.started && !this.paused && this.currentMode === 'opus') setTimeout(() => this.startAdpcm(), 1000);
     });
   }
 
@@ -393,14 +664,15 @@ class MultiStreamPlayer {
     const source = context.createBufferSource();
     source.buffer = buffer;
     source.connect(this.gainNode);
+    this.scheduledSources.add(source);
+    source.addEventListener('ended', () => this.scheduledSources.delete(source));
     source.start(this.nextPlayTime);
     this.nextPlayTime += buffer.duration;
   }
 
   pause() {
     this.paused = true;
-    this.stopAudioSockets();
-    this.bandwidth = 0;
+    this.stopRealtimeAudio();
     this.updateLabels();
   }
 
@@ -410,25 +682,54 @@ class MultiStreamPlayer {
   }
 
   stopAudioSockets() {
+    this.socketGeneration += 1;
     if (this.rawWs) this.rawWs.close();
     if (this.adpcmWs) this.adpcmWs.close();
     this.rawWs = null;
     this.adpcmWs = null;
   }
 
+  stopRealtimeAudio() {
+    this.stopAudioSockets();
+    this.stopScheduledSources();
+    this.bandwidth = 0;
+    this.peak = 0;
+    this.resetNativeLevelSync();
+    this.lastAudioAt = 0;
+  }
+
+  stopScheduledSources() {
+    for (const source of this.scheduledSources) {
+      try {
+        source.stop();
+      } catch {
+        // The source may already have ended.
+      }
+    }
+    this.scheduledSources.clear();
+    this.nextPlayTime = 0;
+  }
+
   applyGain() {
     if (this.gainNode) this.gainNode.gain.value = this.muted ? 0 : this.gain;
+  }
+
+  resetNativeLevelSync() {
+    this.peak = 0;
+    this.lastAudioAt = 0;
   }
 
   updateMeter() {
     const now = Date.now();
     const elapsed = Math.max(0.001, (now - this.lastBandwidthAt) / 1000);
-    this.bandwidth = this.paused ? 0 : Math.max(0, (this.receivedBytes - this.lastBandwidthBytes) * 8 / elapsed);
+    if (globalMode !== 'opus') {
+      this.bandwidth = this.paused ? 0 : Math.max(0, (this.receivedBytes - this.lastBandwidthBytes) * 8 / elapsed);
+    }
     this.lastBandwidthBytes = this.receivedBytes;
     this.lastBandwidthAt = now;
-    if (!this.lastAudioAt || now - this.lastAudioAt > 350) {
+    if (!this.lastAudioAt || now - this.lastAudioAt > 400 || globalPaused) {
       this.peak = 0;
-    } else {
+    } else if (globalMode !== 'opus') {
       this.peak *= 0.985;
     }
     const db = this.peak * this.gain > 0 ? 20 * Math.log10(this.peak * this.gain) : -60;
@@ -439,8 +740,52 @@ class MultiStreamPlayer {
 
   updateLabels() {
     this.lastEl.textContent = localizeLastHeard(this.lastHeardLabel);
+    this.updateCompactLabel();
     this.modeButton.textContent = this.mode === 'opus' ? t('compressed') : t('uncompressed');
     this.startButton.textContent = this.started ? (this.muted ? t('unmute') : t('mute')) : t('startAudio');
+    this.nativeMuteButton.classList.toggle('muted', this.muted);
+    this.nativeMuteButton.setAttribute('aria-label', this.muted ? t('unmute') : t('mute'));
+    this.updateCardModeState();
+  }
+
+  updateCompactLabel() {
+    if (!this.compactNameEl) return;
+    this.compactNameEl.textContent = `${this.stream.label} | ${localizeLastHeard(this.lastHeardLabel)}`;
+  }
+
+  updateCardModeState() {
+    if (!this.card) return;
+    const isRaw = globalMode === 'raw';
+    this.card.classList.toggle('raw-mode', isRaw);
+    this.card.classList.toggle('compressed-mode', !isRaw);
+    if (!isRaw) this.card.classList.remove('expanded');
+    if (this.compactToggle) {
+      this.compactToggle.disabled = !isRaw;
+      this.compactToggle.setAttribute('aria-expanded', String(isRaw && this.card.classList.contains('expanded')));
+    }
+  }
+
+  sendNativeGain(options = {}) {
+    if (globalMode !== 'opus' || !multiPlaybackRequested) return;
+    const send = () => {
+      const query = new URLSearchParams({
+        clientId: getClientId(),
+        stream: this.stream.name,
+        gain: String(this.muted ? 0 : this.gain),
+      });
+      fetch(`/multi/native-gain?${query.toString()}`).catch(() => {});
+    };
+    if (options.immediate) {
+      clearTimeout(this.nativeGainTimer);
+      this.nativeGainTimer = null;
+      send();
+      return;
+    }
+    if (this.nativeGainTimer) return;
+    this.nativeGainTimer = setTimeout(() => {
+      this.nativeGainTimer = null;
+      send();
+    }, 500);
   }
 }
 
@@ -538,9 +883,11 @@ function init() {
   players = streams.map((stream) => new MultiStreamPlayer(stream));
   renderPlayers();
   applyLanguage();
+  updateModeControls();
   connectPlayers();
   updateHeader();
   updateClocks();
+  showModeNotice(globalMode);
   setInterval(updateClocks, 1000);
   setInterval(updateMeters, 250);
 }

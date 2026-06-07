@@ -30,7 +30,15 @@
       <div class="meter"><span data-i18n="buffered">Buffered</span><strong id="buffered">0 ms</strong></div>
       <div class="meter"><span data-i18n="bandwidth">Bandwidth</span><strong id="browserBandwidth">0 bps</strong></div>
       <div class="meter"><span data-i18n="lastHeardTime">Last Heard Time</span><strong id="lastHeard">never</strong></div>
-      <div class="meter"><span data-i18n="mode">Mode</span><button id="mode" class="mode-button" type="button">Uncompressed</button></div>
+      <div class="meter mode-meter">
+        <span data-i18n="mode">Mode</span>
+        <button id="mode" class="mode-button" type="button" aria-haspopup="true" aria-expanded="false">Uncompressed</button>
+        <div id="modeMenu" class="mode-menu" hidden>
+          <button class="mode-option" type="button" data-mode-option="raw">Uncompressed</button>
+          <button class="mode-option" type="button" data-mode-option="opus">Compressed</button>
+          <button class="mode-option" type="button" data-mode-option="compatible">Compatible</button>
+        </div>
+      </div>
     </section>
 
     <section class="controls">
@@ -52,7 +60,18 @@
       <div class="time-box"><span data-i18n="localTime">Local Time</span><strong id="localTime">--:--:--</strong></div>
       <div class="time-box"><span>UTC</span><strong id="utcTime">--:--:--</strong></div>
     </footer>
+    <footer class="project-footer">
+      <a href="https://github.com/OA6DXV/udp-airband-server" rel="noopener noreferrer">UDP Airband Server __SOFTWARE_VERSION__</a>
+    </footer>
   </main>
+
+  <div id="modeNoticeOverlay" class="multi-start-overlay" hidden>
+    <section class="multi-mode-notice" role="dialog" aria-modal="true" aria-labelledby="modeNoticeTitle">
+      <h2 id="modeNoticeTitle">Compatible Mode</h2>
+      <p id="modeNoticeBody"></p>
+      <button id="modeNoticeAccept" class="multi-start-button" type="button">Accept</button>
+    </section>
+  </div>
 
   <script src="/assets/app.js"></script>
 </body>

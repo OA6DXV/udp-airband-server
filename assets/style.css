@@ -339,6 +339,58 @@ button:hover {
   margin-top: 2px;
 }
 
+.mode-meter {
+  position: relative;
+}
+
+.mode-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 12px;
+  right: 12px;
+  z-index: 8;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #11161d;
+  box-shadow: 0 16px 32px rgb(0 0 0 / 35%);
+}
+
+.mode-menu[hidden] {
+  display: none;
+}
+
+.mode-option {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mode-option:hover,
+.mode-option:focus-visible {
+  border-color: var(--accent);
+}
+
+.mode-option.active {
+  background: var(--accent);
+  color: #06100b;
+}
+
+.mode-option:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 canvas {
   width: 100%;
   height: 180px;
@@ -413,16 +465,107 @@ canvas {
   font-variant-numeric: tabular-nums;
 }
 
+.project-footer {
+  margin-top: 28px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.project-footer a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.project-footer a:hover {
+  color: var(--accent);
+}
+
 .multi-streams {
   display: grid;
   gap: 16px;
 }
 
+.multi-mode-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.multi-mode-button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 12px 14px;
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.multi-mode-button.active {
+  border-color: var(--wave);
+  background: var(--wave);
+  color: #160500;
+}
+
 .multi-stream-card {
+  position: relative;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
   padding: 16px;
+}
+
+.native-mute-button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 34px;
+  height: 34px;
+  min-width: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #202733;
+  color: var(--text);
+  padding: 0;
+}
+
+.native-mute-button svg {
+  width: 19px;
+  height: 19px;
+  fill: currentColor;
+}
+
+.native-mute-button path {
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.native-mute-button .speaker-wave,
+.native-mute-button .mute-slash {
+  fill: none;
+}
+
+.native-mute-button .mute-slash {
+  display: none;
+}
+
+.native-mute-button.muted .speaker-wave {
+  display: none;
+}
+
+.native-mute-button.muted .mute-slash {
+  display: block;
+}
+
+.multi-stream-card.compressed-mode .native-mute-button {
+  display: inline-flex;
 }
 
 .multi-meters {
@@ -436,8 +579,7 @@ canvas {
   margin-top: 14px;
 }
 
-.compact-stream-header,
-.compact-stream-heading {
+.compact-stream-header {
   display: none;
 }
 
@@ -484,46 +626,43 @@ canvas {
 
 .multi-start-button {
   width: auto;
-  min-width: 0;
-  display: inline-grid;
-  place-items: center;
-  gap: 18px;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  padding: 0;
-  font-size: 32px;
+  min-width: 150px;
+  border: 1px solid rgb(92 199 134 / 55%);
+  background: var(--accent);
+  color: #06100b;
+  padding: 13px 22px;
+  border-radius: 8px;
+  font-size: 16px;
   font-weight: 700;
   cursor: pointer;
 }
 
-.multi-start-icon {
-  width: 132px;
-  height: 132px;
+.multi-start-button:hover,
+.multi-start-button:focus-visible {
+  background: #69d88d;
+}
+
+.multi-mode-notice {
+  width: min(420px, calc(100vw - 40px));
   display: grid;
-  place-items: center;
-  border: 8px solid rgb(238 242 246 / 92%);
-  border-radius: 50%;
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgb(23 29 38 / 96%);
+  box-shadow: 0 24px 70px rgb(0 0 0 / 38%);
 }
 
-.multi-start-icon::before {
-  content: "";
-  width: 0;
-  height: 0;
-  border-top: 30px solid transparent;
-  border-bottom: 30px solid transparent;
-  border-left: 48px solid rgb(238 242 246 / 94%);
-  transform: translateX(5px);
+.multi-mode-notice h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 24px;
 }
 
-.multi-start-button:hover .multi-start-icon,
-.multi-start-button:focus-visible .multi-start-icon {
-  border-color: var(--accent);
-}
-
-.multi-start-button:hover .multi-start-icon::before,
-.multi-start-button:focus-visible .multi-start-icon::before {
-  border-left-color: var(--accent);
+.multi-mode-notice p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
 }
 
 .gain-level input[type="range"] {
@@ -644,23 +783,26 @@ canvas {
     margin-bottom: 16px;
   }
 
-  .compact-stream-heading {
+  .compact-stream-toggle {
+    width: auto;
+    min-width: 0;
     display: inline-flex;
     align-items: center;
-    justify-content: flex-start;
-    gap: 9px;
-    min-width: 0;
-    width: fit-content;
-    max-width: 100%;
+    gap: 7px;
     border: 0;
     background: transparent;
     padding: 0;
     color: var(--muted);
-    cursor: pointer;
+    text-align: left;
+  }
+
+  .compact-stream-toggle:disabled {
+    opacity: 1;
+    cursor: default;
   }
 
   .compact-stream-title {
-    display: block;
+    display: inline;
     min-width: 0;
     color: var(--muted);
     font-size: 17px;
@@ -668,19 +810,34 @@ canvas {
     line-height: 1.1;
   }
 
-  .compact-stream-heading::after {
-    flex: 0 0 auto;
-    content: "";
-    width: 0.58em;
-    height: 0.58em;
-    border-right: 0.12em solid var(--muted);
-    border-bottom: 0.12em solid var(--muted);
-    transform: translateY(-0.18em) rotate(45deg);
+  .compact-chevron {
+    width: 0.65em;
+    height: 0.65em;
+    display: inline-block;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: translateY(-0.1em) rotate(45deg);
     transition: transform 140ms ease;
   }
 
-  .multi-stream-card.expanded .compact-stream-heading::after {
-    transform: translateY(0.12em) rotate(225deg);
+  .multi-stream-card.expanded .compact-chevron {
+    transform: translateY(0.1em) rotate(225deg);
+  }
+
+  .multi-stream-card.compressed-mode .compact-chevron {
+    display: none;
+  }
+
+  .multi-stream-card.raw-mode .multi-meters {
+    display: none;
+  }
+
+  .multi-stream-card.raw-mode.expanded .multi-meters {
+    display: grid;
+  }
+
+  .multi-stream-card.compressed-mode .multi-meters {
+    display: none;
   }
 
   .multi-stream-card .gain-level-track,
