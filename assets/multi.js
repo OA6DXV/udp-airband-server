@@ -12,6 +12,7 @@ const statusText = document.getElementById('statusText');
 const totalBandwidthEl = document.getElementById('totalBandwidth');
 const localTimeEl = document.getElementById('localTime');
 const utcTimeEl = document.getElementById('utcTime');
+const titleStatusDot = document.getElementById('titleStatusDot');
 const languageToggle = document.getElementById('languageToggle');
 const languageCode = document.getElementById('languageCode');
 const languageMenu = document.getElementById('languageMenu');
@@ -26,7 +27,7 @@ const modeButtons = Array.from(document.querySelectorAll('.multi-mode-button'));
 const translations = {
   en: {
     users: 'Users', localTime: 'Local Time', disconnected: 'Disconnected', waitingUdp: 'Waiting for UDP',
-    connected: 'Connected', idle: 'Push to Reconnect', stopStream: 'Stop stream', lastHeard: 'Last Heard',
+    connected: 'Connected', idle: 'Push to Reconnect', pushDisconnect: 'Push to disconnect', stopStream: 'Stop stream', lastHeard: 'Last Heard',
     mode: 'Mode', audio: 'Audio', startAudio: 'Start', mute: 'Mute', unmute: 'Unmute', compressed: 'Compressed',
     uncompressed: 'Uncompressed', streamName: 'Stream', level: 'Level', never: 'never', now: 'Now',
     realTimeMode: 'RealTime Mode', compatibleMode: 'Compatible Mode', accept: 'Accept',
@@ -37,7 +38,7 @@ const translations = {
   },
   es: {
     users: 'Usuarios', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP',
-    connected: 'Conectado', idle: 'Presiona para reconectar', stopStream: 'Detener stream', lastHeard: 'Ultima transmision',
+    connected: 'Conectado', idle: 'Presiona para reconectar', pushDisconnect: 'Presiona para desconectar', stopStream: 'Detener stream', lastHeard: 'Ultima transmision',
     mode: 'Modo', audio: 'Audio', startAudio: 'Iniciar', mute: 'Silenciar', unmute: 'Activar', compressed: 'Comprimido',
     uncompressed: 'Sin comprimir', streamName: 'Stream', level: 'Nivel', never: 'nunca', now: 'Ahora',
     realTimeMode: 'Modo RealTime', compatibleMode: 'Modo Compatible', accept: 'Aceptar',
@@ -415,7 +416,18 @@ function updateHeader() {
 
 function setHeaderStatus(state, key) {
   statusEl.className = `status ${state}`;
-  statusText.textContent = key === 'connected' && statusHovering && !globalPaused ? t('stopStream') : t(key);
+  titleStatusDot.className = 'title-status-dot';
+  if (key === 'connected') {
+    titleStatusDot.classList.add('live');
+    statusText.textContent = t('pushDisconnect');
+    return;
+  }
+  if (key === 'idle') {
+    titleStatusDot.classList.add('idle');
+    statusText.textContent = t('idle');
+    return;
+  }
+  statusText.textContent = t(key);
 }
 
 function updateMeters() {

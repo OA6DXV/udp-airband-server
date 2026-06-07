@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.4-testing - Unreleased
+## 1.4-preview - Unreleased
 
 ### Added
 
@@ -13,7 +13,7 @@
 
 ### Changed
 
-- Updated the software version to `1.4-testing`.
+- Updated the software version to `1.4-preview`.
 - The main page now shows a Multi Stream card only when two or more streams are configured.
 - Expected client/proxy socket closes such as `EPIPE` and `ECONNRESET` are now logged as debug-only `client_socket_closed` events instead of production warnings.
 - Multi Stream selection now uses a slower border-only breathing animation on stream cards, and the `/multi` page now embeds stream configuration as valid JSON.

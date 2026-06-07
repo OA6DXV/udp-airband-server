@@ -12,6 +12,7 @@ const modeButton = document.getElementById('mode');
 const modeMenu = document.getElementById('modeMenu');
 const modeOptions = Array.from(document.querySelectorAll('[data-mode-option]'));
 const titleLink = document.getElementById('title');
+const titleStatusDot = document.getElementById('titleStatusDot');
 const levelMaskEl = document.getElementById('levelMask');
 const levelValueEl = document.getElementById('levelValue');
 const localTimeEl = document.getElementById('localTime');
@@ -29,7 +30,7 @@ const ctx = canvas.getContext('2d');
 
 const translations = {
   en: {
-    users: 'Users', gain: 'Gain', startAudio: 'Start Audio', mute: 'Mute', unmute: 'Unmute', buffered: 'Buffered', bandwidth: 'Bandwidth', lastHeardTime: 'Last Heard Time', mode: 'Mode', level: 'Level', localTime: 'Local Time', disconnected: 'Disconnected', waitingUdp: 'Waiting for UDP', connected: 'Connected', idle: 'Push to Reconnect', stopStream: 'Stop stream', returnHome: 'Click to return home', opusUnavailable: 'Compressed unavailable', compressed: 'Compressed', uncompressed: 'Uncompressed', switchMode: 'Switch audio mode', opusNeedsFfmpeg: 'Compressed mode is unavailable on the server', never: 'never', now: 'Now',
+    users: 'Users', gain: 'Gain', startAudio: 'Start Audio', mute: 'Mute', unmute: 'Unmute', buffered: 'Buffered', bandwidth: 'Bandwidth', lastHeardTime: 'Last Heard Time', mode: 'Mode', level: 'Level', localTime: 'Local Time', disconnected: 'Disconnected', waitingUdp: 'Waiting for UDP', connected: 'Connected', idle: 'Push to Reconnect', pushDisconnect: 'Push to disconnect', stopStream: 'Stop stream', returnHome: 'Click to return home', opusUnavailable: 'Compressed unavailable', compressed: 'Compressed', uncompressed: 'Uncompressed', switchMode: 'Switch audio mode', opusNeedsFfmpeg: 'Compressed mode is unavailable on the server', never: 'never', now: 'Now',
     compatible: 'Compatible', compatibleUnavailable: 'Compatible unavailable', modeUnavailable: 'Mode unavailable',
     compatibleNoticeTitle: 'Compatible Mode',
     compatibleNoticeBody: 'Compatible Mode was designed for mobile devices and background playback. It uses native AAC audio, so it can keep playing with the phone locked, but it may add a variable delay of about 5 seconds.',
@@ -38,7 +39,7 @@ const translations = {
     accept: 'Accept',
   },
   es: {
-    users: 'Usuarios', gain: 'Ganancia', startAudio: 'Iniciar audio', mute: 'Silenciar', unmute: 'Activar audio', buffered: 'Buffer', bandwidth: 'Ancho de banda', lastHeardTime: 'Ultima transmision', mode: 'Modo', level: 'Nivel', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP', connected: 'Conectado', idle: 'Presiona para reconectar', stopStream: 'Detener stream', returnHome: 'Click para volver a la pagina principal', opusUnavailable: 'Comprimido no disponible', compressed: 'Comprimido', uncompressed: 'Sin comprimir', switchMode: 'Cambiar modo de audio', opusNeedsFfmpeg: 'El modo comprimido no esta disponible en el servidor', never: 'nunca', now: 'Ahora',
+    users: 'Usuarios', gain: 'Ganancia', startAudio: 'Iniciar audio', mute: 'Silenciar', unmute: 'Activar audio', buffered: 'Buffer', bandwidth: 'Ancho de banda', lastHeardTime: 'Ultima transmision', mode: 'Modo', level: 'Nivel', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP', connected: 'Conectado', idle: 'Presiona para reconectar', pushDisconnect: 'Presiona para desconectar', stopStream: 'Detener stream', returnHome: 'Click para volver a la pagina principal', opusUnavailable: 'Comprimido no disponible', compressed: 'Comprimido', uncompressed: 'Sin comprimir', switchMode: 'Cambiar modo de audio', opusNeedsFfmpeg: 'El modo comprimido no esta disponible en el servidor', never: 'nunca', now: 'Ahora',
     compatible: 'Compatible', compatibleUnavailable: 'Compatible no disponible', modeUnavailable: 'Modo no disponible',
     compatibleNoticeTitle: 'Modo Compatible',
     compatibleNoticeBody: 'El Modo Compatible fue disenado para moviles y reproduccion en segundo plano. Usa audio AAC nativo, asi que puede seguir sonando con el telefono bloqueado, pero puede agregar un delay variable de unos 5 segundos.',
@@ -820,8 +821,15 @@ function setStatus(state, textKey) {
 }
 
 function updateStatusLabel() {
-  if (currentStatusKey === 'connected' && statusHovering && !streamPaused) {
-    statusText.textContent = t('stopStream');
+  titleStatusDot.className = 'title-status-dot';
+  if (currentStatusKey === 'connected') {
+    titleStatusDot.classList.add('live');
+    statusText.textContent = t('pushDisconnect');
+    return;
+  }
+  if (currentStatusKey === 'idle') {
+    titleStatusDot.classList.add('idle');
+    statusText.textContent = t('idle');
     return;
   }
   statusText.textContent = t(currentStatusKey);
