@@ -158,7 +158,10 @@ function renderPlayers() {
         <div class="meter"><span data-i18n="audio">Audio</span><button data-role="start" type="button">Start</button></div>
       </section>
       <div class="compact-stream-header">
-        <span class="compact-stream-title" data-role="compact-name"></span>
+        <button class="compact-stream-toggle" data-role="compact-toggle" type="button" aria-expanded="false">
+          <span class="compact-stream-title" data-role="compact-name"></span>
+          <span class="compact-chevron" aria-hidden="true"></span>
+        </button>
       </div>
       <div class="level gain-level">
         <span class="level-label" data-i18n="level">Level</span>
@@ -413,6 +416,7 @@ class MultiStreamPlayer {
   bind(card) {
     this.card = card;
     this.nameEl = card.querySelector('[data-role="name"]');
+    this.compactToggle = card.querySelector('[data-role="compact-toggle"]');
     this.compactNameEl = card.querySelector('[data-role="compact-name"]');
     this.lastEl = card.querySelector('[data-role="last"]');
     this.modeButton = card.querySelector('[data-role="mode"]');
@@ -423,6 +427,11 @@ class MultiStreamPlayer {
     this.levelMask = card.querySelector('[data-role="level-mask"]');
     this.nameEl.textContent = this.stream.label;
     this.updateCompactLabel();
+    this.compactToggle.addEventListener('click', () => {
+      if (globalMode !== 'raw') return;
+      this.card.classList.toggle('expanded');
+      this.compactToggle.setAttribute('aria-expanded', String(this.card.classList.contains('expanded')));
+    });
     this.modeButton.addEventListener('click', () => {
       this.mode = this.mode === 'raw' ? 'opus' : 'raw';
       if (this.started && !this.paused) this.startAudio();
@@ -452,6 +461,7 @@ class MultiStreamPlayer {
     this.gainInput.addEventListener('mouseenter', () => this.showGainValue());
     this.gainInput.addEventListener('mouseleave', () => this.hideGainValueLater());
     this.updateLabels();
+    this.updateCardModeState();
   }
 
   showGainValue() {
@@ -544,7 +554,7 @@ class MultiStreamPlayer {
       this.receivedBytes += event.data.byteLength || 0;
       this.confirmed = true;
       this.lastAudioAt = Date.now();
-      this.peak = Math.max(this.peak * 0.92, peakOf(samples));
+      this.peak = Math.max(this.peak * 0.55, peakOf(samples));
       this.schedule(samples, frames);
     });
     this.rawWs.addEventListener('close', () => {
@@ -566,7 +576,7 @@ class MultiStreamPlayer {
       this.receivedBytes += event.data.byteLength || 0;
       this.confirmed = true;
       this.lastAudioAt = Date.now();
-      this.peak = Math.max(this.peak * 0.92, peakOf(decoded.samples));
+      this.peak = Math.max(this.peak * 0.55, peakOf(decoded.samples));
       this.schedule(decoded.samples, decoded.frames);
     });
     this.adpcmWs.addEventListener('close', () => {
@@ -698,11 +708,24 @@ class MultiStreamPlayer {
     this.updateCompactLabel();
     this.modeButton.textContent = globalMode === 'opus' ? t('compressed') : t('uncompressed');
     this.startButton.textContent = this.started ? (this.muted ? t('unmute') : t('mute')) : t('startAudio');
+    this.updateCardModeState();
   }
 
   updateCompactLabel() {
     if (!this.compactNameEl) return;
     this.compactNameEl.textContent = `${this.stream.label} | ${localizeLastHeard(this.lastHeardLabel)}`;
+  }
+
+  updateCardModeState() {
+    if (!this.card) return;
+    const isRaw = globalMode === 'raw';
+    this.card.classList.toggle('raw-mode', isRaw);
+    this.card.classList.toggle('compressed-mode', !isRaw);
+    if (!isRaw) this.card.classList.remove('expanded');
+    if (this.compactToggle) {
+      this.compactToggle.disabled = !isRaw;
+      this.compactToggle.setAttribute('aria-expanded', String(isRaw && this.card.classList.contains('expanded')));
+    }
   }
 
   sendNativeGain() {
