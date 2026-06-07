@@ -42,11 +42,6 @@ const serverConfigUpdated = ensureServerConfigDefaults(serverConfigPath, [
     comments: ['Public status API. Keep disabled unless you explicitly want /status endpoints.'],
     keys: [{ key: 'enabled', value: 'false' }],
   },
-  {
-    name: 'logging',
-    comments: ['Connection logs are summarized at info level. Use -D for per-socket details.'],
-    keys: [{ key: 'client_summary_ms', value: '10000' }],
-  },
 ], fs, path);
 const serverConfig = loadServerConfig(serverConfigPath, fs, path);
 const defaultUdpHost = args.udpHost || getSetting(serverConfig, 'udp.host', '0.0.0.0');
@@ -63,7 +58,6 @@ const aacBitrate = args.aacBitrate || getSetting(serverConfig, 'compressed.aacBi
 const opusKeepaliveMs = Number(args.opusKeepaliveMs || getSetting(serverConfig, 'compressed.keepaliveMs', 1000));
 const ffmpegPath = args.ffmpeg || getSetting(serverConfig, 'compressed.ffmpeg', 'ffmpeg');
 const logLevel = args.logLevel || getSetting(serverConfig, 'logging.level', 'info');
-const clientSummaryMs = Number(args.clientSummaryMs || args.clientLogSummaryMs || getSetting(serverConfig, 'logging.clientSummaryMs', 10000));
 const tlsKeyPath = args.tlsKey || args.httpsKey || getSetting(serverConfig, 'ssl.key', '');
 const tlsCertPath = args.tlsCert || args.httpsCert || getSetting(serverConfig, 'ssl.cert', '');
 const sslEnabledSetting = args.sslEnabled !== undefined ? args.sslEnabled : (args.tlsEnabled !== undefined ? args.tlsEnabled : getSetting(serverConfig, 'ssl.enabled', false));
@@ -72,7 +66,7 @@ const debugEnabled = Boolean(args.debug);
 const logTimestamps = parseBoolean(args.logTimestamps !== undefined ? args.logTimestamps : (debugEnabled ? true : getSetting(serverConfig, 'logging.timestamps', false)));
 const logColors = parseBoolean(args.logColors !== undefined ? args.logColors : (debugEnabled ? true : getSetting(serverConfig, 'logging.colors', false)));
 const logger = createLogger({ debug: debugEnabled, level: logLevel, timestamps: logTimestamps, colors: logColors });
-const clientActivityLog = createClientActivityLog(logger, clientSummaryMs);
+const clientLifecycleLog = createClientLifecycleLog(logger);
 
 if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) {
   fatal('--http-port must be a valid port');
@@ -85,9 +79,6 @@ if (!COMPRESSED_CODECS.has(compressedCodec)) {
 }
 if (!Number.isInteger(adpcmFrameMs) || adpcmFrameMs < 10 || adpcmFrameMs > 100) {
   fatal('--adpcm-frame-ms must be between 10 and 100');
-}
-if (!Number.isFinite(clientSummaryMs) || clientSummaryMs < 0 || (clientSummaryMs > 0 && clientSummaryMs < 1000)) {
-  fatal('--client-summary-ms must be 0 or at least 1000');
 }
 const publicDir = __dirname;
 const indexHtml = fs.readFileSync(path.join(publicDir, 'index.html'));
@@ -150,6 +141,8 @@ const nativeMultiAac = createNativeMultiAac({
   addListenerMode,
   ffmpegPath,
   logger,
+  onClientConnected: (clientId) => recordClientActivity('connected', 'multi', 'native-aac', clientId, ''),
+  onClientDisconnected: (clientId) => recordClientActivity('disconnected', 'multi', 'native-aac', clientId, ''),
   removeListenerMode,
   spawn,
   streamsByName,
@@ -388,48 +381,59 @@ function attachUpgradeHandler(server) {
 
 function recordClientActivity(action, streamName, mode, clientId, remote) {
   logger.debug(`client_${action}`, { stream: streamName, mode, client: clientId, remote });
-  clientActivityLog.record(action, streamName, mode, clientId, remote);
+  clientLifecycleLog.record(action, clientId, remote);
 }
 
-function createClientActivityLog(activityLogger, summaryMs) {
-  let connected = 0;
-  let disconnected = 0;
-  const clients = new Set();
-  const remotes = new Set();
-  const modes = new Map();
-  const streamCounts = new Map();
+function createClientLifecycleLog(activityLogger) {
+  const disconnectGraceMs = 2000;
+  const clients = new Map();
 
-  function record(action, streamName, mode, clientId, remote) {
-    if (summaryMs <= 0) return;
-    if (action === 'connected') connected += 1;
-    if (action === 'disconnected') disconnected += 1;
-    if (clientId) clients.add(clientId);
-    if (remote) remotes.add(remote);
-    incrementCount(modes, `${action}.${mode}`);
-    incrementCount(streamCounts, streamName);
+  function record(action, clientId, remote) {
+    if (!clientId) return;
+    if (action === 'connected') {
+      recordConnect(clientId, remote);
+      return;
+    }
+    if (action === 'disconnected') {
+      recordDisconnect(clientId);
+    }
   }
 
-  function flush() {
-    const total = connected + disconnected;
-    if (total === 0) return;
-    activityLogger.info('client_activity', {
-      windowMs: summaryMs,
-      connected,
-      disconnected,
-      clients: clients.size,
-      remotes: remotes.size,
-      modes: formatTopCounts(modes),
-      streams: formatTopCounts(streamCounts),
-    });
-    connected = 0;
-    disconnected = 0;
-    clients.clear();
-    remotes.clear();
-    modes.clear();
-    streamCounts.clear();
+  function recordConnect(clientId, remote) {
+    let entry = clients.get(clientId);
+    if (!entry) {
+      entry = { socketCount: 0, remote, connectedAt: Date.now(), disconnectTimer: null };
+      clients.set(clientId, entry);
+      activityLogger.info('client_connected', { client: clientId, remote, activeClients: clients.size });
+    }
+    if (entry.disconnectTimer) {
+      clearTimeout(entry.disconnectTimer);
+      entry.disconnectTimer = null;
+    }
+    entry.socketCount += 1;
+    if (remote) entry.remote = remote;
   }
 
-  return { flush, record };
+  function recordDisconnect(clientId) {
+    const entry = clients.get(clientId);
+    if (!entry) return;
+    entry.socketCount = Math.max(0, entry.socketCount - 1);
+    if (entry.socketCount > 0 || entry.disconnectTimer) return;
+    entry.disconnectTimer = setTimeout(() => {
+      const latest = clients.get(clientId);
+      if (!latest || latest.socketCount > 0) return;
+      clients.delete(clientId);
+      activityLogger.info('client_disconnected', {
+        client: clientId,
+        remote: latest.remote,
+        durationSec: Math.max(0, Math.round((Date.now() - latest.connectedAt) / 1000)),
+        activeClients: clients.size,
+      });
+    }, disconnectGraceMs);
+    if (typeof entry.disconnectTimer.unref === 'function') entry.disconnectTimer.unref();
+  }
+
+  return { record };
 }
 
 function startWebServers() {
@@ -445,7 +449,6 @@ function startWebServers() {
       streamsConfig: configPath,
       streamsConfigLoaded: streamsConfigExists,
       apiEnabled,
-      clientSummaryMs,
       logLevel: logger.level,
     });
   });
@@ -455,10 +458,6 @@ function startWebServers() {
     logger.warn('compressed_unavailable', { codec: compressedCodec, ffmpeg: ffmpegPath });
   }
   setInterval(broadcastStreamStats, 250);
-  if (clientSummaryMs > 0) {
-    const clientActivityTimer = setInterval(() => clientActivityLog.flush(), clientSummaryMs);
-    if (typeof clientActivityTimer.unref === 'function') clientActivityTimer.unref();
-  }
   if (compressedEnabled) {
     setInterval(() => compressed.writeSilenceKeepalive(streams, opusKeepaliveMs), opusKeepaliveMs);
   }
@@ -647,18 +646,6 @@ function formatStreamStartupLine(stream) {
 
 function isExpectedClientSocketError(err) {
   return ['EPIPE', 'ECONNRESET', 'ECONNABORTED', 'ERR_STREAM_DESTROYED'].includes(err && err.code);
-}
-
-function incrementCount(map, key) {
-  if (!key) return;
-  map.set(key, (map.get(key) || 0) + 1);
-}
-
-function formatTopCounts(map, limit = 8) {
-  const entries = Array.from(map.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  const shown = entries.slice(0, limit).map(([key, count]) => `${key}:${count}`);
-  if (entries.length > limit) shown.push(`+${entries.length - limit}`);
-  return shown.join(',');
 }
 
 function normalizePath(value) {
