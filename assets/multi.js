@@ -59,6 +59,7 @@ let globalMode = isMobileDevice() ? 'opus' : 'raw';
 let nativeAudioStarted = false;
 let nativeStopExpected = false;
 let nativePreloadActive = false;
+let nativeStartPromise = null;
 let nativeReconnectTimer = null;
 let nativeReconnectInFlight = false;
 let pendingNoticeMode = globalMode;
@@ -121,7 +122,7 @@ modeButtons.forEach((button) => {
 
 if (nativeMultiAudio) {
   ['abort', 'emptied', 'ended', 'error', 'pause', 'stalled'].forEach((eventName) => {
-    nativeMultiAudio.addEventListener(eventName, () => handleNativePlaybackInterrupted());
+    nativeMultiAudio.addEventListener(eventName, () => handleNativePlaybackInterrupted(eventName));
   });
   nativeMultiAudio.addEventListener('playing', () => {
     nativeAudioStarted = true;
@@ -225,6 +226,14 @@ async function startSelectedGlobalMode() {
 }
 
 async function startNativeMultiAudio() {
+  if (nativeStartPromise) return nativeStartPromise;
+  nativeStartPromise = startNativeMultiAudioOnce().finally(() => {
+    nativeStartPromise = null;
+  });
+  return nativeStartPromise;
+}
+
+async function startNativeMultiAudioOnce() {
   if (!nativeMultiAudio) throw new Error('native audio element missing');
   nativeStopExpected = true;
   if (!nativePreloadActive || !nativeMultiAudio.getAttribute('src')) {
@@ -289,6 +298,7 @@ function stopNativeMultiAudio() {
   nativeMultiAudio.load();
   nativeAudioStarted = false;
   nativePreloadActive = false;
+  nativeStartPromise = null;
   players.forEach((player) => player.resetNativeLevelSync());
 }
 
@@ -333,11 +343,14 @@ function shouldRecoverNativeAudio() {
 function nativeNeedsReconnect() {
   return shouldRecoverNativeAudio()
     && nativeMultiAudio
+    && !nativeStartPromise
     && (!nativeAudioStarted || nativeMultiAudio.paused || nativeMultiAudio.error);
 }
 
-function handleNativePlaybackInterrupted() {
+function handleNativePlaybackInterrupted(eventName) {
   if (nativeStopExpected || !shouldRecoverNativeAudio()) return;
+  if (nativeStartPromise) return;
+  if (eventName === 'stalled' && nativeMultiAudio && !nativeMultiAudio.paused && !nativeMultiAudio.error) return;
   nativeAudioStarted = false;
   players.forEach((player) => player.resetNativeLevelSync());
   updateHeader();
