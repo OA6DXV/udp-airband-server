@@ -82,6 +82,7 @@ let compatibleSourceNode;
 let compatibleAnalyser;
 let compatibleAnalyserBuffer;
 let compatibleAudioReady = false;
+let compatibleBandwidthReady = false;
 let opusMediaSource;
 let opusSourceBuffer;
 let opusObjectUrl;
@@ -280,8 +281,8 @@ function connectControlWebSocket() {
         updateModeButton();
         updateConnectionState();
       } else if (message.type === 'stats') {
-        if (!streamPaused && currentMode !== 'compatible') {
-          browserBandwidthEl.textContent = formatBandwidth(message.listenerBitsPerSecond || 0);
+        if (!streamPaused) {
+          updateServerMeasuredBandwidth(message.listenerBitsPerSecond || 0);
         }
         activeUsersEl.textContent = String(message.activeListeners || message.clients || 0);
         lastUdpAt = message.lastHeardAt || message.lastUdpAt || 0;
@@ -511,6 +512,7 @@ function startHlsCompressed() {
 function startCompatible() {
   currentMode = 'compatible';
   compatibleAudioReady = false;
+  compatibleBandwidthReady = false;
   browserBandwidthEl.textContent = 'Loading';
   stopRaw();
   stopOpus();
@@ -546,6 +548,7 @@ function stopCompatible() {
   compatibleAudio.removeAttribute('src');
   compatibleAudio.load();
   compatibleAudioReady = false;
+  compatibleBandwidthReady = false;
   latestWave = new Float32Array(0);
   lastPeak = 0;
 }
@@ -932,7 +935,7 @@ function updateBrowserBandwidth() {
     return;
   }
   if (currentMode === 'compatible') {
-    browserBandwidthEl.textContent = compatibleAudioReady ? formatBandwidth(parseBitrate(config.aacBitrate || '32k')) : 'Loading';
+    if (!compatibleBandwidthReady) browserBandwidthEl.textContent = 'Loading';
     return;
   }
   const now = Date.now();
@@ -943,14 +946,15 @@ function updateBrowserBandwidth() {
   browserBandwidthEl.textContent = formatBandwidth(bitsPerSecond);
 }
 
-function parseBitrate(value) {
-  const match = String(value || '').trim().match(/^(\d+(?:\.\d+)?)([kKmM]?)$/);
-  if (!match) return 0;
-  const amount = Number(match[1]);
-  const unit = match[2].toLowerCase();
-  if (unit === 'm') return amount * 1_000_000;
-  if (unit === 'k') return amount * 1_000;
-  return amount;
+function updateServerMeasuredBandwidth(bitsPerSecond) {
+  if (currentMode === 'compatible') {
+    if (!compatibleBandwidthReady && bitsPerSecond <= 0) {
+      browserBandwidthEl.textContent = 'Loading';
+      return;
+    }
+    compatibleBandwidthReady = true;
+  }
+  browserBandwidthEl.textContent = formatBandwidth(bitsPerSecond);
 }
 
 function getOpusBufferedMs() {
