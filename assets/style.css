@@ -358,6 +358,10 @@ button:hover {
   box-shadow: 0 16px 32px rgb(0 0 0 / 35%);
 }
 
+.mode-menu[hidden] {
+  display: none;
+}
+
 .mode-option {
   width: 100%;
   padding: 11px 12px;
@@ -377,8 +381,8 @@ button:hover {
 }
 
 .mode-option.active {
-  background: var(--wave);
-  color: #120603;
+  background: var(--accent);
+  color: #06100b;
 }
 
 .mode-option:disabled {
