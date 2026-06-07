@@ -388,7 +388,6 @@ class MultiStreamPlayer {
     this.configReady = false;
     this.gain = 1;
     this.peak = 0;
-    this.nativeLevelHistory = [];
     this.lastAudioAt = 0;
     this.bandwidth = 0;
     this.receivedBytes = 0;
@@ -484,7 +483,8 @@ class MultiStreamPlayer {
         this.activeListeners = message.activeListeners || 0;
         this.bandwidth = message.listenerBitsPerSecond || this.bandwidth || 0;
         if (globalMode === 'opus') {
-          this.queueNativeLevel(message.nativeAacTimelineMs, message.nativeAacLevelPeak);
+          this.peak = Number(message.levelPeak) || 0;
+          this.lastAudioAt = this.peak > 0 ? Date.now() : 0;
         }
         this.lastHeardAt = message.lastHeardAt || 0;
         this.lastHeardLabel = message.lastHeardLabel || 'never';
@@ -630,33 +630,7 @@ class MultiStreamPlayer {
     if (this.gainNode) this.gainNode.gain.value = this.muted ? 0 : this.gain;
   }
 
-  queueNativeLevel(timelineMs, peak) {
-    if (document.visibilityState === 'hidden' || globalPaused || !nativeAudioStarted) return;
-    const timeline = Number(timelineMs);
-    if (!Number.isFinite(timeline) || timeline < 0) return;
-    this.nativeLevelHistory.push({ timelineMs: timeline, peak: clamp(Number(peak) || 0, 0, 1) });
-    const oldestAllowed = getNativeAudioTimelineMs() - 3000;
-    while (this.nativeLevelHistory.length > 1 && this.nativeLevelHistory[0].timelineMs < oldestAllowed) {
-      this.nativeLevelHistory.shift();
-    }
-  }
-
-  readNativeLevel() {
-    if (!this.nativeLevelHistory.length) return 0;
-    const targetAt = getNativeAudioTimelineMs();
-    let index = -1;
-    for (let i = 0; i < this.nativeLevelHistory.length; i += 1) {
-      if (this.nativeLevelHistory[i].timelineMs <= targetAt) index = i;
-      else break;
-    }
-    if (index < 0) return 0;
-    const peak = this.nativeLevelHistory[index].peak;
-    if (index > 0) this.nativeLevelHistory.splice(0, index);
-    return peak;
-  }
-
   resetNativeLevelSync() {
-    this.nativeLevelHistory = [];
     this.peak = 0;
     this.lastAudioAt = 0;
   }
@@ -669,11 +643,9 @@ class MultiStreamPlayer {
     }
     this.lastBandwidthBytes = this.receivedBytes;
     this.lastBandwidthAt = now;
-    if (globalMode === 'opus') {
-      this.peak = document.visibilityState === 'hidden' || globalPaused || !nativeAudioStarted ? 0 : this.readNativeLevel();
-    } else if (!this.lastAudioAt || now - this.lastAudioAt > 400) {
+    if (!this.lastAudioAt || now - this.lastAudioAt > 400 || globalPaused) {
       this.peak = 0;
-    } else {
+    } else if (globalMode !== 'opus') {
       this.peak *= 0.985;
     }
     const db = this.peak * this.gain > 0 ? 20 * Math.log10(this.peak * this.gain) : -60;
@@ -780,11 +752,6 @@ function formatBandwidth(bitsPerSecond) {
   if (bitsPerSecond >= 1_000_000) return `${(bitsPerSecond / 1_000_000).toFixed(2)} Mbps`;
   if (bitsPerSecond >= 1_000) return `${(bitsPerSecond / 1_000).toFixed(1)} kbps`;
   return `${Math.round(bitsPerSecond)} bps`;
-}
-
-function getNativeAudioTimelineMs() {
-  if (!nativeMultiAudio || !Number.isFinite(nativeMultiAudio.currentTime)) return 0;
-  return Math.max(0, nativeMultiAudio.currentTime * 1000);
 }
 
 function getClientId() {

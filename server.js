@@ -527,7 +527,6 @@ function broadcastStreamStats() {
       const listenerStats = ensureListenerStats(stream, clientId);
       const listenerBitsPerSecond = Math.max(0, (listenerStats.bytes - listenerStats.lastBytes) * 8 / elapsedSeconds);
       listenerStats.lastBytes = listenerStats.bytes;
-      const nativeAacLevel = nativeMultiAac.getLevel(clientId, stream.name);
       sendWsJson(client, {
         type: 'stats',
         listenerBitsPerSecond,
@@ -535,8 +534,6 @@ function broadcastStreamStats() {
         lastHeardLabel: lastHeard.label,
         secondsSinceLastHeard: lastHeard.secondsSince,
         levelPeak: now - stream.levelPeakAt > 400 ? 0 : stream.levelPeak,
-        nativeAacTimelineMs: nativeAacLevel.timelineMs,
-        nativeAacLevelPeak: nativeAacLevel.peak,
         hasUdp: stream.packetCount > 0,
         activeListeners: getActiveListeners(stream).length,
         compressedCodec,
