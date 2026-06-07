@@ -45,6 +45,9 @@ let players = [];
 let multiPlaybackRequested = false;
 let globalMode = isMobileDevice() ? 'opus' : 'raw';
 let nativeAudioStarted = false;
+let nativeStopExpected = false;
+let nativeReconnectTimer = null;
+let nativeReconnectInFlight = false;
 const nativeLevelSyncMs = 60 * 1000;
 
 languageToggle.addEventListener('click', () => {
@@ -103,6 +106,18 @@ modeButtons.forEach((button) => {
   });
 });
 
+if (nativeMultiAudio) {
+  ['abort', 'emptied', 'ended', 'error', 'pause', 'stalled'].forEach((eventName) => {
+    nativeMultiAudio.addEventListener(eventName, () => handleNativePlaybackInterrupted());
+  });
+  nativeMultiAudio.addEventListener('playing', () => {
+    nativeAudioStarted = true;
+    nativeStopExpected = false;
+    if (multiStartOverlay) multiStartOverlay.hidden = true;
+    updateHeader();
+  });
+}
+
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
     players.forEach((player) => player.resetNativeLevelSync());
@@ -110,7 +125,23 @@ document.addEventListener('visibilitychange', () => {
     return;
   }
   players.forEach((player) => player.resetNativeLevelSync());
-  requestNativeLevelSync();
+  if (nativeNeedsReconnect()) {
+    scheduleNativeReconnect(0);
+  } else {
+    requestNativeLevelSync();
+  }
+});
+
+window.addEventListener('pageshow', () => {
+  if (nativeNeedsReconnect()) {
+    scheduleNativeReconnect(0);
+  }
+});
+
+window.addEventListener('focus', () => {
+  if (nativeNeedsReconnect()) {
+    scheduleNativeReconnect(0);
+  }
 });
 
 function renderPlayers() {
@@ -186,12 +217,19 @@ async function startNativeMultiAudio() {
     clientId,
     t: String(Date.now()),
   });
+  nativeStopExpected = true;
   nativeMultiAudio.preload = 'auto';
   nativeMultiAudio.src = `/multi/native.aac?${query.toString()}`;
   nativeMultiAudio.load();
   updateMediaSessionMetadata();
-  await nativeMultiAudio.play();
+  try {
+    await nativeMultiAudio.play();
+  } catch (err) {
+    nativeStopExpected = false;
+    throw err;
+  }
   nativeAudioStarted = true;
+  nativeStopExpected = false;
   players.forEach((player) => {
     player.started = true;
     player.paused = false;
@@ -212,7 +250,9 @@ function updateMediaSessionMetadata() {
 }
 
 function stopNativeMultiAudio() {
-  if (!nativeMultiAudio || !nativeAudioStarted) return;
+  if (!nativeMultiAudio) return;
+  nativeStopExpected = true;
+  clearTimeout(nativeReconnectTimer);
   nativeMultiAudio.pause();
   nativeMultiAudio.removeAttribute('src');
   nativeMultiAudio.load();
@@ -242,6 +282,48 @@ function requestNativeLevelSync() {
     t: String(Date.now()),
   });
   fetch(`/multi/native-sync?${query.toString()}`).catch(() => {});
+}
+
+function shouldRecoverNativeAudio() {
+  return globalMode === 'opus' && multiPlaybackRequested && !globalPaused;
+}
+
+function nativeNeedsReconnect() {
+  return shouldRecoverNativeAudio()
+    && nativeMultiAudio
+    && (!nativeAudioStarted || nativeMultiAudio.paused || nativeMultiAudio.error);
+}
+
+function handleNativePlaybackInterrupted() {
+  if (nativeStopExpected || !shouldRecoverNativeAudio()) return;
+  nativeAudioStarted = false;
+  players.forEach((player) => player.resetNativeLevelSync());
+  updateHeader();
+  if (document.visibilityState === 'visible') {
+    scheduleNativeReconnect(500);
+  }
+}
+
+function scheduleNativeReconnect(delayMs) {
+  if (!shouldRecoverNativeAudio() || document.visibilityState === 'hidden') return;
+  clearTimeout(nativeReconnectTimer);
+  nativeReconnectTimer = setTimeout(() => {
+    recoverNativeAudio().catch(() => {});
+  }, delayMs);
+}
+
+async function recoverNativeAudio() {
+  if (!shouldRecoverNativeAudio() || nativeReconnectInFlight) return;
+  nativeReconnectInFlight = true;
+  try {
+    await startNativeMultiAudio();
+    if (multiStartOverlay) multiStartOverlay.hidden = true;
+  } catch {
+    nativeAudioStarted = false;
+    if (multiStartOverlay) multiStartOverlay.hidden = false;
+  } finally {
+    nativeReconnectInFlight = false;
+  }
 }
 
 function updateModeControls() {
