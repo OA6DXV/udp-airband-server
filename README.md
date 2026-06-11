@@ -22,23 +22,6 @@ For this server, each UDP stream is expected to be 32-bit little-endian floating
 
 The useful part of this approach is latency and simplicity. RTLSDR-Airband can keep using its native UDP output, while this server handles the browser-specific work: WebSockets, compressed audio framing, status display, language selection, active users, and web UI.
 
-## Files
-
-- `server.js`: Node.js entry point. It starts the UDP listeners, HTTP/HTTPS web server, stream routes, status handling used by the UI, and compressed-audio backends.
-- `server.conf`: server-level configuration. Edit it to set web bind addresses, ports, SSL/TLS certificate paths, logging, and compressed-audio options.
-- `streams.example.json`: example stream configuration. Copy it to `streams.json`; this is where feed names, labels, UDP ports, sample rates, and channel counts are defined.
-- `index.html`: stream player HTML shell used for each individual feed page.
-- `assets/style.css`: CSS for the stream player and responsive UI.
-- `assets/app.js`: browser-side player logic: audio decoding/playback, UI state, status updates, language switching, waveform, level meter, bandwidth display, and reconnect/idle behavior.
-- `assets/favicon.ico`: browser icon served by all pages.
-- `lib/config.js`: parser and defaults for `server.conf`.
-- `lib/streams.js`: stream configuration loader and main feed-list page renderer.
-- `lib/listeners.js`: active-listener tracking shared by the web UI and server state.
-- `lib/clients.js`: client helpers for stream connections.
-- `lib/websocket.js`: WebSocket framing and helpers.
-- `lib/compressed/`: compressed audio implementations. ADPCM is the default; Opus, AAC, and HLS are kept as optional or experimental backends.
-- `tools/`: helper scripts for generating test UDP audio without RTLSDR-Airband.
-
 ## Installation
 
 Clone the repository and install the Node.js dependencies:

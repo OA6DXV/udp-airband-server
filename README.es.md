@@ -22,23 +22,6 @@ Para este servidor, cada stream UDP debe ser PCM float de 32 bits little-endian:
 
 La utilidad de este enfoque es la baja latencia y la simplicidad. RTLSDR-Airband puede seguir usando su salida UDP nativa, mientras este servidor se encarga del trabajo especifico del navegador: WebSockets, audio comprimido, estado visual, selector de idioma, usuarios activos e interfaz web.
 
-## Archivos
-
-- `server.js`: punto de entrada de Node.js. Inicia los listeners UDP, el servidor HTTP/HTTPS, rutas de stream, estado usado por la UI y backends de audio comprimido.
-- `server.conf`: configuracion a nivel servidor. Editalo para definir direcciones de escucha, puertos, rutas de certificado SSL/TLS, logging y opciones de audio comprimido.
-- `streams.example.json`: configuracion de streams de ejemplo. Copialo como `streams.json`; aqui se definen nombres de feeds, labels, puertos UDP, sample rates y cantidad de canales.
-- `index.html`: estructura HTML del reproductor para cada pagina individual de stream.
-- `assets/style.css`: estilos CSS del reproductor y la UI responsive.
-- `assets/app.js`: logica del navegador: decodificacion/reproduccion de audio, estado de UI, actualizaciones de estado, cambio de idioma, grafica de onda, medidor de nivel, bandwidth y reconnect/idle.
-- `assets/favicon.ico`: icono del navegador servido por todas las paginas.
-- `lib/config.js`: parser y valores predeterminados de `server.conf`.
-- `lib/streams.js`: carga la configuracion de streams y renderiza la pagina principal de feeds.
-- `lib/listeners.js`: seguimiento de usuarios activos compartido por la UI y el estado del servidor.
-- `lib/clients.js`: helpers para clientes de stream.
-- `lib/websocket.js`: helpers y framing de WebSocket.
-- `lib/compressed/`: implementaciones de audio comprimido. ADPCM es el valor predeterminado; Opus, AAC y HLS quedan como backends opcionales o experimentales.
-- `tools/`: scripts auxiliares para generar audio UDP de prueba sin RTLSDR-Airband.
-
 ## Instalacion
 
 Clona el repositorio e instala las dependencias de Node.js:
