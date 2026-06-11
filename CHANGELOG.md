@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5-preview - Unreleased
+
+### Changed
+
+- Started the 1.5 preview cycle.
+- Compatible AAC playback now seeks native browser audio closer to the live edge when playback starts, reducing startup buffer delay for Multi Stream and individual compatible players.
+
 ## 1.4 - 2026-06-11
 
 ### Added

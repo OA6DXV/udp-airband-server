@@ -521,8 +521,52 @@ function startCompatible() {
   setupCompatibleAudioGraph();
   compatibleAudio.src = `/multi/native.aac?streams=${encodeURIComponent(streamName)}&clientId=${encodeURIComponent(clientId)}&t=${Date.now()}`;
   compatibleAudio.load();
-  compatibleAudio.play().catch(() => setStatus('', 'compatibleUnavailable'));
+  const seekOnCanPlay = () => {
+    jumpNativeAudioToLiveEdge(compatibleAudio);
+  };
+  compatibleAudio.addEventListener('canplay', seekOnCanPlay, { once: true });
+  jumpNativeAudioToLiveEdge(compatibleAudio);
+  const playPromise = compatibleAudio.play();
+  if (playPromise && typeof playPromise.then === 'function') {
+    playPromise
+      .then(() => {
+        setTimeout(() => {
+          if (currentMode === 'compatible' && compatibleAudio?.src) jumpNativeAudioToLiveEdge(compatibleAudio);
+        }, 100);
+      })
+      .catch(() => {
+        compatibleAudio.removeEventListener('canplay', seekOnCanPlay);
+        setStatus('', 'compatibleUnavailable');
+      });
+  }
   updateMediaSessionMetadata();
+}
+
+function jumpNativeAudioToLiveEdge(audio, targetBufferSeconds = 0.5) {
+  const delay = getNativeBufferedDelay(audio);
+  if (delay === null || delay <= targetBufferSeconds + 0.25) return false;
+
+  try {
+    const liveEdge = audio.buffered.end(audio.buffered.length - 1);
+    const target = Math.max(0, liveEdge - targetBufferSeconds);
+    if (!Number.isFinite(target) || target <= audio.currentTime) return false;
+    audio.currentTime = target;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getNativeBufferedDelay(audio) {
+  if (!audio || audio.buffered.length === 0) return null;
+
+  try {
+    const liveEdge = audio.buffered.end(audio.buffered.length - 1);
+    const delay = liveEdge - audio.currentTime;
+    return Number.isFinite(delay) ? delay : null;
+  } catch {
+    return null;
+  }
 }
 
 function ensureCompatibleAudio() {

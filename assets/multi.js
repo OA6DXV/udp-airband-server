@@ -253,12 +253,21 @@ async function startNativeMultiAudioOnce() {
     nativeMultiAudio.load();
   }
   updateMediaSessionMetadata();
+  const seekOnCanPlay = () => {
+    jumpNativeAudioToLiveEdge(nativeMultiAudio);
+  };
+  nativeMultiAudio.addEventListener('canplay', seekOnCanPlay, { once: true });
+  jumpNativeAudioToLiveEdge(nativeMultiAudio);
   try {
     await nativeMultiAudio.play();
   } catch (err) {
+    nativeMultiAudio.removeEventListener('canplay', seekOnCanPlay);
     nativeStopExpected = false;
     throw err;
   }
+  setTimeout(() => {
+    if (nativeAudioStarted && nativeMultiAudio?.src) jumpNativeAudioToLiveEdge(nativeMultiAudio);
+  }, 100);
   nativeAudioStarted = true;
   nativeStopExpected = false;
   nativePreloadActive = false;
@@ -269,6 +278,33 @@ async function startNativeMultiAudioOnce() {
   });
   players.forEach((player) => player.sendNativeGain({ immediate: true }));
   updateHeader();
+}
+
+function jumpNativeAudioToLiveEdge(audio, targetBufferSeconds = 0.5) {
+  const delay = getNativeBufferedDelay(audio);
+  if (delay === null || delay <= targetBufferSeconds + 0.25) return false;
+
+  try {
+    const liveEdge = audio.buffered.end(audio.buffered.length - 1);
+    const target = Math.max(0, liveEdge - targetBufferSeconds);
+    if (!Number.isFinite(target) || target <= audio.currentTime) return false;
+    audio.currentTime = target;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getNativeBufferedDelay(audio) {
+  if (!audio || audio.buffered.length === 0) return null;
+
+  try {
+    const liveEdge = audio.buffered.end(audio.buffered.length - 1);
+    const delay = liveEdge - audio.currentTime;
+    return Number.isFinite(delay) ? delay : null;
+  } catch {
+    return null;
+  }
 }
 
 function preloadNativeMultiAudio() {
