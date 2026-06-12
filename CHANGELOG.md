@@ -6,6 +6,7 @@
 
 - Started the 1.5 preview cycle.
 - Compatible AAC playback now seeks native browser audio closer to the live edge when playback starts, reducing startup buffer delay for Multi Stream and individual compatible players.
+- Multi Stream Compatible Mode now uses the same compact per-stream controls on desktop and mobile, hiding realtime-only mode/start controls while the mixed AAC stream is active.
 
 ## 1.4 - 2026-06-11
 
