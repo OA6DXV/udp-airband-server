@@ -35,7 +35,7 @@ const translations = {
     realTimeNoticeBody: 'This mode uses realtime per-stream audio with the lowest latency. It cannot keep playing in the background, so keep this page open and the device active.',
     realTimeDesktopNoticeBody: 'This mode uses realtime per-stream audio with the lowest latency. Compatible Mode is designed for smartphones.',
     compatibleNoticeTitle: 'Compatible Mode',
-    compatibleNoticeBody: 'This mode uses one mixed AAC stream. It can keep playing with the phone locked or in the background, but delay is variable and usually around 5 seconds.',
+    compatibleNoticeBody: 'This mode uses one mixed AAC stream. It can keep playing with the phone locked or in the background, but delay is variable and usually around 5 to 10 seconds.',
   },
   es: {
     users: 'Usuarios', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP',
@@ -47,7 +47,7 @@ const translations = {
     realTimeNoticeBody: 'Este modo usa audio por stream en tiempo real con la menor latencia. No puede seguir sonando en segundo plano, asi que manten esta pagina abierta y el dispositivo activo.',
     realTimeDesktopNoticeBody: 'Este modo usa audio por stream en tiempo real con la menor latencia. El Modo Compatible esta disenado para smartphones.',
     compatibleNoticeTitle: 'Modo Compatible',
-    compatibleNoticeBody: 'Este modo usa un stream AAC mezclado. Puede seguir sonando con el telefono bloqueado o en segundo plano, pero el delay es variable y suele rondar los 5 segundos.',
+    compatibleNoticeBody: 'Este modo usa un stream AAC mezclado. Puede seguir sonando con el telefono bloqueado o en segundo plano, pero el delay es variable y suele rondar los 5 a 10 segundos.',
   },
 };
 
