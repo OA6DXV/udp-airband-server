@@ -56,7 +56,6 @@ const translations = {
 let language = localStorage.getItem('udp-airband-language') || 'en';
 if (!translations[language]) language = 'en';
 const preferredModeStorageKey = 'udp-airband-preferred-mode';
-const legacyAcceptedNoticeStoragePrefix = 'udp-airband-notice-accepted:';
 const acceptedNoticeStoragePrefix = 'udp-airband-single-notice-accepted:';
 let currentStatusKey = 'disconnected';
 let lastHeardLabel = 'never';
@@ -1186,12 +1185,11 @@ function modeNoticeKeyForMode(mode) {
 }
 
 function hasAcceptedNotice(key) {
-  return localStorage.getItem(`${acceptedNoticeStoragePrefix}${key}`) === 'true'
-    || localStorage.getItem(`${legacyAcceptedNoticeStoragePrefix}${key}`) === 'true';
+  return sessionStorage.getItem(`${acceptedNoticeStoragePrefix}${key}`) === 'true';
 }
 
 function rememberNoticeAccepted(key) {
-  localStorage.setItem(`${acceptedNoticeStoragePrefix}${key}`, 'true');
+  sessionStorage.setItem(`${acceptedNoticeStoragePrefix}${key}`, 'true');
 }
 
 function getCompressedTransport() {
