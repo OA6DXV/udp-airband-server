@@ -58,7 +58,7 @@ let audioContext;
 let gainNode;
 let config = { sampleRate: 8000, channels: 1 };
 let queuedFrames = 0;
-const targetLatencySeconds = 0.25;
+const targetLatencySeconds = 0.05;
 let nextPlayTime = 0;
 let gain = Number(gainInput.value);
 let lastPeak = 0;
@@ -241,6 +241,7 @@ function applyOutputGain() {
 
 function updateAudioButton() {
   startButton.textContent = audioStarted ? (muted ? t('unmute') : t('mute')) : t('startAudio');
+  startButton.classList.toggle('audio-muted', audioStarted && muted);
   startButton.disabled = false;
 }
 

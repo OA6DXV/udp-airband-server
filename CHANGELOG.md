@@ -7,6 +7,7 @@
 - Started the 1.5 preview cycle.
 - Compatible AAC playback now seeks native browser audio closer to the live edge when playback starts, reducing startup buffer delay for Multi Stream and individual compatible players.
 - Multi Stream Compatible Mode now uses the same compact per-stream controls on desktop and mobile, hiding realtime-only mode/start controls while the mixed AAC stream is active.
+- Individual stream startup latency was reduced, muted audio buttons now turn green while showing `Unmute`, Last Heard stays in seconds for up to 20 seconds, and the initial Multi Stream card is centered with an orange border.
 
 ## 1.4 - 2026-06-11
 

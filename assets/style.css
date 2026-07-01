@@ -327,6 +327,12 @@ button:hover {
   border-color: var(--accent);
 }
 
+button.audio-muted {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #06100b;
+}
+
 .meters {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
