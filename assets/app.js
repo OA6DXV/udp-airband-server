@@ -55,7 +55,6 @@ const translations = {
 
 let language = localStorage.getItem('udp-airband-language') || 'en';
 if (!translations[language]) language = 'en';
-const preferredModeStorageKey = 'udp-airband-preferred-mode';
 const acceptedNoticeStoragePrefix = 'udp-airband-single-notice-accepted:';
 let currentStatusKey = 'disconnected';
 let lastHeardLabel = 'never';
@@ -100,8 +99,7 @@ let compressedTransport = null;
 let activeCompressedKind = null;
 let usingNativeHls = false;
 let currentMode = 'raw';
-let preferredMode = localStorage.getItem(preferredModeStorageKey) || (isMobileDevice() ? 'opus' : 'raw');
-if (!['raw', 'opus', 'compatible'].includes(preferredMode)) preferredMode = isMobileDevice() ? 'opus' : 'raw';
+let preferredMode = isMobileDevice() ? 'opus' : 'raw';
 let opusAvailable = false;
 let compressedAvailable = false;
 let audioStarted = false;
@@ -1126,7 +1124,6 @@ function applySelectedMode(mode) {
 
 function setPreferredMode(mode) {
   preferredMode = mode;
-  localStorage.setItem(preferredModeStorageKey, mode);
 }
 
 function updateModeMenu() {
