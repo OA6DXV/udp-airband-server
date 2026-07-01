@@ -14,6 +14,7 @@
 - Individual streams now remember accepted mode notices per tab, while playback mode defaults continue to be selected by device type on each new session.
 - Multi Stream now also remembers accepted Realtime/Compatible mode notices and skips repeated informational dialogs when switching modes.
 - Individual stream and Multi Stream notice acknowledgements now use separate per-tab session storage namespaces.
+- Single and Multi Stream title links now show a back chevron, desktop single streams show a startup notice for Uncompressed mode, and selecting Compressed mode shows its own realtime bandwidth-saving notice once per tab.
 
 ## 1.4 - 2026-06-11
 

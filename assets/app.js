@@ -34,8 +34,10 @@ const translations = {
     compatible: 'Compatible', compatibleUnavailable: 'Compatible unavailable', modeUnavailable: 'Mode unavailable',
     compatibleNoticeTitle: 'Compatible Mode',
     compatibleNoticeBody: 'Compatible Mode was designed for mobile devices and background playback. It uses native AAC audio, so it can keep playing with the phone locked, but it may add a variable delay of about 5 seconds.',
-    realtimeNoticeTitle: 'Realtime Mode',
-    realtimeNoticeBody: 'Uncompressed and Compressed are realtime modes. They have lower latency, but they need this page to stay open and the device active.',
+    uncompressedNoticeTitle: 'Uncompressed Realtime Mode',
+    uncompressedNoticeBody: 'This mode uses raw realtime audio with the lowest latency. It must stay open and active in this page.',
+    compressedNoticeTitle: 'Compressed Realtime Mode',
+    compressedNoticeBody: 'This mode uses realtime compressed audio to reduce bandwidth. It is ideal for slow connections, but it still needs this page to stay open and active.',
     mobileStartupNoticeTitle: 'Compressed realtime mode',
     mobileStartupNoticeBody: 'This stream starts in low-delay compressed realtime mode. To keep audio playing in the background or with the phone locked, select Compatible Mode; it may add some delay.',
     accept: 'Accept',
@@ -45,8 +47,10 @@ const translations = {
     compatible: 'Compatible', compatibleUnavailable: 'Compatible no disponible', modeUnavailable: 'Modo no disponible',
     compatibleNoticeTitle: 'Modo Compatible',
     compatibleNoticeBody: 'El Modo Compatible fue disenado para moviles y reproduccion en segundo plano. Usa audio AAC nativo, asi que puede seguir sonando con el telefono bloqueado, pero puede agregar un delay variable de unos 5 segundos.',
-    realtimeNoticeTitle: 'Modo realtime',
-    realtimeNoticeBody: 'Sin comprimir y Comprimido son modos en tiempo real. Tienen menor latencia, pero necesitan que esta pagina siga abierta y el dispositivo activo.',
+    uncompressedNoticeTitle: 'Modo Realtime sin comprimir',
+    uncompressedNoticeBody: 'Este modo usa audio realtime crudo con la menor latencia. Debe mantenerse abierto y activo en esta pagina.',
+    compressedNoticeTitle: 'Modo Realtime comprimido',
+    compressedNoticeBody: 'Este modo usa audio realtime comprimido para reducir el ancho de banda. Es ideal para conexiones lentas, pero igual necesita que esta pagina siga abierta y activa.',
     mobileStartupNoticeTitle: 'Modo comprimido realtime',
     mobileStartupNoticeBody: 'Este stream inicia en modo comprimido sin delay. Si quieres escuchar el audio en background o con el telefono bloqueado, selecciona el Modo Compatible; puede agregar cierto delay.',
     accept: 'Aceptar',
@@ -188,6 +192,15 @@ if (modeNoticeAccept) {
       startAudioPlayback().catch(() => {});
       return;
     }
+    if (modeNoticeOverlay?.dataset.notice === 'startup-mode') {
+      const startupMode = modeNoticeOverlay.dataset.mode || preferredMode;
+      rememberNoticeAccepted(modeNoticeKeyForMode(startupMode));
+      applySelectedMode(startupMode);
+      delete modeNoticeOverlay.dataset.notice;
+      if (modeNoticeOverlay) modeNoticeOverlay.hidden = true;
+      startAudioPlayback().catch(() => {});
+      return;
+    }
     const mode = modeNoticeOverlay ? modeNoticeOverlay.dataset.mode : '';
     if (mode) {
       rememberNoticeAccepted(modeNoticeKeyForMode(mode));
@@ -298,7 +311,7 @@ function connectControlWebSocket() {
           startSelectedMode();
         }
         updateModeButton();
-        showMobileStartupNoticeIfNeeded();
+        showStartupNoticeIfNeeded();
         updateConnectionState();
       } else if (message.type === 'stats') {
         if (!streamPaused) {
@@ -1064,7 +1077,9 @@ function applyLanguage() {
   });
   updateAudioButton();
   updateModeButton();
-  if (modeNoticeOverlay && !modeNoticeOverlay.hidden && modeNoticeOverlay.dataset.mode) {
+  if (modeNoticeOverlay && !modeNoticeOverlay.hidden && modeNoticeOverlay.dataset.notice === 'startup-mode') {
+    showStartupModeNotice(modeNoticeOverlay.dataset.mode || preferredMode);
+  } else if (modeNoticeOverlay && !modeNoticeOverlay.hidden && modeNoticeOverlay.dataset.mode) {
     showModeNotice(modeNoticeOverlay.dataset.mode);
   } else if (modeNoticeOverlay && !modeNoticeOverlay.hidden && modeNoticeOverlay.dataset.notice === 'mobile-startup') {
     showMobileStartupNotice();
@@ -1109,7 +1124,7 @@ function selectMode(mode) {
   if (!['raw', 'opus', 'compatible'].includes(mode) || !getAvailableModes().includes(mode)) return;
   closeModeMenu();
   if (mode === preferredMode && (!audioStarted || currentMode === mode)) return;
-  if (mode === 'compatible' || (preferredMode === 'compatible' && isMobileDevice())) {
+  if (mode === 'compatible' || mode === 'opus' || (preferredMode === 'compatible' && isMobileDevice())) {
     showModeNotice(mode);
     return;
   }
@@ -1154,10 +1169,20 @@ function showModeNotice(mode) {
   }
   delete modeNoticeOverlay.dataset.notice;
   modeNoticeOverlay.dataset.mode = mode;
-  if (modeNoticeTitle) modeNoticeTitle.textContent = t(mode === 'compatible' ? 'compatibleNoticeTitle' : 'realtimeNoticeTitle');
-  if (modeNoticeBody) modeNoticeBody.textContent = t(mode === 'compatible' ? 'compatibleNoticeBody' : 'realtimeNoticeBody');
+  if (modeNoticeTitle) modeNoticeTitle.textContent = t(modeNoticeTitleKey(mode));
+  if (modeNoticeBody) modeNoticeBody.textContent = t(modeNoticeBodyKey(mode));
   if (modeNoticeAccept) modeNoticeAccept.textContent = t('accept');
   modeNoticeOverlay.hidden = false;
+}
+
+function showStartupNoticeIfNeeded() {
+  if (audioStarted) return;
+  if (isMobileDevice()) {
+    showMobileStartupNoticeIfNeeded();
+    return;
+  }
+  if (preferredMode !== 'raw' || !getAvailableModes().includes('raw') || hasAcceptedNotice(modeNoticeKeyForMode('raw'))) return;
+  showStartupModeNotice('raw');
 }
 
 function showMobileStartupNoticeIfNeeded() {
@@ -1177,8 +1202,33 @@ function showMobileStartupNotice() {
   modeNoticeOverlay.hidden = false;
 }
 
+function showStartupModeNotice(mode) {
+  if (!modeNoticeOverlay) return;
+  delete modeNoticeOverlay.dataset.notice;
+  modeNoticeOverlay.dataset.notice = 'startup-mode';
+  modeNoticeOverlay.dataset.mode = mode;
+  if (modeNoticeTitle) modeNoticeTitle.textContent = t(modeNoticeTitleKey(mode));
+  if (modeNoticeBody) modeNoticeBody.textContent = t(modeNoticeBodyKey(mode));
+  if (modeNoticeAccept) modeNoticeAccept.textContent = t('accept');
+  modeNoticeOverlay.hidden = false;
+}
+
+function modeNoticeTitleKey(mode) {
+  if (mode === 'compatible') return 'compatibleNoticeTitle';
+  if (mode === 'opus') return 'compressedNoticeTitle';
+  return 'uncompressedNoticeTitle';
+}
+
+function modeNoticeBodyKey(mode) {
+  if (mode === 'compatible') return 'compatibleNoticeBody';
+  if (mode === 'opus') return 'compressedNoticeBody';
+  return 'uncompressedNoticeBody';
+}
+
 function modeNoticeKeyForMode(mode) {
-  return mode === 'compatible' ? 'compatible-mode' : 'realtime-mode';
+  if (mode === 'compatible') return 'compatible-mode';
+  if (mode === 'opus') return 'compressed-realtime-mode';
+  return 'uncompressed-realtime-mode';
 }
 
 function hasAcceptedNotice(key) {

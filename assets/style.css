@@ -165,8 +165,17 @@ h1 {
 }
 
 .stream-title-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   color: inherit;
   text-decoration: none;
+}
+
+.stream-title-link::before {
+  content: "<";
+  color: var(--muted);
+  font-weight: 650;
 }
 
 .stream-title-link:hover {
