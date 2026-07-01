@@ -770,6 +770,10 @@ canvas {
 .multi-start-button {
   width: auto;
   min-width: 150px;
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid rgb(92 199 134 / 55%);
   background: var(--accent);
   color: #06100b;
