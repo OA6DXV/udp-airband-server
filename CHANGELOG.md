@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6-preview - Unreleased
+
+### English
+
+- Started the 1.6 preview cycle.
+- Planned: active-session server shutdown/restart detection and user-facing recovery guidance.
+
+### Espanol
+
+- Se inicio el ciclo preview de 1.6.
+- Pendiente: deteccion de apagado/reinicio del servidor en sesiones activas y guia visible de recuperacion para el usuario.
+
 ## 1.5 - 2026-07-01
 
 ### English
