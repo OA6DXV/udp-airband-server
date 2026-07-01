@@ -183,6 +183,7 @@ if (modeNoticeAccept) {
     if (modeNoticeOverlay?.dataset.notice === 'mobile-startup') {
       delete modeNoticeOverlay.dataset.notice;
       if (modeNoticeOverlay) modeNoticeOverlay.hidden = true;
+      startAudioPlayback().catch(() => {});
       return;
     }
     const mode = modeNoticeOverlay ? modeNoticeOverlay.dataset.mode : '';
@@ -213,7 +214,11 @@ statusEl.addEventListener('mouseleave', () => {
   updateStatusLabel();
 });
 
-startButton.addEventListener('click', async () => {
+startButton.addEventListener('click', () => {
+  startAudioPlayback().catch(() => {});
+});
+
+async function startAudioPlayback() {
   if (audioStarted) {
     muted = !muted;
     applyOutputGain();
@@ -238,7 +243,7 @@ startButton.addEventListener('click', async () => {
   updateAudioButton();
   updateGainControl();
   updateConnectionState();
-});
+}
 
 function applyOutputGain() {
   if (gainNode) gainNode.gain.value = muted ? 0 : gain;
