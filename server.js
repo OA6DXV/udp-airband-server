@@ -27,11 +27,13 @@ const { DEFAULT_STREAMS, loadStreams, renderMultiStreamPage, renderStreamList, v
 const { acceptWebSocket, sendWsBinary, sendWsJson } = require('./lib/websocket');
 const { createCompressedManager } = require('./lib/compressed');
 const { createNativeMultiAac } = require('./lib/native-multi-aac');
+const { createLastHeardStore } = require('./lib/last-heard-store');
 
 const MAX_SOCKET_BUFFER_BYTES = 1024 * 1024;
 const MAX_OPUS_STDIN_BUFFER_BYTES = 512 * 1024;
 const SOFTWARE_VERSION = '1.6-preview';
 const COMPRESSED_CODECS = new Set(['adpcm', 'opus', 'aac', 'hls']);
+const serverInstanceId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
 
 const args = parseArgs(process.argv.slice(2));
 const serverConfigPath = args.serverConfig || args.serverConf || 'server.conf';
@@ -135,6 +137,13 @@ try {
   fatal(err.message);
 }
 const streamsByName = new Map(streams.map((stream) => [stream.name, stream]));
+const lastHeardStore = createLastHeardStore({
+  filePath: path.join(__dirname, 'data', 'last-heard.json'),
+  fs,
+  logger,
+  path,
+});
+lastHeardStore.apply(streams);
 const nativeMultiAac = createNativeMultiAac({
   aacBitrate,
   addListenerBytes,
@@ -154,6 +163,7 @@ const webServer = tlsEnabled
   : http.createServer(handleHttpRequest);
 
 attachUpgradeHandler(webServer);
+attachShutdownHandlers();
 startUdpServers();
 
 function startUdpServers() {
@@ -182,6 +192,7 @@ function handleUdpMessage(stream, msg) {
   stream.packetCount += 1;
   stream.byteCount += msg.length;
   stream.lastUdpAt = Date.now();
+  lastHeardStore.record(stream.name, stream.lastUdpAt);
   stream.levelPeak = Math.max(stream.levelPeak * 0.75, peakOfFloatPcm(msg));
   stream.levelPeakAt = stream.lastUdpAt;
   nativeMultiAac.pushPcm(stream, msg);
@@ -375,6 +386,19 @@ function attachUpgradeHandler(server) {
   });
 }
 
+function attachShutdownHandlers() {
+  let shuttingDown = false;
+  function shutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info('shutdown', { signal });
+    lastHeardStore.flush();
+    process.exit(signal === 'SIGINT' ? 130 : 143);
+  }
+  process.once('SIGINT', () => shutdown('SIGINT'));
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+}
+
 function recordClientActivity(action, streamName, mode, clientId, remote) {
   logger.debug(`client_${action}`, { stream: streamName, mode, client: clientId, remote });
   clientLifecycleLog.record(action, clientId, remote);
@@ -483,6 +507,7 @@ function publicStreamStatus(stream) {
     hlsAvailable: opusAvailable && compressedCodec === 'hls',
     tlsEnabled,
     softwareVersion: SOFTWARE_VERSION,
+    serverInstanceId,
   };
 }
 
@@ -506,6 +531,7 @@ function streamConfig(stream) {
     hlsAvailable: opusAvailable && compressedCodec === 'hls',
     tlsEnabled,
     softwareVersion: SOFTWARE_VERSION,
+    serverInstanceId,
   };
 }
 
@@ -540,6 +566,7 @@ function broadcastStreamStats() {
         activeListeners: getActiveListeners(stream).length,
         compressedCodec,
         softwareVersion: SOFTWARE_VERSION,
+        serverInstanceId,
       });
     }
   }

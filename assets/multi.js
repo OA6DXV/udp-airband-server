@@ -36,6 +36,9 @@ const translations = {
     realTimeDesktopNoticeBody: 'This mode uses realtime per-stream audio with the lowest latency. Compatible Mode is designed for smartphones.',
     compatibleNoticeTitle: 'Compatible Mode',
     compatibleNoticeBody: 'This mode uses one mixed AAC stream. It can keep playing with the phone locked or in the background, but delay is variable and usually around 5 to 10 seconds.',
+    serverDisconnected: 'Connection to the server was lost. Reconnecting...',
+    serverRestarted: 'The server restarted. This page reconnected; refresh if audio does not resume.',
+    reload: 'Reload',
   },
   es: {
     users: 'Usuarios', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP',
@@ -48,6 +51,9 @@ const translations = {
     realTimeDesktopNoticeBody: 'Este modo usa audio por stream en tiempo real con la menor latencia. El Modo Compatible esta disenado para smartphones.',
     compatibleNoticeTitle: 'Modo Compatible',
     compatibleNoticeBody: 'Este modo usa un stream AAC mezclado. Puede seguir sonando con el telefono bloqueado o en segundo plano, pero el delay es variable y suele rondar los 5 a 10 segundos.',
+    serverDisconnected: 'Se perdio la conexion con el servidor. Reconectando...',
+    serverRestarted: 'El servidor se reinicio. Esta pagina se reconecto; actualiza si el audio no vuelve.',
+    reload: 'Actualizar',
   },
 };
 
@@ -67,6 +73,9 @@ let nativeStartPromise = null;
 let nativeReconnectTimer = null;
 let nativeReconnectInFlight = false;
 let pendingNoticeMode = globalMode;
+let serverInstanceId = '';
+let serverNoticeEl;
+let serverNoticeKind = '';
 
 languageToggle.addEventListener('click', () => {
   const open = languageMenu.hidden;
@@ -493,6 +502,47 @@ function setHeaderStatus(state, key) {
   statusText.textContent = t(key);
 }
 
+function updateServerInstance(nextServerInstanceId) {
+  if (!nextServerInstanceId) {
+    hideServerNotice();
+    return;
+  }
+  if (serverInstanceId && serverInstanceId !== nextServerInstanceId) {
+    serverInstanceId = nextServerInstanceId;
+    showServerNotice('restarted');
+    return;
+  }
+  serverInstanceId = nextServerInstanceId;
+  if (serverNoticeKind !== 'restarted') hideServerNotice();
+}
+
+function showServerNotice(kind) {
+  const notice = ensureServerNotice();
+  serverNoticeKind = kind;
+  const textEl = notice.querySelector('[data-role="server-notice-text"]');
+  const reloadButton = notice.querySelector('[data-role="server-notice-reload"]');
+  if (textEl) textEl.textContent = t(kind === 'restarted' ? 'serverRestarted' : 'serverDisconnected');
+  if (reloadButton) reloadButton.textContent = t('reload');
+  notice.hidden = false;
+}
+
+function hideServerNotice() {
+  serverNoticeKind = '';
+  if (serverNoticeEl) serverNoticeEl.hidden = true;
+}
+
+function ensureServerNotice() {
+  if (serverNoticeEl) return serverNoticeEl;
+  serverNoticeEl = document.createElement('div');
+  serverNoticeEl.className = 'server-notice';
+  serverNoticeEl.hidden = true;
+  serverNoticeEl.innerHTML = '<span data-role="server-notice-text"></span><button type="button" data-role="server-notice-reload"></button>';
+  const button = serverNoticeEl.querySelector('[data-role="server-notice-reload"]');
+  if (button) button.addEventListener('click', () => location.reload());
+  document.body.appendChild(serverNoticeEl);
+  return serverNoticeEl;
+}
+
 function updateMeters() {
   players.forEach((player) => player.updateMeter());
   updateHeader();
@@ -518,6 +568,12 @@ function applyLanguage() {
   players.forEach((player) => player.updateLabels());
   updateModeControls();
   updateModeNotice();
+  if (serverNoticeEl && !serverNoticeEl.hidden) {
+    const textEl = serverNoticeEl.querySelector('[data-role="server-notice-text"]');
+    const reloadButton = serverNoticeEl.querySelector('[data-role="server-notice-reload"]');
+    if (textEl) textEl.textContent = t(serverNoticeKind === 'restarted' ? 'serverRestarted' : 'serverDisconnected');
+    if (reloadButton) reloadButton.textContent = t('reload');
+  }
   updateHeader();
 }
 
@@ -629,6 +685,7 @@ class MultiStreamPlayer {
     });
     this.controlWs.addEventListener('close', () => {
       this.controlOpen = false;
+      showServerNotice('disconnected');
       setTimeout(() => this.connectControl(), 1000);
       updateHeader();
     });
@@ -637,6 +694,7 @@ class MultiStreamPlayer {
       if (message.type === 'config') {
         this.config = { ...this.config, ...message };
         this.configReady = true;
+        updateServerInstance(message.serverInstanceId);
         this.startIfReady();
       } else if (message.type === 'stats') {
         this.activeListeners = message.activeListeners || 0;
@@ -647,7 +705,7 @@ class MultiStreamPlayer {
         }
         this.lastHeardAt = message.lastHeardAt || 0;
         this.lastHeardLabel = message.lastHeardLabel || 'never';
-        if (message.hasUdp || this.lastHeardAt) this.confirmed = true;
+        if (message.hasUdp) this.confirmed = true;
       }
       this.updateLabels();
       updateHeader();
