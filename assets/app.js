@@ -55,6 +55,8 @@ const translations = {
 
 let language = localStorage.getItem('udp-airband-language') || 'en';
 if (!translations[language]) language = 'en';
+const preferredModeStorageKey = 'udp-airband-preferred-mode';
+const acceptedNoticeStoragePrefix = 'udp-airband-notice-accepted:';
 let currentStatusKey = 'disconnected';
 let lastHeardLabel = 'never';
 
@@ -98,7 +100,8 @@ let compressedTransport = null;
 let activeCompressedKind = null;
 let usingNativeHls = false;
 let currentMode = 'raw';
-let preferredMode = isMobileDevice() ? 'opus' : 'raw';
+let preferredMode = localStorage.getItem(preferredModeStorageKey) || (isMobileDevice() ? 'opus' : 'raw');
+if (!['raw', 'opus', 'compatible'].includes(preferredMode)) preferredMode = isMobileDevice() ? 'opus' : 'raw';
 let opusAvailable = false;
 let compressedAvailable = false;
 let audioStarted = false;
@@ -181,6 +184,7 @@ modeOptions.forEach((option) => {
 if (modeNoticeAccept) {
   modeNoticeAccept.addEventListener('click', () => {
     if (modeNoticeOverlay?.dataset.notice === 'mobile-startup') {
+      rememberNoticeAccepted('mobile-startup');
       delete modeNoticeOverlay.dataset.notice;
       if (modeNoticeOverlay) modeNoticeOverlay.hidden = true;
       startAudioPlayback().catch(() => {});
@@ -188,9 +192,8 @@ if (modeNoticeAccept) {
     }
     const mode = modeNoticeOverlay ? modeNoticeOverlay.dataset.mode : '';
     if (mode) {
-      preferredMode = mode;
-      if (audioStarted) startSelectedMode();
-      updateModeButton();
+      rememberNoticeAccepted(modeNoticeKeyForMode(mode));
+      applySelectedMode(mode);
     }
     if (modeNoticeOverlay) modeNoticeOverlay.hidden = true;
   });
@@ -289,7 +292,7 @@ function connectControlWebSocket() {
         opusAvailable = Boolean(message.opusAvailable);
         compressedAvailable = Boolean(message.compressedAvailable);
         compressedTransport = getCompressedTransport();
-        if (!getAvailableModes().includes(preferredMode)) preferredMode = isCompatibleAvailable() && isMobileDevice() ? 'compatible' : 'raw';
+        if (!getAvailableModes().includes(preferredMode)) setPreferredMode(isCompatibleAvailable() && isMobileDevice() ? 'compatible' : 'raw');
         document.title = `${message.label} - UDP Airband Monitor`;
         titleLink.textContent = message.label;
         titleLink.title = t('returnHome');
@@ -1112,9 +1115,18 @@ function selectMode(mode) {
     showModeNotice(mode);
     return;
   }
-  preferredMode = mode;
+  applySelectedMode(mode);
+}
+
+function applySelectedMode(mode) {
+  setPreferredMode(mode);
   if (audioStarted) startSelectedMode();
   updateModeButton();
+}
+
+function setPreferredMode(mode) {
+  preferredMode = mode;
+  localStorage.setItem(preferredModeStorageKey, mode);
 }
 
 function updateModeMenu() {
@@ -1135,10 +1147,12 @@ function closeModeMenu() {
 }
 
 function showModeNotice(mode) {
+  if (hasAcceptedNotice(modeNoticeKeyForMode(mode))) {
+    applySelectedMode(mode);
+    return;
+  }
   if (!modeNoticeOverlay) {
-    preferredMode = mode;
-    if (audioStarted) startSelectedMode();
-    updateModeButton();
+    applySelectedMode(mode);
     return;
   }
   delete modeNoticeOverlay.dataset.notice;
@@ -1151,6 +1165,7 @@ function showModeNotice(mode) {
 
 function showMobileStartupNoticeIfNeeded() {
   if (mobileStartupNoticeShown || audioStarted || !isMobileDevice() || preferredMode !== 'opus' || !isCompressedAvailable() || !isCompatibleAvailable()) return;
+  if (hasAcceptedNotice('mobile-startup')) return;
   mobileStartupNoticeShown = true;
   showMobileStartupNotice();
 }
@@ -1163,6 +1178,18 @@ function showMobileStartupNotice() {
   if (modeNoticeBody) modeNoticeBody.textContent = t('mobileStartupNoticeBody');
   if (modeNoticeAccept) modeNoticeAccept.textContent = t('accept');
   modeNoticeOverlay.hidden = false;
+}
+
+function modeNoticeKeyForMode(mode) {
+  return mode === 'compatible' ? 'compatible-mode' : 'realtime-mode';
+}
+
+function hasAcceptedNotice(key) {
+  return localStorage.getItem(`${acceptedNoticeStoragePrefix}${key}`) === 'true';
+}
+
+function rememberNoticeAccepted(key) {
+  localStorage.setItem(`${acceptedNoticeStoragePrefix}${key}`, 'true');
 }
 
 function getCompressedTransport() {

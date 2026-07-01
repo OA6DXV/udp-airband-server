@@ -11,6 +11,7 @@
 - The initial Multi Stream card was compacted, its description now starts with a capital letter, and Multi Stream mode buttons now keep an orange relationship border around the inactive mode.
 - Mobile users opening an individual stream now see a startup notice explaining that the default compressed realtime mode has low delay, while Compatible Mode is needed for background playback and can add delay.
 - Accepting the mobile individual-stream notice now starts audio immediately, and Multi Stream requires at least two selected streams before it can start.
+- Individual streams now remember the user's preferred playback mode and accepted mode notices in the browser, so informational dialogs are shown only once per notice type.
 
 ## 1.4 - 2026-06-11
 
