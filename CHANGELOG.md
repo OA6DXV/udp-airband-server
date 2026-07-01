@@ -1,22 +1,22 @@
 # Changelog
 
-## 1.5-preview - Unreleased
+## 1.5 - 2026-07-01
 
-### Changed
+### English
 
-- Started the 1.5 preview cycle.
-- Compatible AAC playback now seeks native browser audio closer to the live edge when playback starts, reducing startup buffer delay for Multi Stream and individual compatible players.
-- Multi Stream Compatible Mode now uses the same compact per-stream controls on desktop and mobile, hiding realtime-only mode/start controls while the mixed AAC stream is active.
-- Individual stream startup latency was reduced, the `Start Audio` button now pulses green until playback starts, muted audio buttons turn green while showing `Unmute`, Last Heard stays in seconds for up to 20 seconds, and the initial Multi Stream card is centered with an orange border.
-- The initial Multi Stream card was compacted, its description now starts with a capital letter, and Multi Stream mode buttons now keep an orange relationship border around the inactive mode.
-- Mobile users opening an individual stream now see a startup notice explaining that the default compressed realtime mode has low delay, while Compatible Mode is needed for background playback and can add delay.
-- Accepting the mobile individual-stream notice now starts audio immediately, and Multi Stream requires at least two selected streams before it can start.
-- Individual streams now remember accepted mode notices per tab, while playback mode defaults continue to be selected by device type on each new session.
-- Multi Stream now also remembers accepted Realtime/Compatible mode notices and skips repeated informational dialogs when switching modes.
-- Individual stream and Multi Stream notice acknowledgements now use separate per-tab session storage namespaces.
-- Single and Multi Stream title links now show a back chevron, desktop single streams show a startup notice for Uncompressed mode, and selecting Compressed mode shows its own realtime bandwidth-saving notice once per tab.
-- Compatible Mode notices now describe a 5 to 10 second delay, and the main page title is fixed as `Real-Time Airband Audio` across languages.
-- Single-stream Compatible mode now uses orange hover, active, and closed-button border states in the mode selector.
+- Improved Compatible AAC playback by seeking native browser audio closer to the live edge on startup for Multi Stream and individual players.
+- Refined Multi Stream Compatible Mode with the same compact per-stream layout on desktop and mobile, plus clearer Realtime/Compatible mode controls.
+- Improved individual stream startup: playback can start from the informational notice, mute/unmute states are clearer, and Last Heard stays in seconds for up to 20 seconds.
+- Added per-tab acknowledgements for individual and Multi Stream mode notices while keeping playback defaults device-based on each new session.
+- Updated the main page title to `Real-Time Airband Audio`, improved Multi Stream selection requirements, and polished compatible-mode orange states.
+
+### Espanol
+
+- Se mejoro la reproduccion AAC Compatible acercando el audio nativo al borde en vivo al iniciar Multi Stream y reproductores individuales.
+- Se refino Multi Stream Compatible Mode con el mismo diseno compacto por stream en escritorio y movil, ademas de controles Realtime/Compatible mas claros.
+- Se mejoro el inicio de streams individuales: el audio puede arrancar desde el aviso informativo, mute/unmute es mas claro, y Last Heard se mantiene en segundos hasta 20 segundos.
+- Se agrego memoria por pestana para avisos de modo en streams individuales y Multi Stream, manteniendo los modos por defecto segun el dispositivo en cada nueva sesion.
+- Se actualizo el titulo principal a `Real-Time Airband Audio`, se mejoro el requisito de seleccion de Multi Stream y se pulieron los estados naranjas del modo Compatible.
 
 ## 1.4 - 2026-06-11
 
