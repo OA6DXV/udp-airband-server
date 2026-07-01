@@ -53,7 +53,8 @@ const translations = {
 
 let language = localStorage.getItem('udp-airband-language') || 'en';
 if (!translations[language]) language = 'en';
-const acceptedNoticeStoragePrefix = 'udp-airband-notice-accepted:';
+const legacyAcceptedNoticeStoragePrefix = 'udp-airband-notice-accepted:';
+const acceptedNoticeStoragePrefix = 'udp-airband-multi-notice-accepted:';
 let audioContext;
 let globalPaused = false;
 let statusHovering = false;
@@ -401,7 +402,8 @@ function modeNoticeKeyForMode(mode) {
 }
 
 function hasAcceptedNotice(key) {
-  return localStorage.getItem(`${acceptedNoticeStoragePrefix}${key}`) === 'true';
+  return localStorage.getItem(`${acceptedNoticeStoragePrefix}${key}`) === 'true'
+    || localStorage.getItem(`${legacyAcceptedNoticeStoragePrefix}${key}`) === 'true';
 }
 
 function rememberNoticeAccepted(key) {
