@@ -763,6 +763,7 @@ function updateModeButton() {
   modeButton.textContent = modeLabel(visibleMode);
   modeButton.disabled = getAvailableModes().length <= 1;
   modeButton.title = getAvailableModes().length > 1 ? t('switchMode') : t('modeUnavailable');
+  modeButton.classList.toggle('compatible-mode', visibleMode === 'compatible');
   updateModeMenu();
 }
 
@@ -1149,6 +1150,7 @@ function updateModeMenu() {
     option.textContent = modeLabel(mode);
     option.disabled = !availableModes.includes(mode);
     option.classList.toggle('active', mode === visibleMode);
+    option.classList.toggle('compatible-option', mode === 'compatible');
   });
 }
 

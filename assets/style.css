@@ -394,6 +394,10 @@ button.audio-muted {
   margin-top: 2px;
 }
 
+.mode-button.compatible-mode {
+  border-color: var(--wave);
+}
+
 .mode-meter {
   position: relative;
 }
@@ -435,9 +439,20 @@ button.audio-muted {
   border-color: var(--accent);
 }
 
+.mode-option.compatible-option:hover,
+.mode-option.compatible-option:focus-visible {
+  border-color: var(--wave);
+}
+
 .mode-option.active {
   background: var(--accent);
   color: #06100b;
+}
+
+.mode-option.compatible-option.active {
+  border-color: var(--wave);
+  background: var(--wave);
+  color: #160500;
 }
 
 .mode-option:disabled {

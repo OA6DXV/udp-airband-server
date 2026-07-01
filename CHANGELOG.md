@@ -16,6 +16,7 @@
 - Individual stream and Multi Stream notice acknowledgements now use separate per-tab session storage namespaces.
 - Single and Multi Stream title links now show a back chevron, desktop single streams show a startup notice for Uncompressed mode, and selecting Compressed mode shows its own realtime bandwidth-saving notice once per tab.
 - Compatible Mode notices now describe a 5 to 10 second delay, and the main page title is fixed as `Real-Time Airband Audio` across languages.
+- Single-stream Compatible mode now uses orange hover, active, and closed-button border states in the mode selector.
 
 ## 1.4 - 2026-06-11
 
