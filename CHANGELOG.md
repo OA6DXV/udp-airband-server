@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.5 - 2026-07-01
+
+### English
+
+- Improved Compatible AAC playback by seeking native browser audio closer to the live edge on startup for Multi Stream and individual players.
+- Refined Multi Stream Compatible Mode with the same compact per-stream layout on desktop and mobile, plus clearer Realtime/Compatible mode controls.
+- Improved individual stream startup: playback can start from the informational notice, mute/unmute states are clearer, and Last Heard stays in seconds for up to 20 seconds.
+- Added per-tab acknowledgements for individual and Multi Stream mode notices while keeping playback defaults device-based on each new session.
+- Updated the main page title to `Real-Time Airband Audio`, improved Multi Stream selection requirements, and polished compatible-mode orange states.
+
+### Espanol
+
+- Se mejoro la reproduccion AAC Compatible acercando el audio nativo al borde en vivo al iniciar Multi Stream y reproductores individuales.
+- Se refino Multi Stream Compatible Mode con el mismo diseno compacto por stream en escritorio y movil, ademas de controles Realtime/Compatible mas claros.
+- Se mejoro el inicio de streams individuales: el audio puede arrancar desde el aviso informativo, mute/unmute es mas claro, y Last Heard se mantiene en segundos hasta 20 segundos.
+- Se agrego memoria por pestana para avisos de modo en streams individuales y Multi Stream, manteniendo los modos por defecto segun el dispositivo en cada nueva sesion.
+- Se actualizo el titulo principal a `Real-Time Airband Audio`, se mejoro el requisito de seleccion de Multi Stream y se pulieron los estados naranjas del modo Compatible.
+
 ## 1.4 - 2026-06-11
 
 ### Added

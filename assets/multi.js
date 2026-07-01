@@ -35,7 +35,7 @@ const translations = {
     realTimeNoticeBody: 'This mode uses realtime per-stream audio with the lowest latency. It cannot keep playing in the background, so keep this page open and the device active.',
     realTimeDesktopNoticeBody: 'This mode uses realtime per-stream audio with the lowest latency. Compatible Mode is designed for smartphones.',
     compatibleNoticeTitle: 'Compatible Mode',
-    compatibleNoticeBody: 'This mode uses one mixed AAC stream. It can keep playing with the phone locked or in the background, but delay is variable and usually around 5 seconds.',
+    compatibleNoticeBody: 'This mode uses one mixed AAC stream. It can keep playing with the phone locked or in the background, but delay is variable and usually around 5 to 10 seconds.',
   },
   es: {
     users: 'Usuarios', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP',
@@ -47,12 +47,13 @@ const translations = {
     realTimeNoticeBody: 'Este modo usa audio por stream en tiempo real con la menor latencia. No puede seguir sonando en segundo plano, asi que manten esta pagina abierta y el dispositivo activo.',
     realTimeDesktopNoticeBody: 'Este modo usa audio por stream en tiempo real con la menor latencia. El Modo Compatible esta disenado para smartphones.',
     compatibleNoticeTitle: 'Modo Compatible',
-    compatibleNoticeBody: 'Este modo usa un stream AAC mezclado. Puede seguir sonando con el telefono bloqueado o en segundo plano, pero el delay es variable y suele rondar los 5 segundos.',
+    compatibleNoticeBody: 'Este modo usa un stream AAC mezclado. Puede seguir sonando con el telefono bloqueado o en segundo plano, pero el delay es variable y suele rondar los 5 a 10 segundos.',
   },
 };
 
 let language = localStorage.getItem('udp-airband-language') || 'en';
 if (!translations[language]) language = 'en';
+const acceptedNoticeStoragePrefix = 'udp-airband-multi-notice-accepted:';
 let audioContext;
 let globalPaused = false;
 let statusHovering = false;
@@ -113,6 +114,7 @@ statusEl.addEventListener('mouseleave', () => {
 
 if (multiStartButton) {
   multiStartButton.addEventListener('click', () => {
+    if (pendingNoticeMode) rememberNoticeAccepted(modeNoticeKeyForMode(pendingNoticeMode));
     startMultiPlayback();
   });
 }
@@ -253,12 +255,21 @@ async function startNativeMultiAudioOnce() {
     nativeMultiAudio.load();
   }
   updateMediaSessionMetadata();
+  const seekOnCanPlay = () => {
+    jumpNativeAudioToLiveEdge(nativeMultiAudio);
+  };
+  nativeMultiAudio.addEventListener('canplay', seekOnCanPlay, { once: true });
+  jumpNativeAudioToLiveEdge(nativeMultiAudio);
   try {
     await nativeMultiAudio.play();
   } catch (err) {
+    nativeMultiAudio.removeEventListener('canplay', seekOnCanPlay);
     nativeStopExpected = false;
     throw err;
   }
+  setTimeout(() => {
+    if (nativeAudioStarted && nativeMultiAudio?.src) jumpNativeAudioToLiveEdge(nativeMultiAudio);
+  }, 100);
   nativeAudioStarted = true;
   nativeStopExpected = false;
   nativePreloadActive = false;
@@ -269,6 +280,33 @@ async function startNativeMultiAudioOnce() {
   });
   players.forEach((player) => player.sendNativeGain({ immediate: true }));
   updateHeader();
+}
+
+function jumpNativeAudioToLiveEdge(audio, targetBufferSeconds = 0.5) {
+  const delay = getNativeBufferedDelay(audio);
+  if (delay === null || delay <= targetBufferSeconds + 0.25) return false;
+
+  try {
+    const liveEdge = audio.buffered.end(audio.buffered.length - 1);
+    const target = Math.max(0, liveEdge - targetBufferSeconds);
+    if (!Number.isFinite(target) || target <= audio.currentTime) return false;
+    audio.currentTime = target;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getNativeBufferedDelay(audio) {
+  if (!audio || audio.buffered.length === 0) return null;
+
+  try {
+    const liveEdge = audio.buffered.end(audio.buffered.length - 1);
+    const delay = liveEdge - audio.currentTime;
+    return Number.isFinite(delay) ? delay : null;
+  } catch {
+    return null;
+  }
 }
 
 function preloadNativeMultiAudio() {
@@ -332,6 +370,12 @@ function showModeNotice(mode) {
   if (!['raw', 'opus'].includes(mode)) return;
   pendingNoticeMode = mode;
   setGlobalMode(mode, { deferStart: true });
+  if (hasAcceptedNotice(modeNoticeKeyForMode(mode))) {
+    if (mode === 'opus') preloadNativeMultiAudio();
+    else stopNativeMultiAudio();
+    if (multiPlaybackRequested) startSelectedGlobalMode().catch(() => {});
+    return;
+  }
   if (multiNoticeTitle) multiNoticeTitle.textContent = t(mode === 'opus' ? 'compatibleNoticeTitle' : 'realTimeNoticeTitle');
   if (multiNoticeBody) multiNoticeBody.textContent = t(noticeBodyKey(mode));
   if (multiStartButton) multiStartButton.textContent = t('accept');
@@ -350,6 +394,18 @@ function updateModeNotice() {
 function noticeBodyKey(mode) {
   if (mode === 'opus') return 'compatibleNoticeBody';
   return isMobileDevice() ? 'realTimeNoticeBody' : 'realTimeDesktopNoticeBody';
+}
+
+function modeNoticeKeyForMode(mode) {
+  return mode === 'opus' ? 'multi-compatible-mode' : 'multi-realtime-mode';
+}
+
+function hasAcceptedNotice(key) {
+  return sessionStorage.getItem(`${acceptedNoticeStoragePrefix}${key}`) === 'true';
+}
+
+function rememberNoticeAccepted(key) {
+  sessionStorage.setItem(`${acceptedNoticeStoragePrefix}${key}`, 'true');
 }
 
 function shouldRecoverNativeAudio() {

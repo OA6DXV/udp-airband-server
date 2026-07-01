@@ -33,24 +33,33 @@ const translations = {
     users: 'Users', gain: 'Gain', startAudio: 'Start Audio', mute: 'Mute', unmute: 'Unmute', buffered: 'Buffered', bandwidth: 'Bandwidth', lastHeardTime: 'Last Heard Time', mode: 'Mode', level: 'Level', localTime: 'Local Time', disconnected: 'Disconnected', waitingUdp: 'Waiting for UDP', connected: 'Connected', idle: 'Push to Reconnect', pushDisconnect: 'Push to disconnect', stopStream: 'Stop stream', returnHome: 'Click to return home', opusUnavailable: 'Compressed unavailable', compressed: 'Compressed', uncompressed: 'Uncompressed', switchMode: 'Switch audio mode', opusNeedsFfmpeg: 'Compressed mode is unavailable on the server', never: 'never', now: 'Now',
     compatible: 'Compatible', compatibleUnavailable: 'Compatible unavailable', modeUnavailable: 'Mode unavailable',
     compatibleNoticeTitle: 'Compatible Mode',
-    compatibleNoticeBody: 'Compatible Mode was designed for mobile devices and background playback. It uses native AAC audio, so it can keep playing with the phone locked, but it may add a variable delay of about 5 seconds.',
-    realtimeNoticeTitle: 'Realtime Mode',
-    realtimeNoticeBody: 'Uncompressed and Compressed are realtime modes. They have lower latency, but they need this page to stay open and the device active.',
+    compatibleNoticeBody: 'Compatible Mode was designed for mobile devices and background playback. It uses native AAC audio, so it can keep playing with the phone locked, but it may add a variable delay of about 5 to 10 seconds.',
+    uncompressedNoticeTitle: 'Uncompressed Realtime Mode',
+    uncompressedNoticeBody: 'This mode uses raw realtime audio with the lowest latency. It must stay open and active in this page.',
+    compressedNoticeTitle: 'Compressed Realtime Mode',
+    compressedNoticeBody: 'This mode uses realtime compressed audio to reduce bandwidth. It is ideal for slow connections, but it still needs this page to stay open and active.',
+    mobileStartupNoticeTitle: 'Compressed realtime mode',
+    mobileStartupNoticeBody: 'This stream starts in low-delay compressed realtime mode. To keep audio playing in the background or with the phone locked, select Compatible Mode; it may add some delay.',
     accept: 'Accept',
   },
   es: {
     users: 'Usuarios', gain: 'Ganancia', startAudio: 'Iniciar audio', mute: 'Silenciar', unmute: 'Activar audio', buffered: 'Buffer', bandwidth: 'Ancho de banda', lastHeardTime: 'Ultima transmision', mode: 'Modo', level: 'Nivel', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP', connected: 'Conectado', idle: 'Presiona para reconectar', pushDisconnect: 'Presiona para desconectar', stopStream: 'Detener stream', returnHome: 'Click para volver a la pagina principal', opusUnavailable: 'Comprimido no disponible', compressed: 'Comprimido', uncompressed: 'Sin comprimir', switchMode: 'Cambiar modo de audio', opusNeedsFfmpeg: 'El modo comprimido no esta disponible en el servidor', never: 'nunca', now: 'Ahora',
     compatible: 'Compatible', compatibleUnavailable: 'Compatible no disponible', modeUnavailable: 'Modo no disponible',
     compatibleNoticeTitle: 'Modo Compatible',
-    compatibleNoticeBody: 'El Modo Compatible fue disenado para moviles y reproduccion en segundo plano. Usa audio AAC nativo, asi que puede seguir sonando con el telefono bloqueado, pero puede agregar un delay variable de unos 5 segundos.',
-    realtimeNoticeTitle: 'Modo realtime',
-    realtimeNoticeBody: 'Sin comprimir y Comprimido son modos en tiempo real. Tienen menor latencia, pero necesitan que esta pagina siga abierta y el dispositivo activo.',
+    compatibleNoticeBody: 'El Modo Compatible fue disenado para moviles y reproduccion en segundo plano. Usa audio AAC nativo, asi que puede seguir sonando con el telefono bloqueado, pero puede agregar un delay variable de unos 5 a 10 segundos.',
+    uncompressedNoticeTitle: 'Modo Realtime sin comprimir',
+    uncompressedNoticeBody: 'Este modo usa audio realtime crudo con la menor latencia. Debe mantenerse abierto y activo en esta pagina.',
+    compressedNoticeTitle: 'Modo Realtime comprimido',
+    compressedNoticeBody: 'Este modo usa audio realtime comprimido para reducir el ancho de banda. Es ideal para conexiones lentas, pero igual necesita que esta pagina siga abierta y activa.',
+    mobileStartupNoticeTitle: 'Modo comprimido realtime',
+    mobileStartupNoticeBody: 'Este stream inicia en modo comprimido sin delay. Si quieres escuchar el audio en background o con el telefono bloqueado, selecciona el Modo Compatible; puede agregar cierto delay.',
     accept: 'Aceptar',
   },
 };
 
 let language = localStorage.getItem('udp-airband-language') || 'en';
 if (!translations[language]) language = 'en';
+const acceptedNoticeStoragePrefix = 'udp-airband-single-notice-accepted:';
 let currentStatusKey = 'disconnected';
 let lastHeardLabel = 'never';
 
@@ -58,7 +67,7 @@ let audioContext;
 let gainNode;
 let config = { sampleRate: 8000, channels: 1 };
 let queuedFrames = 0;
-const targetLatencySeconds = 0.25;
+const targetLatencySeconds = 0.05;
 let nextPlayTime = 0;
 let gain = Number(gainInput.value);
 let lastPeak = 0;
@@ -102,6 +111,7 @@ let muted = false;
 let streamPaused = false;
 let pausedMode = null;
 let statusHovering = false;
+let mobileStartupNoticeShown = false;
 let receivedBytes = 0;
 let lastBandwidthBytes = 0;
 let lastBandwidthAt = Date.now();
@@ -175,11 +185,26 @@ modeOptions.forEach((option) => {
 
 if (modeNoticeAccept) {
   modeNoticeAccept.addEventListener('click', () => {
+    if (modeNoticeOverlay?.dataset.notice === 'mobile-startup') {
+      rememberNoticeAccepted('mobile-startup');
+      delete modeNoticeOverlay.dataset.notice;
+      if (modeNoticeOverlay) modeNoticeOverlay.hidden = true;
+      startAudioPlayback().catch(() => {});
+      return;
+    }
+    if (modeNoticeOverlay?.dataset.notice === 'startup-mode') {
+      const startupMode = modeNoticeOverlay.dataset.mode || preferredMode;
+      rememberNoticeAccepted(modeNoticeKeyForMode(startupMode));
+      applySelectedMode(startupMode);
+      delete modeNoticeOverlay.dataset.notice;
+      if (modeNoticeOverlay) modeNoticeOverlay.hidden = true;
+      startAudioPlayback().catch(() => {});
+      return;
+    }
     const mode = modeNoticeOverlay ? modeNoticeOverlay.dataset.mode : '';
     if (mode) {
-      preferredMode = mode;
-      if (audioStarted) startSelectedMode();
-      updateModeButton();
+      rememberNoticeAccepted(modeNoticeKeyForMode(mode));
+      applySelectedMode(mode);
     }
     if (modeNoticeOverlay) modeNoticeOverlay.hidden = true;
   });
@@ -203,7 +228,11 @@ statusEl.addEventListener('mouseleave', () => {
   updateStatusLabel();
 });
 
-startButton.addEventListener('click', async () => {
+startButton.addEventListener('click', () => {
+  startAudioPlayback().catch(() => {});
+});
+
+async function startAudioPlayback() {
   if (audioStarted) {
     muted = !muted;
     applyOutputGain();
@@ -228,7 +257,7 @@ startButton.addEventListener('click', async () => {
   updateAudioButton();
   updateGainControl();
   updateConnectionState();
-});
+}
 
 function applyOutputGain() {
   if (gainNode) gainNode.gain.value = muted ? 0 : gain;
@@ -241,6 +270,8 @@ function applyOutputGain() {
 
 function updateAudioButton() {
   startButton.textContent = audioStarted ? (muted ? t('unmute') : t('mute')) : t('startAudio');
+  startButton.classList.toggle('audio-muted', audioStarted && muted);
+  startButton.classList.toggle('audio-start-prompt', !audioStarted);
   startButton.disabled = false;
 }
 
@@ -272,7 +303,7 @@ function connectControlWebSocket() {
         opusAvailable = Boolean(message.opusAvailable);
         compressedAvailable = Boolean(message.compressedAvailable);
         compressedTransport = getCompressedTransport();
-        if (!getAvailableModes().includes(preferredMode)) preferredMode = isCompatibleAvailable() && isMobileDevice() ? 'compatible' : 'raw';
+        if (!getAvailableModes().includes(preferredMode)) setPreferredMode(isCompatibleAvailable() && isMobileDevice() ? 'compatible' : 'raw');
         document.title = `${message.label} - UDP Airband Monitor`;
         titleLink.textContent = message.label;
         titleLink.title = t('returnHome');
@@ -280,6 +311,7 @@ function connectControlWebSocket() {
           startSelectedMode();
         }
         updateModeButton();
+        showStartupNoticeIfNeeded();
         updateConnectionState();
       } else if (message.type === 'stats') {
         if (!streamPaused) {
@@ -521,8 +553,52 @@ function startCompatible() {
   setupCompatibleAudioGraph();
   compatibleAudio.src = `/multi/native.aac?streams=${encodeURIComponent(streamName)}&clientId=${encodeURIComponent(clientId)}&t=${Date.now()}`;
   compatibleAudio.load();
-  compatibleAudio.play().catch(() => setStatus('', 'compatibleUnavailable'));
+  const seekOnCanPlay = () => {
+    jumpNativeAudioToLiveEdge(compatibleAudio);
+  };
+  compatibleAudio.addEventListener('canplay', seekOnCanPlay, { once: true });
+  jumpNativeAudioToLiveEdge(compatibleAudio);
+  const playPromise = compatibleAudio.play();
+  if (playPromise && typeof playPromise.then === 'function') {
+    playPromise
+      .then(() => {
+        setTimeout(() => {
+          if (currentMode === 'compatible' && compatibleAudio?.src) jumpNativeAudioToLiveEdge(compatibleAudio);
+        }, 100);
+      })
+      .catch(() => {
+        compatibleAudio.removeEventListener('canplay', seekOnCanPlay);
+        setStatus('', 'compatibleUnavailable');
+      });
+  }
   updateMediaSessionMetadata();
+}
+
+function jumpNativeAudioToLiveEdge(audio, targetBufferSeconds = 0.5) {
+  const delay = getNativeBufferedDelay(audio);
+  if (delay === null || delay <= targetBufferSeconds + 0.25) return false;
+
+  try {
+    const liveEdge = audio.buffered.end(audio.buffered.length - 1);
+    const target = Math.max(0, liveEdge - targetBufferSeconds);
+    if (!Number.isFinite(target) || target <= audio.currentTime) return false;
+    audio.currentTime = target;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getNativeBufferedDelay(audio) {
+  if (!audio || audio.buffered.length === 0) return null;
+
+  try {
+    const liveEdge = audio.buffered.end(audio.buffered.length - 1);
+    const delay = liveEdge - audio.currentTime;
+    return Number.isFinite(delay) ? delay : null;
+  } catch {
+    return null;
+  }
 }
 
 function ensureCompatibleAudio() {
@@ -687,6 +763,7 @@ function updateModeButton() {
   modeButton.textContent = modeLabel(visibleMode);
   modeButton.disabled = getAvailableModes().length <= 1;
   modeButton.title = getAvailableModes().length > 1 ? t('switchMode') : t('modeUnavailable');
+  modeButton.classList.toggle('compatible-mode', visibleMode === 'compatible');
   updateModeMenu();
 }
 
@@ -1001,8 +1078,12 @@ function applyLanguage() {
   });
   updateAudioButton();
   updateModeButton();
-  if (modeNoticeOverlay && !modeNoticeOverlay.hidden && modeNoticeOverlay.dataset.mode) {
+  if (modeNoticeOverlay && !modeNoticeOverlay.hidden && modeNoticeOverlay.dataset.notice === 'startup-mode') {
+    showStartupModeNotice(modeNoticeOverlay.dataset.mode || preferredMode);
+  } else if (modeNoticeOverlay && !modeNoticeOverlay.hidden && modeNoticeOverlay.dataset.mode) {
     showModeNotice(modeNoticeOverlay.dataset.mode);
+  } else if (modeNoticeOverlay && !modeNoticeOverlay.hidden && modeNoticeOverlay.dataset.notice === 'mobile-startup') {
+    showMobileStartupNotice();
   }
   titleLink.title = t('returnHome');
   updateStatusLabel();
@@ -1044,13 +1125,21 @@ function selectMode(mode) {
   if (!['raw', 'opus', 'compatible'].includes(mode) || !getAvailableModes().includes(mode)) return;
   closeModeMenu();
   if (mode === preferredMode && (!audioStarted || currentMode === mode)) return;
-  if (mode === 'compatible' || (preferredMode === 'compatible' && isMobileDevice())) {
+  if (mode === 'compatible' || mode === 'opus' || (preferredMode === 'compatible' && isMobileDevice())) {
     showModeNotice(mode);
     return;
   }
-  preferredMode = mode;
+  applySelectedMode(mode);
+}
+
+function applySelectedMode(mode) {
+  setPreferredMode(mode);
   if (audioStarted) startSelectedMode();
   updateModeButton();
+}
+
+function setPreferredMode(mode) {
+  preferredMode = mode;
 }
 
 function updateModeMenu() {
@@ -1061,6 +1150,7 @@ function updateModeMenu() {
     option.textContent = modeLabel(mode);
     option.disabled = !availableModes.includes(mode);
     option.classList.toggle('active', mode === visibleMode);
+    option.classList.toggle('compatible-option', mode === 'compatible');
   });
 }
 
@@ -1071,17 +1161,84 @@ function closeModeMenu() {
 }
 
 function showModeNotice(mode) {
-  if (!modeNoticeOverlay) {
-    preferredMode = mode;
-    if (audioStarted) startSelectedMode();
-    updateModeButton();
+  if (hasAcceptedNotice(modeNoticeKeyForMode(mode))) {
+    applySelectedMode(mode);
     return;
   }
+  if (!modeNoticeOverlay) {
+    applySelectedMode(mode);
+    return;
+  }
+  delete modeNoticeOverlay.dataset.notice;
   modeNoticeOverlay.dataset.mode = mode;
-  if (modeNoticeTitle) modeNoticeTitle.textContent = t(mode === 'compatible' ? 'compatibleNoticeTitle' : 'realtimeNoticeTitle');
-  if (modeNoticeBody) modeNoticeBody.textContent = t(mode === 'compatible' ? 'compatibleNoticeBody' : 'realtimeNoticeBody');
+  if (modeNoticeTitle) modeNoticeTitle.textContent = t(modeNoticeTitleKey(mode));
+  if (modeNoticeBody) modeNoticeBody.textContent = t(modeNoticeBodyKey(mode));
   if (modeNoticeAccept) modeNoticeAccept.textContent = t('accept');
   modeNoticeOverlay.hidden = false;
+}
+
+function showStartupNoticeIfNeeded() {
+  if (audioStarted) return;
+  if (isMobileDevice()) {
+    showMobileStartupNoticeIfNeeded();
+    return;
+  }
+  if (preferredMode !== 'raw' || !getAvailableModes().includes('raw') || hasAcceptedNotice(modeNoticeKeyForMode('raw'))) return;
+  showStartupModeNotice('raw');
+}
+
+function showMobileStartupNoticeIfNeeded() {
+  if (mobileStartupNoticeShown || audioStarted || !isMobileDevice() || preferredMode !== 'opus' || !isCompressedAvailable() || !isCompatibleAvailable()) return;
+  if (hasAcceptedNotice('mobile-startup')) return;
+  mobileStartupNoticeShown = true;
+  showMobileStartupNotice();
+}
+
+function showMobileStartupNotice() {
+  if (!modeNoticeOverlay) return;
+  delete modeNoticeOverlay.dataset.mode;
+  modeNoticeOverlay.dataset.notice = 'mobile-startup';
+  if (modeNoticeTitle) modeNoticeTitle.textContent = t('mobileStartupNoticeTitle');
+  if (modeNoticeBody) modeNoticeBody.textContent = t('mobileStartupNoticeBody');
+  if (modeNoticeAccept) modeNoticeAccept.textContent = t('accept');
+  modeNoticeOverlay.hidden = false;
+}
+
+function showStartupModeNotice(mode) {
+  if (!modeNoticeOverlay) return;
+  delete modeNoticeOverlay.dataset.notice;
+  modeNoticeOverlay.dataset.notice = 'startup-mode';
+  modeNoticeOverlay.dataset.mode = mode;
+  if (modeNoticeTitle) modeNoticeTitle.textContent = t(modeNoticeTitleKey(mode));
+  if (modeNoticeBody) modeNoticeBody.textContent = t(modeNoticeBodyKey(mode));
+  if (modeNoticeAccept) modeNoticeAccept.textContent = t('accept');
+  modeNoticeOverlay.hidden = false;
+}
+
+function modeNoticeTitleKey(mode) {
+  if (mode === 'compatible') return 'compatibleNoticeTitle';
+  if (mode === 'opus') return 'compressedNoticeTitle';
+  return 'uncompressedNoticeTitle';
+}
+
+function modeNoticeBodyKey(mode) {
+  if (mode === 'compatible') return 'compatibleNoticeBody';
+  if (mode === 'opus') return 'compressedNoticeBody';
+  return 'uncompressedNoticeBody';
+}
+
+function modeNoticeKeyForMode(mode) {
+  if (mode === 'compatible') return 'compatible-mode';
+  if (mode === 'opus') return 'compressed-realtime-mode';
+  return 'uncompressed-realtime-mode';
+}
+
+function hasAcceptedNotice(key) {
+  return sessionStorage.getItem(`${acceptedNoticeStoragePrefix}${key}`) === 'true';
+}
+
+function rememberNoticeAccepted(key) {
+  sessionStorage.setItem(`${acceptedNoticeStoragePrefix}${key}`, 'true');
 }
 
 function getCompressedTransport() {
