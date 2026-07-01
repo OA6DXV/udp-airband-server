@@ -242,6 +242,7 @@ function applyOutputGain() {
 function updateAudioButton() {
   startButton.textContent = audioStarted ? (muted ? t('unmute') : t('mute')) : t('startAudio');
   startButton.classList.toggle('audio-muted', audioStarted && muted);
+  startButton.classList.toggle('audio-start-prompt', !audioStarted);
   startButton.disabled = false;
 }
 

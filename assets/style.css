@@ -327,10 +327,28 @@ button:hover {
   border-color: var(--accent);
 }
 
+button.audio-start-prompt {
+  animation: startAudioPulse 2s ease-in-out infinite;
+}
+
 button.audio-muted {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #06100b;
+  border-color: var(--warn);
+  background: var(--warn);
+  color: #171006;
+}
+
+@keyframes startAudioPulse {
+  0%, 100% {
+    border-color: var(--line);
+    background: var(--panel-2);
+    color: var(--text);
+  }
+
+  50% {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #06100b;
+  }
 }
 
 .meters {
