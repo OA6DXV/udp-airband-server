@@ -12,6 +12,7 @@
 - Mobile users opening an individual stream now see a startup notice explaining that the default compressed realtime mode has low delay, while Compatible Mode is needed for background playback and can add delay.
 - Accepting the mobile individual-stream notice now starts audio immediately, and Multi Stream requires at least two selected streams before it can start.
 - Individual streams now remember the user's preferred playback mode and accepted mode notices in the browser, so informational dialogs are shown only once per notice type.
+- Multi Stream now also remembers accepted Realtime/Compatible mode notices and skips repeated informational dialogs when switching modes.
 
 ## 1.4 - 2026-06-11
 

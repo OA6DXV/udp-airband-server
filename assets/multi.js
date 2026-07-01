@@ -53,6 +53,7 @@ const translations = {
 
 let language = localStorage.getItem('udp-airband-language') || 'en';
 if (!translations[language]) language = 'en';
+const acceptedNoticeStoragePrefix = 'udp-airband-notice-accepted:';
 let audioContext;
 let globalPaused = false;
 let statusHovering = false;
@@ -113,6 +114,7 @@ statusEl.addEventListener('mouseleave', () => {
 
 if (multiStartButton) {
   multiStartButton.addEventListener('click', () => {
+    if (pendingNoticeMode) rememberNoticeAccepted(modeNoticeKeyForMode(pendingNoticeMode));
     startMultiPlayback();
   });
 }
@@ -368,6 +370,12 @@ function showModeNotice(mode) {
   if (!['raw', 'opus'].includes(mode)) return;
   pendingNoticeMode = mode;
   setGlobalMode(mode, { deferStart: true });
+  if (hasAcceptedNotice(modeNoticeKeyForMode(mode))) {
+    if (mode === 'opus') preloadNativeMultiAudio();
+    else stopNativeMultiAudio();
+    if (multiPlaybackRequested) startSelectedGlobalMode().catch(() => {});
+    return;
+  }
   if (multiNoticeTitle) multiNoticeTitle.textContent = t(mode === 'opus' ? 'compatibleNoticeTitle' : 'realTimeNoticeTitle');
   if (multiNoticeBody) multiNoticeBody.textContent = t(noticeBodyKey(mode));
   if (multiStartButton) multiStartButton.textContent = t('accept');
@@ -386,6 +394,18 @@ function updateModeNotice() {
 function noticeBodyKey(mode) {
   if (mode === 'opus') return 'compatibleNoticeBody';
   return isMobileDevice() ? 'realTimeNoticeBody' : 'realTimeDesktopNoticeBody';
+}
+
+function modeNoticeKeyForMode(mode) {
+  return mode === 'opus' ? 'multi-compatible-mode' : 'multi-realtime-mode';
+}
+
+function hasAcceptedNotice(key) {
+  return localStorage.getItem(`${acceptedNoticeStoragePrefix}${key}`) === 'true';
+}
+
+function rememberNoticeAccepted(key) {
+  localStorage.setItem(`${acceptedNoticeStoragePrefix}${key}`, 'true');
 }
 
 function shouldRecoverNativeAudio() {
