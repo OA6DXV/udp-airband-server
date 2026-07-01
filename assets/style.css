@@ -549,6 +549,10 @@ canvas {
   font-weight: 750;
 }
 
+.multi-mode-button:not(.active) {
+  border-color: var(--wave);
+}
+
 .multi-mode-button.active {
   border-color: var(--wave);
   background: var(--wave);
