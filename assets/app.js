@@ -36,6 +36,8 @@ const translations = {
     compatibleNoticeBody: 'Compatible Mode was designed for mobile devices and background playback. It uses native AAC audio, so it can keep playing with the phone locked, but it may add a variable delay of about 5 seconds.',
     realtimeNoticeTitle: 'Realtime Mode',
     realtimeNoticeBody: 'Uncompressed and Compressed are realtime modes. They have lower latency, but they need this page to stay open and the device active.',
+    mobileStartupNoticeTitle: 'Compressed realtime mode',
+    mobileStartupNoticeBody: 'This stream starts in low-delay compressed realtime mode. To keep audio playing in the background or with the phone locked, select Compatible Mode; it may add some delay.',
     accept: 'Accept',
   },
   es: {
@@ -45,6 +47,8 @@ const translations = {
     compatibleNoticeBody: 'El Modo Compatible fue disenado para moviles y reproduccion en segundo plano. Usa audio AAC nativo, asi que puede seguir sonando con el telefono bloqueado, pero puede agregar un delay variable de unos 5 segundos.',
     realtimeNoticeTitle: 'Modo realtime',
     realtimeNoticeBody: 'Sin comprimir y Comprimido son modos en tiempo real. Tienen menor latencia, pero necesitan que esta pagina siga abierta y el dispositivo activo.',
+    mobileStartupNoticeTitle: 'Modo comprimido realtime',
+    mobileStartupNoticeBody: 'Este stream inicia en modo comprimido sin delay. Si quieres escuchar el audio en background o con el telefono bloqueado, selecciona el Modo Compatible; puede agregar cierto delay.',
     accept: 'Aceptar',
   },
 };
@@ -102,6 +106,7 @@ let muted = false;
 let streamPaused = false;
 let pausedMode = null;
 let statusHovering = false;
+let mobileStartupNoticeShown = false;
 let receivedBytes = 0;
 let lastBandwidthBytes = 0;
 let lastBandwidthAt = Date.now();
@@ -175,6 +180,11 @@ modeOptions.forEach((option) => {
 
 if (modeNoticeAccept) {
   modeNoticeAccept.addEventListener('click', () => {
+    if (modeNoticeOverlay?.dataset.notice === 'mobile-startup') {
+      delete modeNoticeOverlay.dataset.notice;
+      if (modeNoticeOverlay) modeNoticeOverlay.hidden = true;
+      return;
+    }
     const mode = modeNoticeOverlay ? modeNoticeOverlay.dataset.mode : '';
     if (mode) {
       preferredMode = mode;
@@ -282,6 +292,7 @@ function connectControlWebSocket() {
           startSelectedMode();
         }
         updateModeButton();
+        showMobileStartupNoticeIfNeeded();
         updateConnectionState();
       } else if (message.type === 'stats') {
         if (!streamPaused) {
@@ -1049,6 +1060,8 @@ function applyLanguage() {
   updateModeButton();
   if (modeNoticeOverlay && !modeNoticeOverlay.hidden && modeNoticeOverlay.dataset.mode) {
     showModeNotice(modeNoticeOverlay.dataset.mode);
+  } else if (modeNoticeOverlay && !modeNoticeOverlay.hidden && modeNoticeOverlay.dataset.notice === 'mobile-startup') {
+    showMobileStartupNotice();
   }
   titleLink.title = t('returnHome');
   updateStatusLabel();
@@ -1123,9 +1136,26 @@ function showModeNotice(mode) {
     updateModeButton();
     return;
   }
+  delete modeNoticeOverlay.dataset.notice;
   modeNoticeOverlay.dataset.mode = mode;
   if (modeNoticeTitle) modeNoticeTitle.textContent = t(mode === 'compatible' ? 'compatibleNoticeTitle' : 'realtimeNoticeTitle');
   if (modeNoticeBody) modeNoticeBody.textContent = t(mode === 'compatible' ? 'compatibleNoticeBody' : 'realtimeNoticeBody');
+  if (modeNoticeAccept) modeNoticeAccept.textContent = t('accept');
+  modeNoticeOverlay.hidden = false;
+}
+
+function showMobileStartupNoticeIfNeeded() {
+  if (mobileStartupNoticeShown || audioStarted || !isMobileDevice() || preferredMode !== 'opus' || !isCompressedAvailable() || !isCompatibleAvailable()) return;
+  mobileStartupNoticeShown = true;
+  showMobileStartupNotice();
+}
+
+function showMobileStartupNotice() {
+  if (!modeNoticeOverlay) return;
+  delete modeNoticeOverlay.dataset.mode;
+  modeNoticeOverlay.dataset.notice = 'mobile-startup';
+  if (modeNoticeTitle) modeNoticeTitle.textContent = t('mobileStartupNoticeTitle');
+  if (modeNoticeBody) modeNoticeBody.textContent = t('mobileStartupNoticeBody');
   if (modeNoticeAccept) modeNoticeAccept.textContent = t('accept');
   modeNoticeOverlay.hidden = false;
 }

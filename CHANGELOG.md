@@ -9,6 +9,7 @@
 - Multi Stream Compatible Mode now uses the same compact per-stream controls on desktop and mobile, hiding realtime-only mode/start controls while the mixed AAC stream is active.
 - Individual stream startup latency was reduced, the `Start Audio` button now pulses green until playback starts, muted audio buttons turn green while showing `Unmute`, Last Heard stays in seconds for up to 20 seconds, and the initial Multi Stream card is centered with an orange border.
 - The initial Multi Stream card was compacted, its description now starts with a capital letter, and Multi Stream mode buttons now keep an orange relationship border around the inactive mode.
+- Mobile users opening an individual stream now see a startup notice explaining that the default compressed realtime mode has low delay, while Compatible Mode is needed for background playback and can add delay.
 
 ## 1.4 - 2026-06-11
 
