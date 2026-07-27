@@ -1106,7 +1106,7 @@ Compressed audio:
   --opus-keepalive-ms MS        Silence keepalive interval, 20-1000 ms.
 
 Logging:
-  --log-level LEVEL             error, warn, info, or debug.
+  --log-level LEVEL             off, error, warn, info, or debug.
   --log-timestamps true|false   Add timestamps to logs.
   --log-colors true|false       Color console log levels.
 
