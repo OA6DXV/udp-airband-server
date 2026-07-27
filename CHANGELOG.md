@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.7-preview - Unreleased
+
+### English
+
+- Started the 1.7 preview cycle.
+- Planned: dynamic stream administration and feed management without requiring a full server restart.
+
+### Espanol
+
+- Se inicio el ciclo preview de 1.7.
+- Pendiente: administracion dinamica de streams y gestion de feeds sin requerir reiniciar por completo el servidor.
+
 ## 1.6 - 2026-07-26
 
 ### English
