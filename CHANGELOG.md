@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.6 - 2026-07-26
+
+### English
+
+- Added persistent server-side Last Heard storage in `data/last-heard.json`, so stream activity survives server restarts.
+- Added active-session disconnect/restart notices for single-stream and Multi Stream pages.
+- Restored the DeepWiki link in the English and Spanish README files.
+
+### Espanol
+
+- Se agrego persistencia server-side de Last Heard en `data/last-heard.json`, para que la actividad de streams sobreviva reinicios del servidor.
+- Se agregaron avisos de desconexion/reinicio para sesiones activas en paginas single-stream y Multi Stream.
+- Se restauro el link de DeepWiki en los README en ingles y espanol.
+
 ## 1.5 - 2026-07-01
 
 ### English

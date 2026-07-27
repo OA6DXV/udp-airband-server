@@ -1,4 +1,5 @@
 # UDP Airband Server
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/OA6DXV/udp-airband-server)
 
 [English document here](README.md)
 
@@ -325,6 +326,8 @@ enabled = false
 La pagina del stream muestra contador de usuarios, estado UDP/stream, buffered, bandwidth, ultima transmision, modo, ganancia, grafica de onda y nivel de audio.
 
 Cuando el stream fue validado por al menos un paquete UDP, el estado cambia a `Connected`. Al presionar `Connected`, la pagina cambia a `Push to Reconnect`, cierra solo el socket de audio y detiene el consumo de bandwidth sin cerrar la pagina ni la conexion de control/estado. Al presionar `Push to Reconnect`, se reanuda el mismo modo que estaba activo antes de pausar.
+
+La ultima transmision es detectada por el servidor y se guarda en `data/last-heard.json`, asi la pagina principal y nuevos oyentes pueden ver la ultima actividad conocida incluso despues de reiniciar el servidor.
 
 La pagina principal lista todos los feeds configurados bajo `Real-time Airband audio streams`, muestra usuarios activos, selector de idioma, ruta, informacion de canales/sample rate y la ultima transmision detectada por el servidor para cada feed.
 

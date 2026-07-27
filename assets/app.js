@@ -40,6 +40,9 @@ const translations = {
     compressedNoticeBody: 'This mode uses realtime compressed audio to reduce bandwidth. It is ideal for slow connections, but it still needs this page to stay open and active.',
     mobileStartupNoticeTitle: 'Compressed realtime mode',
     mobileStartupNoticeBody: 'This stream starts in low-delay compressed realtime mode. To keep audio playing in the background or with the phone locked, select Compatible Mode; it may add some delay.',
+    serverDisconnected: 'Connection to the server was lost. Reconnecting...',
+    serverRestarted: 'The server restarted. This page reconnected; refresh if audio does not resume.',
+    reload: 'Reload',
     accept: 'Accept',
   },
   es: {
@@ -53,6 +56,9 @@ const translations = {
     compressedNoticeBody: 'Este modo usa audio realtime comprimido para reducir el ancho de banda. Es ideal para conexiones lentas, pero igual necesita que esta pagina siga abierta y activa.',
     mobileStartupNoticeTitle: 'Modo comprimido realtime',
     mobileStartupNoticeBody: 'Este stream inicia en modo comprimido sin delay. Si quieres escuchar el audio en background o con el telefono bloqueado, selecciona el Modo Compatible; puede agregar cierto delay.',
+    serverDisconnected: 'Se perdio la conexion con el servidor. Reconectando...',
+    serverRestarted: 'El servidor se reinicio. Esta pagina se reconecto; actualiza si el audio no vuelve.',
+    reload: 'Actualizar',
     accept: 'Aceptar',
   },
 };
@@ -77,6 +83,9 @@ let lastAudioAt = 0;
 let streamConfirmed = false;
 let wsGeneration = 0;
 let controlWs;
+let serverInstanceId = '';
+let serverNoticeEl;
+let serverNoticeKind = '';
 let rawWs;
 let suppressRawReconnect = false;
 let adpcmWs;
@@ -292,6 +301,7 @@ function connectControlWebSocket() {
   controlWs.addEventListener('close', () => {
     if (generation === wsGeneration) {
       setStatus('', 'disconnected');
+      showServerNotice('disconnected');
       setTimeout(connectControlWebSocket, 1000);
     }
   });
@@ -303,6 +313,7 @@ function connectControlWebSocket() {
         opusAvailable = Boolean(message.opusAvailable);
         compressedAvailable = Boolean(message.compressedAvailable);
         compressedTransport = getCompressedTransport();
+        updateServerInstance(message.serverInstanceId);
         if (!getAvailableModes().includes(preferredMode)) setPreferredMode(isCompatibleAvailable() && isMobileDevice() ? 'compatible' : 'raw');
         document.title = `${message.label} - UDP Airband Monitor`;
         titleLink.textContent = message.label;
@@ -321,7 +332,7 @@ function connectControlWebSocket() {
         lastUdpAt = message.lastHeardAt || message.lastUdpAt || 0;
         lastHeardLabel = message.lastHeardLabel || 'never';
         lastHeardEl.textContent = localizeLastHeard(lastHeardLabel);
-        if (message.hasUdp || lastUdpAt || message.packetCount > 0) {
+        if (message.hasUdp || message.packetCount > 0) {
           streamConfirmed = true;
         }
         updateConnectionState();
@@ -340,6 +351,47 @@ function updateConnectionState() {
     return;
   }
   setStatus(streamConfirmed ? 'live' : 'ready', streamConfirmed ? 'connected' : 'waitingUdp');
+}
+
+function updateServerInstance(nextServerInstanceId) {
+  if (!nextServerInstanceId) {
+    hideServerNotice();
+    return;
+  }
+  if (serverInstanceId && serverInstanceId !== nextServerInstanceId) {
+    serverInstanceId = nextServerInstanceId;
+    showServerNotice('restarted');
+    return;
+  }
+  serverInstanceId = nextServerInstanceId;
+  if (serverNoticeKind !== 'restarted') hideServerNotice();
+}
+
+function showServerNotice(kind) {
+  const notice = ensureServerNotice();
+  serverNoticeKind = kind;
+  const textEl = notice.querySelector('[data-role="server-notice-text"]');
+  const reloadButton = notice.querySelector('[data-role="server-notice-reload"]');
+  if (textEl) textEl.textContent = t(kind === 'restarted' ? 'serverRestarted' : 'serverDisconnected');
+  if (reloadButton) reloadButton.textContent = t('reload');
+  notice.hidden = false;
+}
+
+function hideServerNotice() {
+  serverNoticeKind = '';
+  if (serverNoticeEl) serverNoticeEl.hidden = true;
+}
+
+function ensureServerNotice() {
+  if (serverNoticeEl) return serverNoticeEl;
+  serverNoticeEl = document.createElement('div');
+  serverNoticeEl.className = 'server-notice';
+  serverNoticeEl.hidden = true;
+  serverNoticeEl.innerHTML = '<span data-role="server-notice-text"></span><button type="button" data-role="server-notice-reload"></button>';
+  const button = serverNoticeEl.querySelector('[data-role="server-notice-reload"]');
+  if (button) button.addEventListener('click', () => location.reload());
+  document.body.appendChild(serverNoticeEl);
+  return serverNoticeEl;
 }
 
 function startSelectedMode(mode = preferredMode) {
@@ -1086,6 +1138,12 @@ function applyLanguage() {
     showMobileStartupNotice();
   }
   titleLink.title = t('returnHome');
+  if (serverNoticeEl && !serverNoticeEl.hidden) {
+    const textEl = serverNoticeEl.querySelector('[data-role="server-notice-text"]');
+    const reloadButton = serverNoticeEl.querySelector('[data-role="server-notice-reload"]');
+    if (textEl) textEl.textContent = t(serverNoticeKind === 'restarted' ? 'serverRestarted' : 'serverDisconnected');
+    if (reloadButton) reloadButton.textContent = t('reload');
+  }
   updateStatusLabel();
   lastHeardEl.textContent = localizeLastHeard(lastHeardLabel);
 }
