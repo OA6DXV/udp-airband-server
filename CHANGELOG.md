@@ -13,6 +13,7 @@
 - Added Web Admin online/restarting/offline status handling that recovers automatically when the server comes back.
 - Added EN/ES language switching to Web Admin.
 - Added persistent unique-user history with a 12-hour administration chart.
+- Added `--help` / `-h` command-line documentation and refined Web Admin action buttons so Apply/Discard only enable when stream configuration really changed.
 - Documented Web Admin usage in both English and Spanish README files.
 
 ### Espanol
@@ -26,6 +27,7 @@
 - Se agrego estado online/restarting/offline en Web Admin con recuperacion automatica cuando el servidor vuelve.
 - Se agrego selector de idioma EN/ES en Web Admin.
 - Se agrego historial persistente de usuarios unicos con una grafica administrativa de 12 horas.
+- Se agrego documentacion de flags con `--help` / `-h` y se ajustaron los botones Apply/Discard para activarse solo cuando la configuracion de streams realmente cambio.
 - Se documento el uso de Web Admin en los README en ingles y espanol.
 
 ## 1.6 - 2026-07-26

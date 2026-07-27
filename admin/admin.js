@@ -209,6 +209,7 @@ async function loadState(renderStreams) {
     if (renderStreams && !dirty) {
       renderStreamsFrom(savedStreams);
     }
+    updateDirtyState();
     lastUserHistory = state.userHistory || [];
     renderChart(lastUserHistory);
     scheduleStateRefresh(ONLINE_REFRESH_MS);
@@ -250,14 +251,7 @@ async function saveStreams(event) {
   clearMessage();
   if (!form.reportValidity()) return;
 
-  const streams = Array.from(rowsEl.querySelectorAll('tr')).map((row) => ({
-    name: row.querySelector('[name="name"]').value.trim(),
-    label: row.querySelector('[name="label"]').value.trim(),
-    udpHost: row.querySelector('[name="udpHost"]').value.trim(),
-    udpPort: Number(row.querySelector('[name="udpPort"]').value),
-    sampleRate: Number(row.querySelector('[name="sampleRate"]').value),
-    channels: Number(row.querySelector('[name="channels"]').value),
-  }));
+  const streams = collectFormStreams();
 
   setBusy(true);
   try {
@@ -406,7 +400,7 @@ async function request(url, options) {
 }
 
 function markDirty() {
-  dirty = true;
+  dirty = !streamsEqual(collectFormStreams(), savedStreams);
   updateDirtyState();
 }
 
@@ -420,6 +414,8 @@ function discardChanges() {
 function renderStreamsFrom(streams) {
   rowsEl.replaceChildren();
   streams.forEach(appendRow);
+  dirty = !streamsEqual(collectFormStreams(), savedStreams);
+  updateDirtyState();
 }
 
 function updateDirtyState() {
@@ -434,11 +430,39 @@ function setBusy(value) {
 
 function updateControls() {
   const unavailable = operationBusy || serverState !== 'online';
-  saveButton.disabled = unavailable;
+  saveButton.disabled = unavailable || !dirty;
   discardButton.disabled = unavailable || !dirty;
   addButton.disabled = unavailable;
   reloadButton.disabled = unavailable;
   restartButton.disabled = unavailable;
+}
+
+function collectFormStreams() {
+  return Array.from(rowsEl.querySelectorAll('tr')).map((row) => ({
+    name: row.querySelector('[name="name"]').value.trim(),
+    label: row.querySelector('[name="label"]').value.trim(),
+    udpHost: row.querySelector('[name="udpHost"]').value.trim(),
+    udpPort: Number(row.querySelector('[name="udpPort"]').value),
+    sampleRate: Number(row.querySelector('[name="sampleRate"]').value),
+    channels: Number(row.querySelector('[name="channels"]').value),
+  }));
+}
+
+function streamsEqual(left, right) {
+  const a = left.map(normalizeStreamForCompare);
+  const b = right.map(normalizeStreamForCompare);
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function normalizeStreamForCompare(stream) {
+  return {
+    name: String(stream.name || '').trim(),
+    label: String(stream.label || '').trim(),
+    udpHost: String(stream.udpHost || '').trim(),
+    udpPort: Number(stream.udpPort),
+    sampleRate: Number(stream.sampleRate),
+    channels: Number(stream.channels),
+  };
 }
 
 function showMessage(text, type) {

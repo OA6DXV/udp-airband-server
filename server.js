@@ -39,6 +39,10 @@ const COMPRESSED_CODECS = new Set(['adpcm', 'opus', 'aac', 'hls']);
 const serverInstanceId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
 
 const args = parseArgs(process.argv.slice(2));
+if (args.help) {
+  printHelp();
+  process.exit(0);
+}
 const serverConfigPath = args.serverConfig || args.serverConf || 'server.conf';
 const serverConfigExists = fs.existsSync(path.resolve(serverConfigPath));
 const serverConfigUpdated = ensureServerConfigDefaults(serverConfigPath, [
@@ -1048,4 +1052,68 @@ function securityHeaders() {
 function fatal(message) {
   logger.error('fatal', { message });
   process.exit(1);
+}
+
+function printHelp() {
+  process.stdout.write(`UDP Airband Server ${SOFTWARE_VERSION}
+
+Usage:
+  node server.js [options]
+  npm start -- [options]
+
+Core options:
+  --help, -h                    Show this help and exit.
+  -D                            Enable debug logging, timestamps, colors, and encoder output.
+  --server-config PATH          Server configuration file. Default: server.conf.
+  --server-conf PATH            Alias for --server-config.
+  --config PATH                 Streams configuration file. Overrides [streams].file.
+  --data-dir PATH               Directory for runtime data. Default: ./data.
+
+Public web player:
+  --http-host HOST              Web player bind host. Overrides [web].host.
+  --http-port PORT              Web player port. Overrides [web].port.
+  --http PORT                   Alias for --http-port.
+
+Web Admin:
+  --webserver PORT              Enable Web Admin on PORT. Overrides [admin].enabled and [admin].port.
+  --webadmin PORT               Alias for --webserver.
+  --webadmin-host HOST          Web Admin bind host. Overrides [admin].host.
+
+UDP and streams:
+  --udp-host HOST               Default UDP bind host for streams without udpHost.
+
+Public status API:
+  -A                            Enable public /status endpoints.
+  --api-enabled true|false      Override [api].enabled.
+
+TLS / HTTPS:
+  --ssl-enabled true|false      Enable HTTPS when valid key and cert are configured.
+  --tls-enabled true|false      Alias for --ssl-enabled.
+  --tls-key PATH                TLS private key path. Overrides [ssl].key.
+  --https-key PATH              Alias for --tls-key.
+  --tls-cert PATH               TLS certificate path. Overrides [ssl].cert.
+  --https-cert PATH             Alias for --tls-cert.
+
+Compressed audio:
+  --compressed-enabled true|false
+                                Enable or disable compressed audio modes.
+  --compressed-codec CODEC      Compressed codec: adpcm, opus, aac, or hls.
+  --codec CODEC                 Alias for --compressed-codec.
+  --adpcm-frame-ms MS           ADPCM frame duration, 10-100 ms. Default: 40.
+  --ffmpeg PATH                 ffmpeg executable path.
+  --opus-bitrate RATE           Opus bitrate for ffmpeg modes. Default: 24k.
+  --aac-bitrate RATE            AAC bitrate for native/compatible modes. Default: 32k.
+  --opus-keepalive-ms MS        Silence keepalive interval, 20-1000 ms.
+
+Logging:
+  --log-level LEVEL             error, warn, info, or debug.
+  --log-timestamps true|false   Add timestamps to logs.
+  --log-colors true|false       Color console log levels.
+
+Examples:
+  node server.js
+  node server.js -D
+  node server.js --webserver 9090
+  node server.js --config streams.json --http-host 0.0.0.0 --http-port 8585
+`);
 }
