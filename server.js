@@ -23,11 +23,14 @@ const {
   removeListenerMode,
 } = require('./lib/listeners');
 const { createLogger } = require('./lib/logger');
-const { DEFAULT_STREAMS, loadStreams, renderMultiStreamPage, renderStreamList, validateStreams } = require('./lib/streams');
+const { DEFAULT_STREAMS, loadStreams, loadStreamsFromConfig, renderMultiStreamPage, renderStreamList, validateStreams } = require('./lib/streams');
 const { acceptWebSocket, sendWsBinary, sendWsJson } = require('./lib/websocket');
 const { createCompressedManager } = require('./lib/compressed');
 const { createNativeMultiAac } = require('./lib/native-multi-aac');
 const { createLastHeardStore } = require('./lib/last-heard-store');
+const { detectRuntimeMode } = require('./lib/runtime');
+const { createUserHistory } = require('./lib/user-history');
+const { createWebAdmin } = require('./lib/web-admin');
 
 const MAX_SOCKET_BUFFER_BYTES = 1024 * 1024;
 const MAX_OPUS_STDIN_BUFFER_BYTES = 512 * 1024;
@@ -44,12 +47,35 @@ const serverConfigUpdated = ensureServerConfigDefaults(serverConfigPath, [
     comments: ['Public status API. Keep disabled unless you explicitly want /status endpoints.'],
     keys: [{ key: 'enabled', value: 'false' }],
   },
+  {
+    name: 'admin',
+    comments: ['Separate Web Admin listener. Keep disabled unless administrative access is required.'],
+    keys: [
+      { key: 'host', value: '127.0.0.1' },
+      { key: 'port', value: '9090' },
+      { key: 'enabled', value: 'false' },
+    ],
+  },
 ], fs, path);
 const serverConfig = loadServerConfig(serverConfigPath, fs, path);
 const defaultUdpHost = args.udpHost || getSetting(serverConfig, 'udp.host', '0.0.0.0');
 const httpHost = args.httpHost || getSetting(serverConfig, 'web.host', '0.0.0.0');
 const httpPort = Number(args.httpPort || args.http || getSetting(serverConfig, 'web.port', 8585));
+const adminConfigEnabled = parseBoolean(getSetting(serverConfig, 'admin.enabled', false));
+const adminConfigHost = String(getSetting(serverConfig, 'admin.host', '127.0.0.1'));
+const adminConfigPort = Number(getSetting(serverConfig, 'admin.port', 9090));
+const webAdminCliFlag = args.webserver !== undefined
+  ? '--webserver'
+  : (args.webadmin !== undefined ? '--webadmin' : '');
+const webAdminCliPort = webAdminCliFlag === '--webserver' ? args.webserver : args.webadmin;
+const webAdminEnabled = webAdminCliFlag ? true : adminConfigEnabled;
+const webAdminPort = Number(webAdminCliFlag
+  ? (webAdminCliPort !== true ? webAdminCliPort : Number.NaN)
+  : adminConfigPort);
+const webAdminHost = String(args.webadminHost || adminConfigHost);
+const webAdminConfigOverridden = Boolean(webAdminCliFlag || args.webadminHost !== undefined);
 const configPath = args.config || getSetting(serverConfig, 'streams.file', 'streams.json');
+const dataDir = path.resolve(args.dataDir || path.join(__dirname, 'data'));
 const apiEnabledSetting = args.api ? true : (args.apiEnabled !== undefined ? args.apiEnabled : getSetting(serverConfig, 'api.enabled', false));
 const apiEnabled = parseBoolean(apiEnabledSetting);
 const compressedEnabled = parseBoolean(args.compressedEnabled !== undefined ? args.compressedEnabled : getSetting(serverConfig, 'compressed.enabled', true));
@@ -68,10 +94,25 @@ const debugEnabled = Boolean(args.debug);
 const logTimestamps = parseBoolean(args.logTimestamps !== undefined ? args.logTimestamps : (debugEnabled ? true : getSetting(serverConfig, 'logging.timestamps', false)));
 const logColors = parseBoolean(args.logColors !== undefined ? args.logColors : (debugEnabled ? true : getSetting(serverConfig, 'logging.colors', false)));
 const logger = createLogger({ debug: debugEnabled, level: logLevel, timestamps: logTimestamps, colors: logColors });
-const clientLifecycleLog = createClientLifecycleLog(logger);
+const runtimeMode = detectRuntimeMode();
+const userHistory = createUserHistory({
+  filePath: path.join(dataDir, 'user-history.json'),
+  fs,
+  logger,
+  path,
+});
+const clientLifecycleLog = createClientLifecycleLog(logger, (count) => userHistory.record(count));
 
 if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) {
   fatal('--http-port must be a valid port');
+}
+if (webAdminEnabled && (!Number.isInteger(webAdminPort) || webAdminPort < 1 || webAdminPort > 65535)) {
+  fatal(webAdminCliFlag
+    ? `${webAdminCliFlag} requires a valid port, for example: ${webAdminCliFlag} 9090`
+    : '[admin].port must be a valid port when [admin].enabled is true');
+}
+if (webAdminEnabled && webAdminPort === httpPort && isOverlappingHost(webAdminHost, httpHost)) {
+  fatal('Web Admin must use a different port from the public web player');
 }
 if (!Number.isInteger(opusKeepaliveMs) || opusKeepaliveMs < 20 || opusKeepaliveMs > 1000) {
   fatal('--opus-keepalive-ms must be between 20 and 1000');
@@ -88,6 +129,12 @@ const appJs = fs.readFileSync(path.join(publicDir, 'assets', 'app.js'));
 const styleCss = fs.readFileSync(path.join(publicDir, 'assets', 'style.css'));
 const multiJs = fs.readFileSync(path.join(publicDir, 'assets', 'multi.js'));
 const faviconIco = fs.readFileSync(path.join(publicDir, 'assets', 'favicon.ico'));
+const adminAssets = webAdminEnabled ? {
+  html: fs.readFileSync(path.join(publicDir, 'admin', 'index.html')),
+  css: fs.readFileSync(path.join(publicDir, 'admin', 'admin.css')),
+  js: fs.readFileSync(path.join(publicDir, 'admin', 'admin.js')),
+  favicon: faviconIco,
+} : null;
 const tlsOptions = sslRequested ? loadTlsOptions() : null;
 const tlsEnabled = Boolean(tlsOptions);
 const hlsRoot = compressedEnabled ? fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-hls-')) : '';
@@ -138,7 +185,7 @@ try {
 }
 const streamsByName = new Map(streams.map((stream) => [stream.name, stream]));
 const lastHeardStore = createLastHeardStore({
-  filePath: path.join(__dirname, 'data', 'last-heard.json'),
+  filePath: path.join(dataDir, 'last-heard.json'),
   fs,
   logger,
   path,
@@ -161,27 +208,56 @@ const webProtocol = tlsEnabled ? 'https' : 'http';
 const webServer = tlsEnabled
   ? https.createServer(tlsOptions, handleHttpRequest)
   : http.createServer(handleHttpRequest);
+const webAdmin = webAdminEnabled ? createWebAdmin({
+  assets: adminAssets,
+  getState: getWebAdminState,
+  host: webAdminHost,
+  http,
+  logger,
+  onReloadStreams: reloadStreamsFromDisk,
+  onReplaceStreams: replaceStreamsFromAdmin,
+  onRestart: () => process.kill(process.pid, 'SIGTERM'),
+  port: webAdminPort,
+  softwareVersion: SOFTWARE_VERSION,
+}) : null;
 
 attachUpgradeHandler(webServer);
 attachShutdownHandlers();
-startUdpServers();
+startUdpServers().then(startWebServers).catch((err) => fatal(err.message));
 
 function startUdpServers() {
-  let pendingUdpBinds = streams.length;
-  for (const stream of streams) {
+  return bindUdpServers(streams, true);
+}
+
+function bindUdpServers(items, logStartup = false) {
+  return Promise.all(items.map((stream) => (
+    bindUdpServer(stream, logStartup)
+      .then(() => ({ ok: true }))
+      .catch((error) => ({ error, ok: false }))
+  ))).then((results) => {
+    const failed = results.find((result) => !result.ok);
+    if (failed) throw failed.error;
+  });
+}
+
+function bindUdpServer(stream, logStartup) {
+  return new Promise((resolve, reject) => {
     const udpServer = dgram.createSocket('udp4');
     stream.udpServer = udpServer;
 
     udpServer.on('message', (msg) => handleUdpMessage(stream, msg));
-    udpServer.on('error', (err) => fatal(`UDP error on ${stream.name}: ${err.message}`));
+    const onBindError = (err) => {
+      udpServer.removeListener('error', onBindError);
+      reject(new Error(`UDP error on ${stream.name}: ${err.message}`));
+    };
+    udpServer.once('error', onBindError);
     udpServer.bind(stream.udpPort, stream.udpHost, () => {
-      logger.plain('info', formatStreamStartupLine(stream));
-      pendingUdpBinds -= 1;
-      if (pendingUdpBinds === 0) {
-        startWebServers();
-      }
+      udpServer.removeListener('error', onBindError);
+      udpServer.on('error', (err) => logger.error('udp_socket_error', { stream: stream.name, error: err.message }));
+      if (logStartup) logger.plain('info', formatStreamStartupLine(stream));
+      resolve();
     });
-  }
+  });
 }
 
 function handleUdpMessage(stream, msg) {
@@ -393,6 +469,8 @@ function attachShutdownHandlers() {
     shuttingDown = true;
     logger.info('shutdown', { signal });
     lastHeardStore.flush();
+    userHistory.record(clientLifecycleLog.activeCount());
+    userHistory.flush();
     process.exit(signal === 'SIGINT' ? 130 : 143);
   }
   process.once('SIGINT', () => shutdown('SIGINT'));
@@ -404,7 +482,7 @@ function recordClientActivity(action, streamName, mode, clientId, remote) {
   clientLifecycleLog.record(action, clientId, remote);
 }
 
-function createClientLifecycleLog(activityLogger) {
+function createClientLifecycleLog(activityLogger, onCountChanged) {
   const disconnectGraceMs = 2000;
   const clients = new Map();
 
@@ -425,6 +503,7 @@ function createClientLifecycleLog(activityLogger) {
       entry = { socketCount: 0, remote, connectedAt: Date.now(), disconnectTimer: null };
       clients.set(clientId, entry);
       activityLogger.info('client_connected', { client: clientId, remote, activeClients: clients.size });
+      if (onCountChanged) onCountChanged(clients.size);
     }
     if (entry.disconnectTimer) {
       clearTimeout(entry.disconnectTimer);
@@ -449,18 +528,54 @@ function createClientLifecycleLog(activityLogger) {
         durationSec: Math.max(0, Math.round((Date.now() - latest.connectedAt) / 1000)),
         activeClients: clients.size,
       });
+      if (onCountChanged) onCountChanged(clients.size);
     }, disconnectGraceMs);
     if (typeof entry.disconnectTimer.unref === 'function') entry.disconnectTimer.unref();
   }
 
-  return { record };
+  return {
+    activeCount: () => clients.size,
+    record,
+  };
 }
 
 function startWebServers() {
   if (debugEnabled) {
     logger.debug('debug_enabled', { flag: '-D' });
   }
-  webServer.listen(httpPort, httpHost, () => {
+  const publicStart = new Promise((resolve, reject) => {
+    webServer.once('error', reject);
+    webServer.listen(httpPort, httpHost, () => {
+      webServer.removeListener('error', reject);
+      resolve();
+    });
+  });
+  const adminStart = webAdmin ? webAdmin.start() : Promise.resolve();
+
+  Promise.all([publicStart, adminStart]).then(() => {
+    logger.plain('info', `Compressed: ${compressedEnabled ? formatCompressedStatus() : 'disabled by config'}`);
+    if (compressedEnabled && !compressedAvailable) {
+      logger.warn('compressed_unavailable', { codec: compressedCodec, ffmpeg: ffmpegPath });
+    }
+    if (webAdmin) {
+      if (webAdminConfigOverridden) {
+        logger.info('webadmin_config_override', {
+          source: webAdminCliFlag || '--webadmin-host',
+          priority: 'command-line',
+          serverConfig: serverConfigPath,
+          overridden: [
+            webAdminCliFlag ? 'admin.enabled,admin.port' : '',
+            args.webadminHost !== undefined ? 'admin.host' : '',
+          ].filter(Boolean).join(','),
+          host: webAdminHost,
+          port: webAdminPort,
+        });
+      }
+      logger.plain('info', `Web admin: ${formatUrl('http', webAdminHost, webAdminPort)}/`);
+      if (!isLoopbackHost(webAdminHost)) {
+        logger.warn('webadmin_exposed', { host: webAdminHost, port: webAdminPort, recommendation: 'bind to 127.0.0.1 and use an authenticated proxy or SSH tunnel' });
+      }
+    }
     logger.plain('info', `Web player: ${formatUrl(webProtocol, httpHost, httpPort)}/`);
     logger.info('startup', {
       version: SOFTWARE_VERSION,
@@ -469,17 +584,218 @@ function startWebServers() {
       streamsConfig: configPath,
       streamsConfigLoaded: streamsConfigExists,
       apiEnabled,
+      webAdminEnabled,
+      webAdminHost: webAdminEnabled ? webAdminHost : undefined,
+      webAdminPort: webAdminEnabled ? webAdminPort : undefined,
+      runtimeMode,
       logLevel: logger.level,
     });
-  });
+  }).catch((err) => fatal(err.message));
 
-  logger.plain('info', `Compressed: ${compressedEnabled ? formatCompressedStatus() : 'disabled by config'}`);
-  if (compressedEnabled && !compressedAvailable) {
-    logger.warn('compressed_unavailable', { codec: compressedCodec, ffmpeg: ffmpegPath });
-  }
+  setInterval(() => userHistory.record(clientLifecycleLog.activeCount()), 60 * 1000);
   setInterval(broadcastStreamStats, 250);
   if (compressedEnabled) {
     setInterval(() => compressed.writeSilenceKeepalive(streams, opusKeepaliveMs), opusKeepaliveMs);
+  }
+}
+
+let streamUpdateQueue = Promise.resolve();
+
+function replaceStreamsFromAdmin(payload) {
+  const operation = streamUpdateQueue.then(() => applyStreamReplacement(payload));
+  streamUpdateQueue = operation.catch(() => {});
+  return operation;
+}
+
+function reloadStreamsFromDisk() {
+  const operation = streamUpdateQueue.then(() => {
+    let payload;
+    try {
+      payload = JSON.parse(fs.readFileSync(path.resolve(configPath), 'utf8'));
+    } catch (err) {
+      const reloadError = new Error(`Could not read ${configPath}: ${err.message}`);
+      reloadError.statusCode = err.code === 'ENOENT' ? 404 : 400;
+      throw reloadError;
+    }
+    return applyStreamReplacement(payload);
+  });
+  streamUpdateQueue = operation.catch(() => {});
+  return operation;
+}
+
+async function applyStreamReplacement(payload) {
+  let candidateStreams;
+  try {
+    candidateStreams = loadStreamsFromConfig(payload, {
+      configPath,
+      defaultUdpHost,
+      opusKeepaliveMs,
+    });
+    validateStreams(candidateStreams);
+  } catch (err) {
+    const validationError = new Error(err.message);
+    validationError.statusCode = 400;
+    throw validationError;
+  }
+
+  const resolvedConfigPath = path.resolve(configPath);
+  const temporaryConfigPath = `${resolvedConfigPath}.${process.pid}.tmp`;
+  const serializedConfig = `${JSON.stringify({ streams: candidateStreams.map(streamFileEntry) }, null, 2)}\n`;
+  try {
+    fs.mkdirSync(path.dirname(resolvedConfigPath), { recursive: true });
+    fs.writeFileSync(temporaryConfigPath, serializedConfig, { mode: 0o600 });
+  } catch (err) {
+    const saveError = new Error(`Could not stage ${configPath}: ${err.message}`);
+    saveError.statusCode = 500;
+    throw saveError;
+  }
+
+  const previousStreams = streams;
+  if (canUpdateStreamsInPlace(previousStreams, candidateStreams)) {
+    try {
+      fs.renameSync(temporaryConfigPath, resolvedConfigPath);
+    } catch (err) {
+      safeUnlink(temporaryConfigPath);
+      const saveError = new Error(`Could not save ${configPath}: ${err.message}`);
+      saveError.statusCode = 500;
+      throw saveError;
+    }
+    for (let index = 0; index < previousStreams.length; index += 1) {
+      previousStreams[index].label = candidateStreams[index].label;
+    }
+    logger.info('streams_reloaded', {
+      count: streams.length,
+      names: streams.map((stream) => stream.name).join(','),
+      listenersPreserved: true,
+    });
+    return {
+      ok: true,
+      message: `${streams.length} stream${streams.length === 1 ? '' : 's'} updated without interrupting listeners.`,
+      streams: streams.map(adminStreamState),
+    };
+  }
+
+  await closeUdpServers(previousStreams);
+
+  try {
+    await bindUdpServers(candidateStreams);
+  } catch (err) {
+    await closeUdpServers(candidateStreams);
+    try {
+      await bindUdpServers(previousStreams);
+    } catch (rollbackError) {
+      logger.error('stream_reload_rollback_failed', { error: rollbackError.message });
+    }
+    safeUnlink(temporaryConfigPath);
+    const bindError = new Error(`${err.message}. The previous stream configuration was restored.`);
+    bindError.statusCode = 409;
+    throw bindError;
+  }
+
+  try {
+    fs.renameSync(temporaryConfigPath, resolvedConfigPath);
+  } catch (err) {
+    await closeUdpServers(candidateStreams);
+    await bindUdpServers(previousStreams);
+    safeUnlink(temporaryConfigPath);
+    const saveError = new Error(`Could not save ${configPath}: ${err.message}`);
+    saveError.statusCode = 500;
+    throw saveError;
+  }
+
+  lastHeardStore.apply(candidateStreams);
+  streams = candidateStreams;
+  streamsByName.clear();
+  for (const stream of streams) streamsByName.set(stream.name, stream);
+
+  nativeMultiAac.cleanupAll();
+  for (const stream of previousStreams) closeStreamClients(stream);
+
+  logger.info('streams_reloaded', {
+    count: streams.length,
+    names: streams.map((stream) => stream.name).join(','),
+  });
+  return {
+    ok: true,
+    message: `${streams.length} stream${streams.length === 1 ? '' : 's'} applied without restarting the server.`,
+    streams: streams.map(adminStreamState),
+  };
+}
+
+function canUpdateStreamsInPlace(currentStreams, candidateStreams) {
+  if (currentStreams.length !== candidateStreams.length) return false;
+  return currentStreams.every((stream, index) => {
+    const candidate = candidateStreams[index];
+    return stream.name === candidate.name
+      && stream.udpHost === candidate.udpHost
+      && stream.udpPort === candidate.udpPort
+      && stream.sampleRate === candidate.sampleRate
+      && stream.channels === candidate.channels;
+  });
+}
+
+function closeUdpServers(items) {
+  return Promise.all(items.map((stream) => new Promise((resolve) => {
+    const udpServer = stream.udpServer;
+    stream.udpServer = null;
+    if (!udpServer) {
+      resolve();
+      return;
+    }
+    try {
+      udpServer.close(resolve);
+    } catch {
+      resolve();
+    }
+  })));
+}
+
+function closeStreamClients(stream) {
+  for (const socket of Array.from(stream.controlClients.keys())) socket.destroy();
+  for (const socket of Array.from(stream.rawClients.keys())) socket.destroy();
+  for (const client of Array.from(stream.opusClients)) compressed.cleanupClient(stream, client);
+  stream.controlClients.clear();
+  stream.rawClients.clear();
+  stream.listenerStats.clear();
+}
+
+function streamFileEntry(stream) {
+  return {
+    name: stream.name,
+    label: stream.label,
+    udpHost: stream.udpHost,
+    udpPort: stream.udpPort,
+    sampleRate: stream.sampleRate,
+    channels: stream.channels,
+  };
+}
+
+function adminStreamState(stream) {
+  return {
+    ...streamFileEntry(stream),
+    activeListeners: getActiveListeners(stream).length,
+    hasUdp: stream.packetCount > 0,
+    lastUdpAt: stream.lastUdpAt,
+  };
+}
+
+function getWebAdminState() {
+  return {
+    version: SOFTWARE_VERSION,
+    uptimeSeconds: Math.floor(process.uptime()),
+    activeUsers: clientLifecycleLog.activeCount(),
+    configPath,
+    runtimeMode,
+    streams: streams.map(adminStreamState),
+    userHistory: userHistory.snapshot(),
+  };
+}
+
+function safeUnlink(filePath) {
+  try {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch (err) {
+    logger.warn('temporary_file_cleanup_failed', { path: filePath, error: err.message });
   }
 }
 
@@ -663,6 +979,22 @@ function isTlsRequest(req) {
 function formatUrl(protocol, host, port) {
   const defaultPort = protocol === 'https' ? 443 : 80;
   return `${protocol}://${host}${port === defaultPort ? '' : `:${port}`}`;
+}
+
+function isLoopbackHost(host) {
+  const normalized = String(host).trim().toLowerCase();
+  return normalized === '127.0.0.1' || normalized === '::1' || normalized === 'localhost';
+}
+
+function isOverlappingHost(first, second) {
+  const normalizedFirst = String(first).trim().toLowerCase();
+  const normalizedSecond = String(second).trim().toLowerCase();
+  return normalizedFirst === normalizedSecond
+    || (isLoopbackHost(normalizedFirst) && isLoopbackHost(normalizedSecond))
+    || normalizedFirst === '0.0.0.0'
+    || normalizedSecond === '0.0.0.0'
+    || normalizedFirst === '::'
+    || normalizedSecond === '::';
 }
 
 function formatStreamStartupLine(stream) {

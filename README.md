@@ -51,6 +51,11 @@ host = 0.0.0.0
 host = 0.0.0.0
 port = 8585
 
+[admin]
+host = 127.0.0.1
+port = 9090
+enabled = false
+
 [streams]
 file = streams.json
 
@@ -78,6 +83,8 @@ Important fields:
 
 - `[udp].host`: default UDP bind address used by streams that do not define their own `udpHost`.
 - `[web].host` and `[web].port`: bind address and port for the browser interface. The same port is used for HTTP or HTTPS depending on `[ssl]`.
+- `[admin].enabled`: enables the separate Web Admin server. It remains `false` by default.
+- `[admin].host` and `[admin].port`: bind address and port for Web Admin. Keep the default loopback host unless access is protected by an SSH tunnel or authenticated reverse proxy.
 - `[streams].file`: JSON file that defines the feeds.
 - `[logging].level`: service-friendly logging level. Supported values are `off`, `error`, `warn`, `info`, and `debug`. The default is `info`.
 - `[logging].timestamps`: set to `true` to prepend ISO timestamps. With `systemd`, this can usually stay `false` because `journalctl` already adds timestamps.
@@ -230,6 +237,45 @@ node server.js -D --server-config server.conf --config streams.json
 ```
 
 When `-D` is active, ffmpeg-backed encoders such as Opus, AAC, and HLS are started with ffmpeg debug logging and their `stderr` output is printed. `-D` also enables timestamps and colors automatically for manual terminal runs. Without `-D`, ffmpeg stays at error-level logging and timestamp/color behavior comes from `server.conf`, so service logs do not get flooded.
+
+## Web Admin
+
+The administration page is disabled by default and is not served from the public player port. It can be enabled persistently in `server.conf`:
+
+```conf
+[admin]
+host = 127.0.0.1
+port = 9090
+enabled = true
+```
+
+It can also be enabled for one run by passing a separate port:
+
+```bash
+node server.js --webserver 9090
+```
+
+`--webserver PORT` takes priority over `[admin].enabled` and `[admin].port`. The startup log reports `webadmin_config_override` so it is clear that command-line values replaced the configuration file. The older `--webadmin PORT` spelling remains available as a compatible alias.
+
+The admin server uses `[admin].host`, which defaults to `127.0.0.1`. Open it securely from another computer with an SSH tunnel:
+
+```bash
+ssh -L 9090:127.0.0.1:9090 user@SERVER_IP
+```
+
+Then open `http://127.0.0.1:9090/` in the local browser. Do not expose this port directly to the internet: the page can add, edit, and remove feeds, change UDP hosts, ports, sample rates, and channel counts, and request a server restart.
+
+Applying stream changes validates the complete configuration, updates `streams.json`, and rebinds UDP inputs without restarting Node. The yellow **Reload streams** button rereads changes made directly to `streams.json` and applies them through the same validation and rollback path. Display-name-only changes preserve current listeners. Changes to routes or audio inputs reconnect affected browser audio sessions. If a new UDP port cannot be bound, the previous runtime configuration and file are restored.
+
+The connected-user chart uses the server's internal unique client counter instead of parsing logs. One-minute samples are retained for seven days in `data/user-history.json`; the page displays the latest 24 hours.
+
+The restart button sends the process a graceful termination signal after confirmation. Web Admin detects `systemd` from its runtime environment and warns whether the service must be configured for automatic restart or the console process will need to be started manually. A `systemd` unit should include, for example:
+
+```ini
+[Service]
+ExecStart=/usr/bin/node /opt/udp-airband-server/server.js --webserver 9090
+Restart=on-failure
+```
 
 Then open the home page:
 

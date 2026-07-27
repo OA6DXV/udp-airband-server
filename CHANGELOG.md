@@ -5,12 +5,28 @@
 ### English
 
 - Started the 1.7 preview cycle.
-- Planned: dynamic stream administration and feed management without requiring a full server restart.
+- Added an opt-in Web Admin server on a separate port, configurable from `[admin]` in `server.conf` or overridden at startup with `--webserver PORT` / `--webadmin PORT`.
+- Added live `streams.json` editing from Web Admin, including validation, safe file writes, UDP socket rebinding, rollback on bind failure, and listener-preserving display-name updates.
+- Added a `Reload streams` action for applying disk changes without a full server restart, with a pending-change pulse after saved stream edits.
+- Added a `Discard changes` action to restore the latest loaded stream configuration before applying edits.
+- Added runtime-aware server controls: console runs are shown as shutdown actions, while `systemd` runs show restart warnings intended for auto-restarting services.
+- Added Web Admin online/restarting/offline status handling that recovers automatically when the server comes back.
+- Added EN/ES language switching to Web Admin.
+- Added persistent unique-user history with a 12-hour administration chart.
+- Documented Web Admin usage in both English and Spanish README files.
 
 ### Espanol
 
 - Se inicio el ciclo preview de 1.7.
-- Pendiente: administracion dinamica de streams y gestion de feeds sin requerir reiniciar por completo el servidor.
+- Se agrego un servidor Web Admin opcional en un puerto separado, configurable desde `[admin]` en `server.conf` o sobrescrito al iniciar con `--webserver PUERTO` / `--webadmin PUERTO`.
+- Se agrego edicion en vivo de `streams.json` desde Web Admin, con validacion, escritura segura del archivo, reapertura de sockets UDP, restauracion ante errores de bind y cambios de nombres visibles sin interrumpir listeners.
+- Se agrego la accion `Reload streams` para aplicar cambios desde disco sin reiniciar todo el servidor, con parpadeo pendiente despues de guardar ediciones.
+- Se agrego la accion `Discard changes` para restaurar la ultima configuracion cargada antes de aplicar cambios.
+- Se agregaron controles de servidor segun el entorno: en consola se muestran como apagado, mientras que bajo `systemd` se muestran advertencias de reinicio pensadas para servicios con auto-restart.
+- Se agrego estado online/restarting/offline en Web Admin con recuperacion automatica cuando el servidor vuelve.
+- Se agrego selector de idioma EN/ES en Web Admin.
+- Se agrego historial persistente de usuarios unicos con una grafica administrativa de 12 horas.
+- Se documento el uso de Web Admin en los README en ingles y espanol.
 
 ## 1.6 - 2026-07-26
 

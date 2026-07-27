@@ -51,6 +51,11 @@ host = 0.0.0.0
 host = 0.0.0.0
 port = 8585
 
+[admin]
+host = 127.0.0.1
+port = 9090
+enabled = false
+
 [streams]
 file = streams.json
 
@@ -78,6 +83,8 @@ Campos importantes:
 
 - `[udp].host`: direccion UDP predeterminada para streams que no definan su propio `udpHost`.
 - `[web].host` y `[web].port`: direccion y puerto para la interfaz web. El mismo puerto se usa para HTTP o HTTPS segun `[ssl]`.
+- `[admin].enabled`: activa el servidor Web Admin separado. Se mantiene en `false` por defecto.
+- `[admin].host` y `[admin].port`: direccion y puerto de Web Admin. Conserva el host loopback predeterminado salvo que el acceso este protegido por un tunel SSH o reverse proxy autenticado.
 - `[streams].file`: archivo JSON que define los feeds.
 - `[logging].level`: nivel de logging amigable para servicio. Valores soportados: `off`, `error`, `warn`, `info` y `debug`. El valor predeterminado es `info`.
 - `[logging].timestamps`: usa `true` para anteponer timestamps ISO. Con `systemd`, normalmente puede quedar en `false` porque `journalctl` ya agrega timestamps.
@@ -230,6 +237,45 @@ node server.js -D --server-config server.conf --config streams.json
 ```
 
 Cuando `-D` esta activo, los encoders basados en ffmpeg como Opus, AAC y HLS se inician con logging debug de ffmpeg y su salida `stderr` se imprime. `-D` tambien activa timestamps y colores automaticamente para ejecuciones manuales en terminal. Sin `-D`, ffmpeg queda en nivel de errores y el comportamiento de timestamps/colores viene desde `server.conf`, para que los logs del servicio no se inunden.
+
+## Administracion Web
+
+La pagina de administracion esta desactivada por defecto y no se publica desde el puerto del reproductor. Puede activarse de forma persistente en `server.conf`:
+
+```conf
+[admin]
+host = 127.0.0.1
+port = 9090
+enabled = true
+```
+
+Tambien puede habilitarse para una ejecucion indicando un puerto separado:
+
+```bash
+node server.js --webserver 9090
+```
+
+`--webserver PUERTO` tiene prioridad sobre `[admin].enabled` y `[admin].port`. El log de inicio muestra `webadmin_config_override` para dejar claro que los valores de la linea de comandos reemplazaron al archivo de configuracion. La forma anterior `--webadmin PUERTO` se conserva como alias compatible.
+
+El servidor admin usa `[admin].host`, cuyo valor predeterminado es `127.0.0.1`. Para abrirlo de forma segura desde otra computadora, crea un tunel SSH:
+
+```bash
+ssh -L 9090:127.0.0.1:9090 usuario@IP_DEL_SERVIDOR
+```
+
+Luego abre `http://127.0.0.1:9090/` en el navegador local. No expongas este puerto directamente a internet: la pagina puede agregar, editar y eliminar feeds, cambiar hosts y puertos UDP, sample rates, canales y solicitar el reinicio del servidor.
+
+Al aplicar cambios se valida la configuracion completa, se actualiza `streams.json` y se vuelven a enlazar las entradas UDP sin reiniciar Node. El boton amarillo **Reload streams** vuelve a leer los cambios hechos directamente en `streams.json` y los aplica con la misma validacion y restauracion ante errores. Los cambios que solo modifican nombres visibles conservan los listeners actuales. Los cambios de rutas o entradas de audio reconectan las sesiones de audio del navegador. Si no se puede abrir un puerto UDP nuevo, se restauran tanto la configuracion anterior en ejecucion como el archivo.
+
+La grafica de usuarios conectados utiliza el contador interno de clientes unicos del servidor en lugar de analizar logs. Las muestras de un minuto se conservan durante siete dias en `data/user-history.json`; la pagina muestra las ultimas 24 horas.
+
+El boton de reinicio envia una senal de cierre controlado despues de pedir confirmacion. Web Admin detecta `systemd` mediante el entorno de ejecucion y avisa si el servicio debe configurarse para reinicio automatico o si el proceso iniciado en consola tendra que arrancarse manualmente. Una unidad de `systemd` debe incluir, por ejemplo:
+
+```ini
+[Service]
+ExecStart=/usr/bin/node /opt/udp-airband-server/server.js --webserver 9090
+Restart=on-failure
+```
 
 Luego abre la pagina principal:
 

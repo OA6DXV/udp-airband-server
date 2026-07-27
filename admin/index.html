@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UDP Airband Admin</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="stylesheet" href="/admin.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">UDP Airband Server</p>
+      <h1 data-i18n="webAdmin">Web Admin</h1>
+    </div>
+    <div class="topbar-actions">
+      <div class="server-summary">
+        <span id="serverStatus" class="status-dot checking" role="status" aria-label="Checking server status" title="Checking server status"></span>
+        <span id="version">Loading</span>
+      </div>
+      <select id="languageSelect" class="language-select" aria-label="Language">
+        <option value="en">EN</option>
+        <option value="es">ES</option>
+      </select>
+    </div>
+  </header>
+
+  <main>
+    <section class="overview" aria-label="Server overview" data-i18n-aria="serverOverview">
+      <div>
+        <span data-i18n="activeUsers">Active users</span>
+        <strong id="activeUsers">0</strong>
+      </div>
+      <div>
+        <span data-i18n="configuredStreams">Configured streams</span>
+        <strong id="streamCount">0</strong>
+      </div>
+      <div>
+        <span data-i18n="uptime">Uptime</span>
+        <strong id="uptime">--</strong>
+      </div>
+      <div>
+        <span data-i18n="configuration">Configuration</span>
+        <strong id="configPath">--</strong>
+      </div>
+    </section>
+
+    <section class="panel history-panel">
+      <div class="section-heading">
+        <div>
+          <h2 data-i18n="connectedUsers">Connected users</h2>
+          <p data-i18n="historyDescription">Unique clients during the last 12 hours</p>
+        </div>
+        <strong id="historyPeak">Peak --</strong>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="historyChart" aria-label="Connected user history" data-i18n-aria="historyAria"></canvas>
+        <div id="chartEmpty" class="chart-empty" data-i18n="collectingHistory">Collecting history...</div>
+      </div>
+      <div class="chart-axis"><span data-i18n="twelveHoursAgo">12 hours ago</span><span data-i18n="now">Now</span></div>
+    </section>
+
+    <section class="panel streams-panel">
+      <div class="section-heading">
+        <div>
+          <h2 data-i18n="streams">Streams</h2>
+          <p data-i18n="streamsDescription">Changes are applied live and saved to streams.json.</p>
+        </div>
+        <button id="addStream" class="button secondary" type="button" data-i18n="addStream">+ Add stream</button>
+      </div>
+
+      <form id="streamsForm">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th data-i18n="routeName">Route name</th>
+                <th data-i18n="displayName">Display name</th>
+                <th data-i18n="udpHost">UDP host</th>
+                <th data-i18n="udpPort">UDP port</th>
+                <th data-i18n="sampleRate">Sample rate</th>
+                <th data-i18n="channels">Channels</th>
+                <th><span class="sr-only" data-i18n="actions">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody id="streamRows"></tbody>
+          </table>
+        </div>
+
+        <div id="message" class="message" role="status" aria-live="polite"></div>
+        <div class="form-actions">
+          <span id="dirtyState" data-i18n="noUnsavedChanges">No unsaved changes</span>
+          <div class="form-action-buttons">
+            <button id="discardStreams" class="button secondary" type="button" data-i18n="discardChanges">Discard changes</button>
+            <button id="saveStreams" class="button primary" type="submit" data-i18n="applyChanges">Apply changes</button>
+            <button id="reloadStreams" class="button warning" type="button" data-i18n="reloadStreams">Reload streams</button>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel danger-panel">
+      <div>
+        <h2 data-i18n="serverProcess">Server process</h2>
+        <p id="runtimeSummary" data-i18n="detectingRuntime">Detecting how the server was started...</p>
+      </div>
+      <div class="server-actions">
+        <button id="restartServer" class="button danger" type="button" data-i18n="restartServer">Restart server</button>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="restartDialog">
+    <form method="dialog">
+      <h2 id="restartDialogTitle">Restart server?</h2>
+      <p id="restartWarning">Current listeners will disconnect. Unsaved stream edits will be discarded.</p>
+      <div class="dialog-actions">
+        <button class="button secondary" value="cancel" data-i18n="cancel">Cancel</button>
+        <button id="confirmRestart" class="button danger" value="confirm">Restart server</button>
+      </div>
+    </form>
+  </dialog>
+
+  <template id="streamRowTemplate">
+    <tr>
+      <td data-label="Route name" data-i18n-label="routeName"><input name="name" required pattern="[A-Za-z0-9][A-Za-z0-9_\-]*" autocomplete="off"></td>
+      <td data-label="Display name" data-i18n-label="displayName"><input name="label" required autocomplete="off"></td>
+      <td data-label="UDP host" data-i18n-label="udpHost"><input name="udpHost" required autocomplete="off"></td>
+      <td data-label="UDP port" data-i18n-label="udpPort"><input name="udpPort" required type="number" min="1" max="65535" inputmode="numeric"></td>
+      <td data-label="Sample rate" data-i18n-label="sampleRate"><input name="sampleRate" required type="number" min="1000" step="1" inputmode="numeric"></td>
+      <td data-label="Channels" data-i18n-label="channels">
+        <select name="channels">
+          <option value="1" data-i18n="mono">Mono</option>
+          <option value="2" data-i18n="stereo">Stereo</option>
+        </select>
+      </td>
+      <td class="row-actions"><button class="icon-button remove-stream" type="button" title="Remove stream" aria-label="Remove stream" data-i18n-title="removeStream" data-i18n-aria="removeStream">&times;</button></td>
+    </tr>
+  </template>
+
+  <script src="/admin.js"></script>
+</body>
+</html>
