@@ -59,6 +59,10 @@ enabled = false
 [streams]
 file = streams.json
 
+[storage]
+backend = json
+sqlite_file = udp-airband-server.sqlite
+
 [logging]
 level = info
 timestamps = false
@@ -86,12 +90,28 @@ Campos importantes:
 - `[admin].enabled`: activa el servidor Web Admin separado. Se mantiene en `false` por defecto.
 - `[admin].host` y `[admin].port`: direccion y puerto de Web Admin. Conserva el host loopback predeterminado salvo que el acceso este protegido por un tunel SSH o reverse proxy autenticado.
 - `[streams].file`: archivo JSON que define los feeds.
+- `[storage].backend`: backend de persistencia para el historial de usuarios conectados y los valores Last Heard. Los valores soportados son `json` (predeterminado) y `sqlite`.
+- `[storage].sqlite_file`: ruta de la base SQLite. Las rutas relativas se resuelven dentro del directorio de datos de ejecucion (`data/` de forma predeterminada).
 - `[logging].level`: nivel de logging amigable para servicio. Valores soportados: `off`, `error`, `warn`, `info` y `debug`. El valor predeterminado es `info`.
 - `[logging].timestamps`: usa `true` para anteponer timestamps ISO. Con `systemd`, normalmente puede quedar en `false` porque `journalctl` ya agrega timestamps.
 - `[logging].colors`: usa `true` para colorear logs en terminal. Mantenlo en `false` para logs normales de servicio con `systemd`.
 - `[ssl]`: modo HTTPS opcional para el mismo host y puerto de `[web]`. Activalo y define rutas validas `key` y `cert` cuando quieras que Node.js sirva TLS directamente. Si SSL esta activado pero faltan las rutas del certificado o son invalidas, el servidor muestra un warning y cae a HTTP en el mismo puerto.
 - `[compressed].enabled`: usa `false` para desactivar todos los modos comprimidos y su logica de transcoding/framing.
 - `[compressed].codec`: backend del modo comprimido. `adpcm` es la opcion predeterminada de baja latencia y no requiere `ffmpeg`.
+
+El almacenamiento JSON utiliza `data/user-history.json` y `data/last-heard.json`. SQLite guarda ambos conjuntos de datos en `data/udp-airband-server.sqlite` de forma predeterminada. En versiones de Node.js sin el modulo SQLite integrado, ejecuta `npm install` para instalar el driver de compatibilidad opcional `better-sqlite3`.
+
+Para migrar datos existentes, primero detiene el servidor en ejecucion y usa uno de estos comandos:
+
+```bash
+# JSON a SQLite
+node server.js --migrate sqlite
+
+# SQLite a JSON
+node server.js --migrate json
+```
+
+`--migrate` sin valor utiliza `[storage].backend` como destino. La migracion combina los datos que ya existan en el destino, conserva el Last Heard mas reciente de cada stream, mantiene los puntos del historial y no borra el origen. Despues de verificar el resultado, cambia `[storage].backend` al backend deseado e inicia el servidor normalmente.
 
 `streams.json` define los feeds:
 
@@ -267,7 +287,7 @@ Luego abre `http://127.0.0.1:9090/` en el navegador local. No expongas este puer
 
 Al aplicar cambios se valida la configuracion completa, se actualiza `streams.json` y se vuelven a enlazar las entradas UDP sin reiniciar Node. El boton amarillo **Reload streams** vuelve a leer los cambios hechos directamente en `streams.json` y los aplica con la misma validacion y restauracion ante errores. Los cambios que solo modifican nombres visibles conservan los listeners actuales. Los cambios de rutas o entradas de audio reconectan las sesiones de audio del navegador. Si no se puede abrir un puerto UDP nuevo, se restauran tanto la configuracion anterior en ejecucion como el archivo.
 
-La grafica de usuarios conectados utiliza el contador interno de clientes unicos del servidor en lugar de analizar logs. Las muestras de un minuto se conservan durante siete dias en `data/user-history.json`; la pagina muestra las ultimas 24 horas.
+La grafica de usuarios conectados utiliza el contador interno de clientes unicos del servidor en lugar de analizar logs. Las muestras de un minuto se conservan durante 12 horas en el backend JSON o SQLite seleccionado.
 
 El boton de reinicio envia una senal de cierre controlado despues de pedir confirmacion. Web Admin detecta `systemd` mediante el entorno de ejecucion y avisa si el servicio debe configurarse para reinicio automatico o si el proceso iniciado en consola tendra que arrancarse manualmente. Una unidad de `systemd` debe incluir, por ejemplo:
 
@@ -373,7 +393,7 @@ La pagina del stream muestra contador de usuarios, estado UDP/stream, buffered, 
 
 Cuando el stream fue validado por al menos un paquete UDP, el estado cambia a `Connected`. Al presionar `Connected`, la pagina cambia a `Push to Reconnect`, cierra solo el socket de audio y detiene el consumo de bandwidth sin cerrar la pagina ni la conexion de control/estado. Al presionar `Push to Reconnect`, se reanuda el mismo modo que estaba activo antes de pausar.
 
-La ultima transmision es detectada por el servidor y se guarda en `data/last-heard.json`, asi la pagina principal y nuevos oyentes pueden ver la ultima actividad conocida incluso despues de reiniciar el servidor.
+La ultima transmision es detectada por el servidor y se guarda en el backend JSON o SQLite seleccionado, asi la pagina principal y nuevos oyentes pueden ver la ultima actividad conocida incluso despues de reiniciar el servidor.
 
 La pagina principal lista todos los feeds configurados bajo `Real-time Airband audio streams`, muestra usuarios activos, selector de idioma, ruta, informacion de canales/sample rate y la ultima transmision detectada por el servidor para cada feed.
 

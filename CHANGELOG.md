@@ -14,6 +14,8 @@
 - Added EN/ES language switching to Web Admin.
 - Added persistent unique-user history with a 12-hour administration chart.
 - Added `--help` / `-h` command-line documentation and refined Web Admin action buttons so Apply/Discard only enable when stream configuration really changed.
+- Added selectable JSON or SQLite runtime persistence for connected-user history and Last Heard values.
+- Added bidirectional, non-destructive `--migrate [json|sqlite]` storage migration with destination-data merging.
 - Documented Web Admin usage in both English and Spanish README files.
 
 ### Espanol
@@ -28,6 +30,8 @@
 - Se agrego selector de idioma EN/ES en Web Admin.
 - Se agrego historial persistente de usuarios unicos con una grafica administrativa de 12 horas.
 - Se agrego documentacion de flags con `--help` / `-h` y se ajustaron los botones Apply/Discard para activarse solo cuando la configuracion de streams realmente cambio.
+- Se agrego persistencia seleccionable JSON o SQLite para el historial de usuarios conectados y los valores Last Heard.
+- Se agrego migracion bidireccional y no destructiva con `--migrate [json|sqlite]`, combinando los datos existentes en el destino.
 - Se documento el uso de Web Admin en los README en ingles y espanol.
 
 ## 1.6 - 2026-07-26

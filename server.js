@@ -27,9 +27,9 @@ const { DEFAULT_STREAMS, loadStreams, loadStreamsFromConfig, renderMultiStreamPa
 const { acceptWebSocket, sendWsBinary, sendWsJson } = require('./lib/websocket');
 const { createCompressedManager } = require('./lib/compressed');
 const { createNativeMultiAac } = require('./lib/native-multi-aac');
-const { createLastHeardStore } = require('./lib/last-heard-store');
 const { detectRuntimeMode } = require('./lib/runtime');
-const { createUserHistory } = require('./lib/user-history');
+const { createStorage, normalizeStorageBackend } = require('./lib/storage');
+const { migrateStorage } = require('./lib/storage-migration');
 const { createWebAdmin } = require('./lib/web-admin');
 
 const MAX_SOCKET_BUFFER_BYTES = 1024 * 1024;
@@ -60,6 +60,14 @@ const serverConfigUpdated = ensureServerConfigDefaults(serverConfigPath, [
       { key: 'enabled', value: 'false' },
     ],
   },
+  {
+    name: 'storage',
+    comments: ['Runtime persistence backend. Supported values: json and sqlite.'],
+    keys: [
+      { key: 'backend', value: 'json' },
+      { key: 'sqlite_file', value: 'udp-airband-server.sqlite' },
+    ],
+  },
 ], fs, path);
 const serverConfig = loadServerConfig(serverConfigPath, fs, path);
 const defaultUdpHost = args.udpHost || getSetting(serverConfig, 'udp.host', '0.0.0.0');
@@ -80,6 +88,13 @@ const webAdminHost = String(args.webadminHost || adminConfigHost);
 const webAdminConfigOverridden = Boolean(webAdminCliFlag || args.webadminHost !== undefined);
 const configPath = args.config || getSetting(serverConfig, 'streams.file', 'streams.json');
 const dataDir = path.resolve(args.dataDir || path.join(__dirname, 'data'));
+const storageBackendSetting = args.storageBackend || getSetting(serverConfig, 'storage.backend', 'json');
+const sqliteFileSetting = String(
+  args.sqliteFile || getSetting(serverConfig, 'storage.sqliteFile', '') || 'udp-airband-server.sqlite',
+).trim();
+const sqliteFile = path.isAbsolute(sqliteFileSetting)
+  ? path.normalize(sqliteFileSetting)
+  : path.resolve(dataDir, sqliteFileSetting);
 const apiEnabledSetting = args.api ? true : (args.apiEnabled !== undefined ? args.apiEnabled : getSetting(serverConfig, 'api.enabled', false));
 const apiEnabled = parseBoolean(apiEnabledSetting);
 const compressedEnabled = parseBoolean(args.compressedEnabled !== undefined ? args.compressedEnabled : getSetting(serverConfig, 'compressed.enabled', true));
@@ -99,12 +114,42 @@ const logTimestamps = parseBoolean(args.logTimestamps !== undefined ? args.logTi
 const logColors = parseBoolean(args.logColors !== undefined ? args.logColors : (debugEnabled ? true : getSetting(serverConfig, 'logging.colors', false)));
 const logger = createLogger({ debug: debugEnabled, level: logLevel, timestamps: logTimestamps, colors: logColors });
 const runtimeMode = detectRuntimeMode();
-const userHistory = createUserHistory({
-  filePath: path.join(dataDir, 'user-history.json'),
-  fs,
-  logger,
-  path,
-});
+let storageBackend;
+try {
+  storageBackend = normalizeStorageBackend(storageBackendSetting);
+} catch (err) {
+  fatal(err.message);
+}
+if (args.migrate !== undefined) {
+  const migrationTarget = args.migrate === true ? storageBackend : args.migrate;
+  try {
+    migrateStorage({
+      dataDir,
+      fs,
+      logger,
+      path,
+      sqliteFile,
+      target: migrationTarget,
+    });
+    process.exit(0);
+  } catch (err) {
+    fatal(`Storage migration failed: ${err.message}`);
+  }
+}
+let storage;
+try {
+  storage = createStorage({
+    backend: storageBackend,
+    dataDir,
+    fs,
+    logger,
+    path,
+    sqliteFile,
+  });
+} catch (err) {
+  fatal(err.message);
+}
+const userHistory = storage.createUserHistory();
 const clientLifecycleLog = createClientLifecycleLog(logger, (count) => userHistory.record(count));
 
 if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) {
@@ -188,12 +233,7 @@ try {
   fatal(err.message);
 }
 const streamsByName = new Map(streams.map((stream) => [stream.name, stream]));
-const lastHeardStore = createLastHeardStore({
-  filePath: path.join(dataDir, 'last-heard.json'),
-  fs,
-  logger,
-  path,
-});
+const lastHeardStore = storage.createLastHeardStore();
 lastHeardStore.apply(streams);
 const nativeMultiAac = createNativeMultiAac({
   aacBitrate,
@@ -475,6 +515,7 @@ function attachShutdownHandlers() {
     lastHeardStore.flush();
     userHistory.record(clientLifecycleLog.activeCount());
     userHistory.flush();
+    storage.close();
     process.exit(signal === 'SIGINT' ? 130 : 143);
   }
   process.once('SIGINT', () => shutdown('SIGINT'));
@@ -592,6 +633,8 @@ function startWebServers() {
       webAdminHost: webAdminEnabled ? webAdminHost : undefined,
       webAdminPort: webAdminEnabled ? webAdminPort : undefined,
       runtimeMode,
+      storageBackend,
+      storagePath: storageBackend === 'sqlite' ? sqliteFile : dataDir,
       logLevel: logger.level,
     });
   }).catch((err) => fatal(err.message));
@@ -1069,6 +1112,12 @@ Core options:
   --config PATH                 Streams configuration file. Overrides [streams].file.
   --data-dir PATH               Directory for runtime data. Default: ./data.
 
+Storage:
+  --storage-backend BACKEND     Persistence backend: json or sqlite. Overrides [storage].backend.
+  --sqlite-file PATH            SQLite database path. Relative paths use --data-dir.
+  --migrate [json|sqlite]       Merge persisted data into the selected destination and exit.
+                                Without a value, the destination is [storage].backend.
+
 Public web player:
   --http-host HOST              Web player bind host. Overrides [web].host.
   --http-port PORT              Web player port. Overrides [web].port.
@@ -1114,6 +1163,8 @@ Examples:
   node server.js
   node server.js -D
   node server.js --webserver 9090
+  node server.js --migrate sqlite
+  node server.js --migrate
   node server.js --config streams.json --http-host 0.0.0.0 --http-port 8585
 `);
 }
