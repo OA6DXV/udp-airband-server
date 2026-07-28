@@ -28,23 +28,18 @@
   </header>
 
   <main>
-    <a class="users-back" href="/" data-i18n="backToAdmin">&lt; Web Admin</a>
+    <a class="users-back" href="/" data-i18n="backToAdmin">&lt; Back</a>
 
     <section class="panel geo-panel">
-      <div class="section-heading">
-        <div>
-          <h2 data-i18n="listenerGeography">Listener geography</h2>
-          <p data-i18n="geoDescription">Anonymized listener locations stored by the server</p>
-        </div>
-        <div class="geo-total">
-          <span data-i18n="knownListeners">Known listeners</span>
-          <strong id="geoTotal">0</strong>
-        </div>
+      <div class="section-heading geo-heading">
+        <h2 data-i18n="listenerGeography">Listener Geography</h2>
       </div>
 
-      <div id="geoMessage" class="message visible" role="status" aria-live="polite" data-i18n="loadingMap">Loading map...</div>
       <div class="geo-layout">
-        <div id="geoChart" class="geo-chart" aria-label="Listener geography map" data-i18n-aria="mapAria"></div>
+        <div class="geo-chart-area">
+          <div id="geoChart" class="geo-chart" aria-label="Listener geography map" data-i18n-aria="mapAria"></div>
+          <p id="geoMessage" class="geo-message visible" role="status" aria-live="polite" data-i18n="loadingMap">Loading map...</p>
+        </div>
         <aside id="countryDetail" class="country-detail" hidden>
           <p id="countryDetailEyebrow" class="eyebrow" data-i18n="selectedCountry">Selected country</p>
           <h2 id="countryName"></h2>

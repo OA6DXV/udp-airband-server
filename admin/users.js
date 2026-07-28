@@ -3,10 +3,8 @@
 const LANGUAGE_STORAGE_KEY = 'udp-airband-language';
 const translations = {
   en: {
-    backToAdmin: '< Web Admin',
-    listenerGeography: 'Listener geography',
-    geoDescription: 'Anonymized listener locations stored by the server',
-    knownListeners: 'Known listeners',
+    backToAdmin: '< Back',
+    listenerGeography: 'Listener Geography',
     listeners: 'Listeners',
     loadingMap: 'Loading map...',
     noGeoData: 'No public listener locations have been collected yet.',
@@ -20,10 +18,8 @@ const translations = {
     serverOffline: 'Server offline',
   },
   es: {
-    backToAdmin: '< Administración web',
-    listenerGeography: 'Geografía de oyentes',
-    geoDescription: 'Ubicaciones anonimizadas de oyentes almacenadas por el servidor',
-    knownListeners: 'Oyentes conocidos',
+    backToAdmin: '< Back',
+    listenerGeography: 'Listener Geography',
     listeners: 'Oyentes',
     loadingMap: 'Cargando mapa...',
     noGeoData: 'Todavía no se recopilaron ubicaciones públicas de oyentes.',
@@ -73,12 +69,8 @@ async function loadGeoStats() {
     const response = await fetch('/api/users/geo', { cache: 'no-store' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     geoStats = await response.json();
-    document.getElementById('geoTotal').textContent = String(geoStats.totalListeners || 0);
     setServerOnline(true);
-    if (!Array.isArray(geoStats.countries) || geoStats.countries.length === 0) {
-      showMessage('noGeoData');
-      return;
-    }
+    if (!Array.isArray(geoStats.countries)) geoStats.countries = [];
     waitForGoogleCharts();
   } catch {
     setServerOnline(false);
@@ -96,7 +88,7 @@ function waitForGoogleCharts() {
 }
 
 function drawChart() {
-  if (!window.google || !google.visualization || !geoStats.countries.length) return;
+  if (!window.google || !google.visualization) return;
 
   const data = new google.visualization.DataTable();
   data.addColumn('string', 'Country');
@@ -127,7 +119,11 @@ function drawChart() {
       textStyle: { color: '#edf1f5' },
     },
   });
-  hideMessage();
+  if (geoStats.countries.length) {
+    hideMessage();
+  } else {
+    showMessage('noGeoData');
+  }
   renderSelectedCountry();
 }
 

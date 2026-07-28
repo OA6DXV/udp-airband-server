@@ -255,15 +255,28 @@ main {
   font-size: 22px;
 }
 
+.geo-heading {
+  justify-content: center;
+  text-align: center;
+}
+
+.geo-heading h2 {
+  margin-bottom: 0;
+}
+
 .geo-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 260px;
   min-height: 520px;
 }
 
+.geo-chart-area {
+  min-width: 0;
+}
+
 .geo-chart {
   width: 100%;
-  min-height: 520px;
+  min-height: 490px;
 }
 
 .country-detail {
@@ -313,6 +326,22 @@ main {
   background: var(--surface-2);
   color: var(--text);
   font: 13px/1.65 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.geo-message {
+  display: none;
+  margin: -8px 20px 18px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.geo-message.visible {
+  display: block;
+}
+
+.geo-message.error {
+  color: #ffb7bc;
 }
 
 .table-wrap {
@@ -572,7 +601,7 @@ dialog::backdrop {
   }
 
   .geo-chart {
-    min-height: 400px;
+    min-height: 370px;
   }
 
   .country-detail {
