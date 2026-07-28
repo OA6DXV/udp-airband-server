@@ -713,18 +713,19 @@ dialog::backdrop {
     font-size: 12px;
   }
 
-  .row-actions {
-    display: block;
+  td.row-actions {
+    display: flex;
+    justify-content: center;
     width: 100%;
-    padding-top: 12px;
+    padding: 14px 0 4px;
     text-align: center;
   }
 
-  .row-actions::before {
+  td.row-actions::before {
     content: none;
   }
 
-  .row-actions .remove-stream {
+  td.row-actions .remove-stream {
     width: auto;
     min-width: 0;
   }
