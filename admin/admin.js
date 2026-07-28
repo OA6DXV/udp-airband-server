@@ -40,10 +40,10 @@ const translations = {
     connectedUsers: 'Connected users',
     historyDescription: 'Unique clients during the last 12 hours',
     historyAria: 'Connected user history',
+    openUsersDetails: 'Open connected users details',
     collectingHistory: 'Collecting history...',
     twelveHoursAgo: '12 hours ago',
     now: 'Now',
-    peak: 'Peak {value}',
     streams: 'Streams',
     streamsDescription: 'Changes are applied live and saved to streams.json.',
     addStream: '+ Add stream',
@@ -106,10 +106,10 @@ const translations = {
     connectedUsers: 'Usuarios conectados',
     historyDescription: 'Clientes únicos durante las últimas 12 horas',
     historyAria: 'Historial de usuarios conectados',
+    openUsersDetails: 'Abrir detalle de usuarios conectados',
     collectingHistory: 'Recopilando historial...',
     twelveHoursAgo: 'Hace 12 horas',
     now: 'Ahora',
-    peak: 'Pico {value}',
     streams: 'Streams',
     streamsDescription: 'Los cambios se aplican en vivo y se guardan en streams.json.',
     addStream: '+ Agregar stream',
@@ -608,31 +608,29 @@ function renderChart(points) {
 
   chartEmpty.hidden = points.length > 0;
   const peak = points.reduce((max, point) => Math.max(max, point.count), 0);
-  document.getElementById('historyPeak').textContent = translate('peak', { value: peak });
-  if (!points.length) return;
 
   const padding = { top: 12, right: 12, bottom: 12, left: 32 };
   const width = Math.max(1, rect.width - padding.left - padding.right);
   const height = Math.max(1, rect.height - padding.top - padding.bottom);
   const end = Date.now();
   const start = end - HISTORY_WINDOW_MS;
-  const maxValue = Math.max(1, peak);
+  const maxValue = Math.max(3, Math.ceil(peak));
 
   context.strokeStyle = '#2d3742';
   context.fillStyle = '#8e9cab';
   context.font = '11px system-ui';
   context.textAlign = 'right';
   context.textBaseline = 'middle';
-  for (let line = 0; line <= 4; line += 1) {
-    const y = padding.top + height * line / 4;
-    const rawValue = maxValue * (1 - line / 4);
-    const value = maxValue < 4 ? rawValue.toFixed(1) : String(Math.round(rawValue));
+  for (const value of integerAxisValues(maxValue)) {
+    const y = padding.top + height - (value / maxValue) * height;
     context.beginPath();
     context.moveTo(padding.left, y);
     context.lineTo(padding.left + width, y);
     context.stroke();
-    context.fillText(value, padding.left - 7, y);
+    context.fillText(String(value), padding.left - 7, y);
   }
+
+  if (!points.length) return;
 
   const chartPoints = points.map((point) => ({
     x: padding.left + Math.max(0, Math.min(1, (point.at - start) / (end - start))) * width,
@@ -659,4 +657,15 @@ function renderChart(points) {
   context.lineWidth = 2;
   context.lineJoin = 'round';
   context.stroke();
+}
+
+function integerAxisValues(maxValue) {
+  if (maxValue <= 6) {
+    return Array.from({ length: maxValue + 1 }, (_, index) => maxValue - index);
+  }
+  const step = Math.max(1, Math.ceil(maxValue / 4));
+  const values = [];
+  for (let value = maxValue; value > 0; value -= step) values.push(value);
+  if (!values.includes(0)) values.push(0);
+  return values;
 }

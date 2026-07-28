@@ -250,6 +250,8 @@ const multiJs = fs.readFileSync(path.join(publicDir, 'assets', 'multi.js'));
 const faviconIco = fs.readFileSync(path.join(publicDir, 'assets', 'favicon.ico'));
 const adminAssets = webAdminEnabled ? {
   html: fs.readFileSync(path.join(publicDir, 'admin', 'index.html')),
+  usersHtml: fs.readFileSync(path.join(publicDir, 'admin', 'users.html'), 'utf8')
+    .replace('__SOFTWARE_VERSION__', SOFTWARE_VERSION),
   css: fs.readFileSync(path.join(publicDir, 'admin', 'admin.css')),
   js: fs.readFileSync(path.join(publicDir, 'admin', 'admin.js')),
   favicon: faviconIco,

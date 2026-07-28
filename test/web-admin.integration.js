@@ -97,6 +97,11 @@ async function run() {
     assert.match(adminPage.body, /id="languageSelect"/);
     assert.match(adminPage.headers['content-security-policy'], /frame-ancestors 'none'/);
 
+    const usersPage = await request(adminPort, '/users');
+    assert.strictEqual(usersPage.statusCode, 200);
+    assert.match(usersPage.body, /Web Admin/);
+    assert.match(usersPage.body, /<main><\/main>/);
+
     const publicPage = await request(publicPort, '/');
     assert.strictEqual(publicPage.statusCode, 200);
     assert.match(publicPage.body, /Initial test/);
