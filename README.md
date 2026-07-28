@@ -287,10 +287,17 @@ enabled = true
 
 Web Admin requires an administrator stored in the same SQLite runtime database. Authentication uses a singleton administrator, scrypt password hashing, server-side SQLite sessions, CSRF protection, account/IP rate limits, and self-hosted ALTCHA Proof-of-Work v2 after three failed logins. Session tokens and ALTCHA secrets are never stored in browser storage.
 
-Install dependencies, generate two independent secrets, and keep the resulting environment file readable only by the service account:
+Install dependencies before enabling Web Admin:
 
 ```bash
 npm install
+```
+
+If `ADMIN_AUTH_SECRET` and `ADMIN_ALTCHA_SECRET` are not provided, the first Web Admin startup creates `data/admin-secrets.env` with private random values and reuses that file on later starts. Keep this file private and include it in backups.
+
+For managed production deployments, you may provide the secrets yourself in a root-owned environment file:
+
+```bash
 sudo install -m 600 -o airband -g airband /dev/null /etc/udp-airband-admin.env
 printf 'ADMIN_AUTH_SECRET=%s\n' "$(openssl rand -base64 48)" | sudo tee -a /etc/udp-airband-admin.env >/dev/null
 printf 'ADMIN_ALTCHA_SECRET=%s\n' "$(openssl rand -base64 48)" | sudo tee -a /etc/udp-airband-admin.env >/dev/null
@@ -309,7 +316,7 @@ If custom paths are used:
 npm run admin:setup -- --server-config /opt/udp-airband-server/server.conf --data-dir /opt/udp-airband-server/data
 ```
 
-Add the protected environment file to the `systemd` service:
+If you use the protected environment file, add it to the `systemd` service:
 
 ```ini
 [Service]

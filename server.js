@@ -10,6 +10,7 @@ const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 
+const { ensureAdminSecrets } = require('./lib/admin-secrets');
 const { createProxyTrust, resolveRequestContext } = require('./lib/proxy-trust');
 const { normalizeClientId } = require('./lib/clients');
 const {
@@ -189,8 +190,15 @@ let adminProxyTrust = null;
 if (webAdminEnabled) {
   try {
     ({ createAdminAuth, loadAdminAuthConfig } = require('./lib/admin-auth'));
-    adminAuthConfig = loadAdminAuthConfig(process.env);
-    adminProxyTrust = createProxyTrust(process.env.ADMIN_TRUSTED_PROXIES || '127.0.0.1,::1');
+    const adminSecrets = ensureAdminSecrets({ crypto, dataDir, env: process.env, fs, path });
+    if (adminSecrets.generated) {
+      logger.warn('webadmin_secrets_generated', {
+        file: adminSecrets.filePath,
+        recommendation: 'keep this file private and include it in backups',
+      });
+    }
+    adminAuthConfig = loadAdminAuthConfig(adminSecrets.env);
+    adminProxyTrust = createProxyTrust(adminSecrets.env.ADMIN_TRUSTED_PROXIES || '127.0.0.1,::1');
   } catch (err) {
     if (err && err.code === 'MODULE_NOT_FOUND' && String(err.message || '').includes('altcha-lib')) {
       fatal('Web Admin requires dependencies that are not installed. Run npm install in the project directory, then start the server again.');

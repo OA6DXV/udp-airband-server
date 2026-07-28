@@ -5,6 +5,7 @@
 ### English
 
 - Added secure Web Admin authentication with hardened sessions, CSRF protection, login rate limiting, and challenge handling.
+- Added automatic first-run generation of private Web Admin secrets in `data/admin-secrets.env` when environment-provided secrets are absent.
 - Made SQLite the exclusive runtime database for listener metrics, Last Heard, geolocation, and Web Admin authentication.
 - Changed `--migrate` to a one-way legacy JSON-to-SQLite import that preserves the source files in a timestamped backup directory.
 - Added a startup warning when legacy JSON runtime data still needs migration, while Node.js 22.13+ uses built-in `node:sqlite` silently and older runtimes receive `better-sqlite3` installation guidance.
@@ -13,6 +14,7 @@
 ### Espanol
 
 - Se agrego autenticacion segura para Web Admin con sesiones reforzadas, proteccion CSRF, limites de intentos de login y sistema de desafios.
+- Se agrego generacion automatica de secretos privados de Web Admin en `data/admin-secrets.env` durante el primer arranque cuando no existen secretos por entorno.
 - SQLite paso a ser la unica base de datos de ejecucion para metricas de listeners, Last Heard, geolocalizacion y autenticacion de Web Admin.
 - `--migrate` ahora importa unicamente de JSON heredado a SQLite y conserva los archivos originales en una carpeta de respaldo con fecha.
 - Se agrego una alerta al detectar datos JSON pendientes de migracion; Node.js 22.13+ usa `node:sqlite` sin avisos y los runtimes antiguos reciben instrucciones para instalar `better-sqlite3`.

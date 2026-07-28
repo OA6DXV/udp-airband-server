@@ -287,17 +287,24 @@ enabled = true
 
 Web Admin requiere un administrador guardado en la misma base SQLite de ejecucion. La autenticacion usa un unico administrador, contrasenas con scrypt, sesiones SQLite del lado del servidor, proteccion CSRF, limites por cuenta/IP y ALTCHA Proof-of-Work v2 autohospedado despues de tres logins fallidos. Los tokens de sesion y secretos ALTCHA nunca se guardan en el almacenamiento del navegador.
 
-Instala las dependencias, genera dos secretos independientes y limita el archivo de entorno a la cuenta del servicio:
+Instala las dependencias antes de activar Web Admin:
 
 ```bash
 npm install
+```
+
+Si `ADMIN_AUTH_SECRET` y `ADMIN_ALTCHA_SECRET` no existen, el primer arranque de Web Admin crea `data/admin-secrets.env` con valores privados aleatorios y reutiliza ese archivo en los siguientes inicios. Manten este archivo privado e incluyelo en tus respaldos.
+
+Para despliegues de produccion administrados, tambien puedes proporcionar los secretos manualmente en un archivo de entorno protegido:
+
+```bash
 sudo install -m 600 -o airband -g airband /dev/null /etc/udp-airband-admin.env
 printf 'ADMIN_AUTH_SECRET=%s\n' "$(openssl rand -base64 48)" | sudo tee -a /etc/udp-airband-admin.env >/dev/null
 printf 'ADMIN_ALTCHA_SECRET=%s\n' "$(openssl rand -base64 48)" | sudo tee -a /etc/udp-airband-admin.env >/dev/null
 printf 'ADMIN_TRUSTED_PROXIES=127.0.0.1,::1\n' | sudo tee -a /etc/udp-airband-admin.env >/dev/null
 ```
 
-Crea o reemplaza el unico administrador de forma interactiva. La contrasena se lee sin eco y nunca se acepta como argumento de linea de comandos:
+Crea o reemplaza el unico administrador de forma interactiva.Crea o reemplaza el unico administrador de forma interactiva. La contrasena se lee sin eco y nunca se acepta como argumento de linea de comandos:
 
 ```bash
 npm run admin:setup
@@ -309,7 +316,7 @@ Si usas rutas personalizadas:
 npm run admin:setup -- --server-config /opt/udp-airband-server/server.conf --data-dir /opt/udp-airband-server/data
 ```
 
-Agrega el archivo protegido al servicio `systemd`:
+Si usas el archivo de entorno protegido, agregalo al servicio `systemd`:
 
 ```ini
 [Service]
