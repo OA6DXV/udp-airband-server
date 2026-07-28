@@ -115,7 +115,7 @@ Important fields:
 
 JSON storage is the compatibility default and uses `data/user-history.json`, `data/last-heard.json`, and `data/geo-cache.json`. SQLite is recommended for production and stores runtime data in `data/localdb.sqlite` by default.
 
-When JSON storage is active, the server prints a readable startup warning with the current Node.js version and migration guidance. On Node 18, run `npm install` so the optional `better-sqlite3` compatibility driver is available before using SQLite. On Node 22.13+ the built-in `node:sqlite` module is available, so no extra SQLite package is required.
+When JSON storage is active, the server prints a readable startup warning with the current Node.js version and migration guidance. On Node 18, install the optional compatibility driver with `npm install better-sqlite3` before using SQLite. On Node 22.13+ the built-in `node:sqlite` module is available, so no extra SQLite package is required.
 
 To migrate existing data, first stop the running server and use one of these commands:
 

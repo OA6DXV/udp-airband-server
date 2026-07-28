@@ -1234,15 +1234,15 @@ function warnWhenJsonStorageIsActive() {
 function getSqliteRuntimeGuidance(version) {
   const [major, minor] = String(version).split('.').map((part) => Number(part));
   if (major === 18) {
-    return 'Node 18 needs npm install so better-sqlite3 is available, or upgrade to Node 22.13+ for built-in node:sqlite.';
+    return 'Node 18 needs npm install better-sqlite3, or upgrade to Node 22.13+ for built-in node:sqlite.';
   }
   if (major > 22 || (major === 22 && minor >= 13)) {
     return 'This Node version includes node:sqlite without extra SQLite packages.';
   }
   if (major === 22) {
-    return 'Upgrade to Node 22.13+ for node:sqlite without flags, or run npm install for better-sqlite3.';
+    return 'Upgrade to Node 22.13+ for node:sqlite without flags, or run npm install better-sqlite3.';
   }
-  return 'Run npm install for better-sqlite3, or use Node 22.13+ for built-in node:sqlite.';
+  return 'Run npm install better-sqlite3, or use Node 22.13+ for built-in node:sqlite.';
 }
 
 function getOppositeStorageBackend(backend) {

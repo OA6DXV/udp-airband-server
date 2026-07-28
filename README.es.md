@@ -115,7 +115,7 @@ Campos importantes:
 
 El almacenamiento JSON es el valor predeterminado de compatibilidad y utiliza `data/user-history.json`, `data/last-heard.json` y `data/geo-cache.json`. SQLite se recomienda para produccion y guarda los datos de ejecucion en `data/localdb.sqlite` de forma predeterminada.
 
-Cuando el almacenamiento JSON esta activo, el servidor muestra un warning legible al iniciar con la version actual de Node.js y la guia de migracion. En Node 18, ejecuta `npm install` para instalar el driver opcional de compatibilidad `better-sqlite3` antes de usar SQLite. En Node 22.13+ el modulo integrado `node:sqlite` esta disponible, asi que no se requiere ningun paquete SQLite adicional.
+Cuando el almacenamiento JSON esta activo, el servidor muestra un warning legible al iniciar con la version actual de Node.js y la guia de migracion. En Node 18, instala el driver opcional de compatibilidad con `npm install better-sqlite3` antes de usar SQLite. En Node 22.13+ el modulo integrado `node:sqlite` esta disponible, asi que no se requiere ningun paquete SQLite adicional.
 
 Para migrar datos existentes, primero detiene el servidor en ejecucion y usa uno de estos comandos:
 
