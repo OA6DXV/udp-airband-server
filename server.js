@@ -10,7 +10,6 @@ const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 
-const { createAdminAuth, loadAdminAuthConfig } = require('./lib/admin-auth');
 const { createProxyTrust, resolveRequestContext } = require('./lib/proxy-trust');
 const { normalizeClientId } = require('./lib/clients');
 const {
@@ -181,13 +180,19 @@ try {
   fatal(err.message);
 }
 const adminDatabase = webAdminEnabled ? storage.database : null;
+let createAdminAuth = null;
+let loadAdminAuthConfig = null;
 let adminAuthConfig = null;
 let adminProxyTrust = null;
 if (webAdminEnabled) {
   try {
+    ({ createAdminAuth, loadAdminAuthConfig } = require('./lib/admin-auth'));
     adminAuthConfig = loadAdminAuthConfig(process.env);
     adminProxyTrust = createProxyTrust(process.env.ADMIN_TRUSTED_PROXIES || '127.0.0.1,::1');
   } catch (err) {
+    if (err && err.code === 'MODULE_NOT_FOUND' && String(err.message || '').includes('altcha-lib')) {
+      fatal('Web Admin requires dependencies that are not installed. Run npm install in the project directory, then start the server again.');
+    }
     fatal(`Web Admin authentication configuration is unsafe: ${err.message}`);
   }
 }
