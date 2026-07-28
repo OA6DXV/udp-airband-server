@@ -51,8 +51,26 @@ host = 0.0.0.0
 host = 0.0.0.0
 port = 8585
 
+[admin]
+host = 127.0.0.1
+port = 8584
+enabled = true
+
 [streams]
 file = streams.json
+
+[storage]
+backend = json
+sqlite_file = localdb.sqlite
+
+[geo]
+enabled = true
+provider = ipwhois
+key =
+cache_ttl_days = 30
+timeout_ms = 1500
+ipv4_anonymize = /24
+ipv6_anonymize = /48
 
 [logging]
 level = info
@@ -78,13 +96,48 @@ Campos importantes:
 
 - `[udp].host`: direccion UDP predeterminada para streams que no definan su propio `udpHost`.
 - `[web].host` y `[web].port`: direccion y puerto para la interfaz web. El mismo puerto se usa para HTTP o HTTPS segun `[ssl]`.
+- `[admin].enabled`: activa el servidor Web Admin separado. Esta en `true` por defecto y queda enlazado a loopback salvo que cambies `[admin].host`.
+- `[admin].host` y `[admin].port`: direccion y puerto de Web Admin. Conserva el host loopback predeterminado salvo que el acceso este protegido por un tunel SSH o reverse proxy autenticado.
 - `[streams].file`: archivo JSON que define los feeds.
+- `[storage].backend`: backend de persistencia para el historial de usuarios conectados, los valores Last Heard y el cache de geolocalizacion. Los valores soportados son `json` (predeterminado) y `sqlite`. SQLite se recomienda para produccion.
+- `[storage].sqlite_file`: ruta de la base SQLite. Las rutas relativas se resuelven dentro del directorio de datos de ejecucion (`data/` de forma predeterminada).
+- `[geo].enabled`: activa la geolocalizacion server-side mediante ipwhois. Esta activada por defecto y mantiene las IP publicas anonimizadas antes de guardarlas.
+- `[geo].key`: reservado para futuros proveedores de geolocalizacion que requieran API key. ipwhois no requiere una, asi que puede quedar vacio.
+- `[geo].cache_ttl_days`: vuelve a consultar la ubicacion de redes publicas despues de 30 dias de forma predeterminada.
+- `[geo].timeout_ms`: tiempo maximo permitido para una consulta. La consulta nunca bloquea la conexion de un listener.
+- `[geo].ipv4_anonymize` y `[geo].ipv6_anonymize`: documentan las politicas obligatorias de anonimizacion `/24` y `/48`.
 - `[logging].level`: nivel de logging amigable para servicio. Valores soportados: `off`, `error`, `warn`, `info` y `debug`. El valor predeterminado es `info`.
 - `[logging].timestamps`: usa `true` para anteponer timestamps ISO. Con `systemd`, normalmente puede quedar en `false` porque `journalctl` ya agrega timestamps.
 - `[logging].colors`: usa `true` para colorear logs en terminal. Mantenlo en `false` para logs normales de servicio con `systemd`.
 - `[ssl]`: modo HTTPS opcional para el mismo host y puerto de `[web]`. Activalo y define rutas validas `key` y `cert` cuando quieras que Node.js sirva TLS directamente. Si SSL esta activado pero faltan las rutas del certificado o son invalidas, el servidor muestra un warning y cae a HTTP en el mismo puerto.
 - `[compressed].enabled`: usa `false` para desactivar todos los modos comprimidos y su logica de transcoding/framing.
 - `[compressed].codec`: backend del modo comprimido. `adpcm` es la opcion predeterminada de baja latencia y no requiere `ffmpeg`.
+
+El almacenamiento JSON es el valor predeterminado de compatibilidad y utiliza `data/user-history.json`, `data/last-heard.json` y `data/geo-cache.json`. SQLite se recomienda para produccion y guarda los datos de ejecucion en `data/localdb.sqlite` de forma predeterminada.
+
+La version 1.7 esta planeada como la ultima version con soporte de JSON como base general de ejecucion. Las instalaciones nuevas en produccion deberian migrar a SQLite instalando `better-sqlite3` en versiones antiguas de Node.js, o usando Node.js 22.13+ / Node.js actual con `node:sqlite` integrado.
+
+Cuando el almacenamiento JSON esta activo, el servidor muestra un warning legible al iniciar con la version actual de Node.js y la guia de migracion. En Node 18, instala el driver opcional de compatibilidad con `npm install better-sqlite3` antes de usar SQLite. En Node 22.13+ el modulo integrado `node:sqlite` esta disponible, asi que no se requiere ningun paquete SQLite adicional.
+
+Para migrar datos existentes, primero detiene el servidor en ejecucion y usa uno de estos comandos:
+
+```bash
+# JSON a SQLite
+node server.js --migrate sqlite
+
+# SQLite a JSON
+node server.js --migrate json
+```
+
+`--migrate` sin valor migra al backend contrario: instalaciones JSON migran a SQLite, e instalaciones SQLite vuelven a JSON. La migracion muestra el origen y destino, pide confirmacion `Y/N`, combina los datos que ya existan en el destino, conserva los valores Last Heard y de geolocalizacion mas recientes, mantiene los puntos del historial y no borra el origen. Despues de una migracion exitosa, el servidor actualiza automaticamente `[storage].backend` en `server.conf`.
+
+### Geolocalizacion Opcional Y Privacidad
+
+Cuando `[geo].enabled = true`, el servidor puede usar [ipwhois](https://ipwhois.io/) para guardar en cache unicamente el pais y la ciudad devueltos para la red de un listener. El pais y la ciudad se almacenan exactamente como los entrega el proveedor y no se traducen.
+
+La IP publica completa solo se usa temporalmente en memoria para realizar la consulta y nunca se escribe en JSON, SQLite ni en los logs de la aplicacion. Antes de persistirla, una IPv4 se reduce a su red `/24` (`8.8.8.45` pasa a `8.8.8.0`) y una IPv6 a `/48`. El cache evita consultas repetidas y se renueva despues de 30 dias. Si una renovacion falla, se conserva la ubicacion anterior.
+
+Las direcciones privadas, loopback, link-local y otras direcciones no publicas nunca se envian a ipwhois. Se almacenan sin truncar con `Local IP` como pais y ciudad. La geolocalizacion es best-effort: un timeout, error del proveedor o limite de consultas nunca retrasa ni rechaza una conexion de audio.
 
 `streams.json` define los feeds:
 
@@ -231,6 +284,45 @@ node server.js -D --server-config server.conf --config streams.json
 
 Cuando `-D` esta activo, los encoders basados en ffmpeg como Opus, AAC y HLS se inician con logging debug de ffmpeg y su salida `stderr` se imprime. `-D` tambien activa timestamps y colores automaticamente para ejecuciones manuales en terminal. Sin `-D`, ffmpeg queda en nivel de errores y el comportamiento de timestamps/colores viene desde `server.conf`, para que los logs del servicio no se inunden.
 
+## Administracion Web
+
+La pagina de administracion corre por defecto en un puerto separado solo en loopback y no se publica desde el puerto del reproductor. Puede configurarse en `server.conf`:
+
+```conf
+[admin]
+host = 127.0.0.1
+port = 8584
+enabled = true
+```
+
+Tambien puede moverse a otro puerto para una ejecucion:
+
+```bash
+node server.js --webserver 8584
+```
+
+`--webserver PUERTO` tiene prioridad sobre `[admin].enabled` y `[admin].port`. El log de inicio muestra `webadmin_config_override` para dejar claro que los valores de la linea de comandos reemplazaron al archivo de configuracion. La forma anterior `--webadmin PUERTO` se conserva como alias compatible.
+
+El servidor admin usa `[admin].host`, cuyo valor predeterminado es `127.0.0.1`. Para abrirlo de forma segura desde otra computadora, crea un tunel SSH:
+
+```bash
+ssh -L 8584:127.0.0.1:8584 usuario@IP_DEL_SERVIDOR
+```
+
+Luego abre `http://127.0.0.1:8584/` en el navegador local. No expongas este puerto directamente a internet: la pagina puede agregar, editar y eliminar feeds, cambiar hosts y puertos UDP, sample rates, canales y solicitar el reinicio del servidor.
+
+Al aplicar cambios se valida la configuracion completa, se actualiza `streams.json` y se vuelven a enlazar las entradas UDP sin reiniciar Node. El boton amarillo **Reload streams** vuelve a leer los cambios hechos directamente en `streams.json` y los aplica con la misma validacion y restauracion ante errores. Los cambios que solo modifican nombres visibles conservan los listeners actuales. Los cambios de rutas o entradas de audio reconectan las sesiones de audio del navegador. Si no se puede abrir un puerto UDP nuevo, se restauran tanto la configuracion anterior en ejecucion como el archivo.
+
+La grafica de usuarios conectados utiliza el contador interno de clientes unicos del servidor en lugar de analizar logs. Las muestras de un minuto se conservan durante 12 horas en el backend JSON o SQLite seleccionado.
+
+El boton de reinicio envia una senal de cierre controlado despues de pedir confirmacion. Web Admin detecta `systemd` mediante el entorno de ejecucion y avisa si el servicio debe configurarse para reinicio automatico o si el proceso iniciado en consola tendra que arrancarse manualmente. Una unidad de `systemd` debe incluir, por ejemplo:
+
+```ini
+[Service]
+ExecStart=/usr/bin/node /opt/udp-airband-server/server.js --webserver 8584
+Restart=on-failure
+```
+
 Luego abre la pagina principal:
 
 ```text
@@ -327,7 +419,7 @@ La pagina del stream muestra contador de usuarios, estado UDP/stream, buffered, 
 
 Cuando el stream fue validado por al menos un paquete UDP, el estado cambia a `Connected`. Al presionar `Connected`, la pagina cambia a `Push to Reconnect`, cierra solo el socket de audio y detiene el consumo de bandwidth sin cerrar la pagina ni la conexion de control/estado. Al presionar `Push to Reconnect`, se reanuda el mismo modo que estaba activo antes de pausar.
 
-La ultima transmision es detectada por el servidor y se guarda en `data/last-heard.json`, asi la pagina principal y nuevos oyentes pueden ver la ultima actividad conocida incluso despues de reiniciar el servidor.
+La ultima transmision es detectada por el servidor y se guarda en el backend JSON o SQLite seleccionado, asi la pagina principal y nuevos oyentes pueden ver la ultima actividad conocida incluso despues de reiniciar el servidor.
 
 La pagina principal lista todos los feeds configurados bajo `Real-time Airband audio streams`, muestra usuarios activos, selector de idioma, ruta, informacion de canales/sample rate y la ultima transmision detectada por el servidor para cada feed.
 

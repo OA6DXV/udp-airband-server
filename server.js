@@ -11,7 +11,14 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 
 const { normalizeClientId } = require('./lib/clients');
-const { ensureServerConfigDefaults, getSetting, loadServerConfig, parseArgs, parseBoolean } = require('./lib/config');
+const {
+  ensureServerConfigDefaults,
+  getSetting,
+  loadServerConfig,
+  parseArgs,
+  parseBoolean,
+  setServerConfigSetting,
+} = require('./lib/config');
 const {
   addListenerBytes,
   addListenerMode,
@@ -23,35 +30,98 @@ const {
   removeListenerMode,
 } = require('./lib/listeners');
 const { createLogger } = require('./lib/logger');
-const { DEFAULT_STREAMS, loadStreams, renderMultiStreamPage, renderStreamList, validateStreams } = require('./lib/streams');
+const { DEFAULT_STREAMS, loadStreams, loadStreamsFromConfig, renderMultiStreamPage, renderStreamList, validateStreams } = require('./lib/streams');
 const { acceptWebSocket, sendWsBinary, sendWsJson } = require('./lib/websocket');
 const { createCompressedManager } = require('./lib/compressed');
+const { createGeoService } = require('./lib/geo-service');
+const { aggregateGeoStats } = require('./lib/geo-stats');
 const { createNativeMultiAac } = require('./lib/native-multi-aac');
-const { createLastHeardStore } = require('./lib/last-heard-store');
+const { detectRuntimeMode } = require('./lib/runtime');
+const { createStorage, normalizeStorageBackend } = require('./lib/storage');
+const { migrateStorage } = require('./lib/storage-migration');
+const { createWebAdmin } = require('./lib/web-admin');
 
 const MAX_SOCKET_BUFFER_BYTES = 1024 * 1024;
 const MAX_OPUS_STDIN_BUFFER_BYTES = 512 * 1024;
-const SOFTWARE_VERSION = '1.6';
+const SOFTWARE_VERSION = '1.7';
 const COMPRESSED_CODECS = new Set(['adpcm', 'opus', 'aac', 'hls']);
 const serverInstanceId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
 
 const args = parseArgs(process.argv.slice(2));
+if (args.help) {
+  printHelp();
+  process.exit(0);
+}
 const serverConfigPath = args.serverConfig || args.serverConf || 'server.conf';
 const serverConfigExists = fs.existsSync(path.resolve(serverConfigPath));
 const serverConfigUpdated = ensureServerConfigDefaults(serverConfigPath, [
   {
-    name: 'api',
-    comments: ['Public status API. Keep disabled unless you explicitly want /status endpoints.'],
-    keys: [{ key: 'enabled', value: 'false' }],
+    name: 'admin',
+    comments: ['Separate Web Admin listener. Keep disabled unless administrative access is required.'],
+    keys: [
+      { key: 'host', value: '127.0.0.1' },
+      { key: 'port', value: '8584' },
+      { key: 'enabled', value: 'true' },
+    ],
+  },
+  {
+    name: 'storage',
+    comments: ['Runtime persistence backend. Supported values: json and sqlite.'],
+    keys: [
+      { key: 'backend', value: 'json' },
+      { key: 'sqlite_file', value: 'localdb.sqlite' },
+    ],
+  },
+  {
+    name: 'geo',
+    comments: [
+      'Optional server-side IP geolocation. Public addresses are anonymized before storage.',
+      'Private/local addresses never leave the server.',
+    ],
+    keys: [
+      { key: 'enabled', value: 'true' },
+      { key: 'provider', value: 'ipwhois' },
+      { key: 'key', value: '' },
+      { key: 'cache_ttl_days', value: '30' },
+      { key: 'timeout_ms', value: '1500' },
+      { key: 'ipv4_anonymize', value: '/24' },
+      { key: 'ipv6_anonymize', value: '/48' },
+    ],
   },
 ], fs, path);
 const serverConfig = loadServerConfig(serverConfigPath, fs, path);
 const defaultUdpHost = args.udpHost || getSetting(serverConfig, 'udp.host', '0.0.0.0');
 const httpHost = args.httpHost || getSetting(serverConfig, 'web.host', '0.0.0.0');
 const httpPort = Number(args.httpPort || args.http || getSetting(serverConfig, 'web.port', 8585));
+const adminConfigEnabled = parseBoolean(getSetting(serverConfig, 'admin.enabled', false));
+const adminConfigHost = String(getSetting(serverConfig, 'admin.host', '127.0.0.1'));
+const adminConfigPort = Number(getSetting(serverConfig, 'admin.port', 8584));
+const webAdminCliFlag = args.webserver !== undefined
+  ? '--webserver'
+  : (args.webadmin !== undefined ? '--webadmin' : '');
+const webAdminCliPort = webAdminCliFlag === '--webserver' ? args.webserver : args.webadmin;
+const webAdminEnabled = webAdminCliFlag ? true : adminConfigEnabled;
+const webAdminPort = Number(webAdminCliFlag
+  ? (webAdminCliPort !== true ? webAdminCliPort : Number.NaN)
+  : adminConfigPort);
+const webAdminHost = String(args.webadminHost || adminConfigHost);
+const webAdminConfigOverridden = Boolean(webAdminCliFlag || args.webadminHost !== undefined);
 const configPath = args.config || getSetting(serverConfig, 'streams.file', 'streams.json');
-const apiEnabledSetting = args.api ? true : (args.apiEnabled !== undefined ? args.apiEnabled : getSetting(serverConfig, 'api.enabled', false));
-const apiEnabled = parseBoolean(apiEnabledSetting);
+const dataDir = path.resolve(args.dataDir || path.join(__dirname, 'data'));
+const storageBackendSetting = args.storageBackend || getSetting(serverConfig, 'storage.backend', 'json');
+const sqliteFileSetting = String(
+  args.sqliteFile || getSetting(serverConfig, 'storage.sqliteFile', '') || 'localdb.sqlite',
+).trim();
+const sqliteFile = path.isAbsolute(sqliteFileSetting)
+  ? path.normalize(sqliteFileSetting)
+  : path.resolve(dataDir, sqliteFileSetting);
+const geoEnabled = parseBoolean(getSetting(serverConfig, 'geo.enabled', true));
+const geoProvider = String(getSetting(serverConfig, 'geo.provider', 'ipwhois')).trim().toLowerCase();
+const geoKey = String(args.geoKey || getSetting(serverConfig, 'geo.key', '')).trim();
+const geoCacheTtlDays = Number(getSetting(serverConfig, 'geo.cacheTtlDays', 30));
+const geoTimeoutMs = Number(getSetting(serverConfig, 'geo.timeoutMs', 1500));
+const geoIpv4Anonymize = String(getSetting(serverConfig, 'geo.ipv4Anonymize', '/24')).trim();
+const geoIpv6Anonymize = String(getSetting(serverConfig, 'geo.ipv6Anonymize', '/48')).trim();
 const compressedEnabled = parseBoolean(args.compressedEnabled !== undefined ? args.compressedEnabled : getSetting(serverConfig, 'compressed.enabled', true));
 const compressedCodec = String(args.compressedCodec || args.codec || getSetting(serverConfig, 'compressed.codec', 'adpcm')).trim().toLowerCase();
 const adpcmFrameMs = Number(args.adpcmFrameMs || getSetting(serverConfig, 'compressed.adpcmFrameMs', 40));
@@ -68,10 +138,101 @@ const debugEnabled = Boolean(args.debug);
 const logTimestamps = parseBoolean(args.logTimestamps !== undefined ? args.logTimestamps : (debugEnabled ? true : getSetting(serverConfig, 'logging.timestamps', false)));
 const logColors = parseBoolean(args.logColors !== undefined ? args.logColors : (debugEnabled ? true : getSetting(serverConfig, 'logging.colors', false)));
 const logger = createLogger({ debug: debugEnabled, level: logLevel, timestamps: logTimestamps, colors: logColors });
-const clientLifecycleLog = createClientLifecycleLog(logger);
+const runtimeMode = detectRuntimeMode();
+let storageBackend;
+try {
+  storageBackend = normalizeStorageBackend(storageBackendSetting);
+} catch (err) {
+  fatal(err.message);
+}
+if (args.migrate !== undefined) {
+  const migrationTarget = args.migrate === true ? getOppositeStorageBackend(storageBackend) : args.migrate;
+  try {
+    const normalizedMigrationTarget = normalizeStorageBackend(migrationTarget);
+    const migrationSource = normalizedMigrationTarget === 'sqlite' ? 'json' : 'sqlite';
+    confirmStorageMigration({
+      source: migrationSource,
+      target: normalizedMigrationTarget,
+      serverConfigPath,
+      sqliteFile,
+    });
+    const result = migrateStorage({
+      dataDir,
+      fs,
+      logger,
+      path,
+      sqliteFile,
+      target: normalizedMigrationTarget,
+    });
+    setServerConfigSetting(serverConfigPath, 'storage', 'backend', normalizedMigrationTarget, fs, path);
+    logger.warn('storage_backend_config_updated', {
+      serverConfig: serverConfigPath,
+      storageBackend: normalizedMigrationTarget,
+    });
+    logger.info('storage_migration_summary', {
+      from: migrationSource,
+      to: normalizedMigrationTarget,
+      userHistory: result.userHistory,
+      lastHeard: result.lastHeard,
+      geoCache: result.geoCache,
+    });
+    process.exit(0);
+  } catch (err) {
+    fatal(`Storage migration failed: ${err.message}`);
+  }
+}
+warnWhenJsonStorageIsActive();
+let storage;
+try {
+  storage = createStorage({
+    backend: storageBackend,
+    dataDir,
+    fs,
+    logger,
+    path,
+    sqliteFile,
+  });
+} catch (err) {
+  fatal(err.message);
+}
+const userHistory = storage.createUserHistory();
+const geoCache = storage.createGeoCache();
+const geoService = createGeoService({
+  cache: geoCache,
+  enabled: geoEnabled,
+  logger,
+  timeoutMs: geoTimeoutMs,
+  ttlMs: geoCacheTtlDays * 24 * 60 * 60 * 1000,
+});
+const clientLifecycleLog = createClientLifecycleLog(
+  logger,
+  (count) => userHistory.record(count),
+  (remote) => geoService.observe(remote),
+  (remote) => geoService.safeAddress(remote),
+);
 
 if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) {
   fatal('--http-port must be a valid port');
+}
+if (geoProvider !== 'ipwhois') {
+  fatal('[geo].provider must be ipwhois');
+}
+if (!Number.isFinite(geoCacheTtlDays) || geoCacheTtlDays < 1) {
+  fatal('[geo].cache_ttl_days must be at least 1');
+}
+if (!Number.isInteger(geoTimeoutMs) || geoTimeoutMs < 100 || geoTimeoutMs > 30000) {
+  fatal('[geo].timeout_ms must be between 100 and 30000');
+}
+if (geoIpv4Anonymize !== '/24' || geoIpv6Anonymize !== '/48') {
+  fatal('[geo] currently supports ipv4_anonymize = /24 and ipv6_anonymize = /48');
+}
+if (webAdminEnabled && (!Number.isInteger(webAdminPort) || webAdminPort < 1 || webAdminPort > 65535)) {
+  fatal(webAdminCliFlag
+    ? `${webAdminCliFlag} requires a valid port, for example: ${webAdminCliFlag} 8584`
+    : '[admin].port must be a valid port when [admin].enabled is true');
+}
+if (webAdminEnabled && webAdminPort === httpPort && isOverlappingHost(webAdminHost, httpHost)) {
+  fatal('Web Admin must use a different port from the public web player');
 }
 if (!Number.isInteger(opusKeepaliveMs) || opusKeepaliveMs < 20 || opusKeepaliveMs > 1000) {
   fatal('--opus-keepalive-ms must be between 20 and 1000');
@@ -88,6 +249,15 @@ const appJs = fs.readFileSync(path.join(publicDir, 'assets', 'app.js'));
 const styleCss = fs.readFileSync(path.join(publicDir, 'assets', 'style.css'));
 const multiJs = fs.readFileSync(path.join(publicDir, 'assets', 'multi.js'));
 const faviconIco = fs.readFileSync(path.join(publicDir, 'assets', 'favicon.ico'));
+const adminAssets = webAdminEnabled ? {
+  html: fs.readFileSync(path.join(publicDir, 'admin', 'index.html')),
+  usersHtml: fs.readFileSync(path.join(publicDir, 'admin', 'users.html'), 'utf8')
+    .replace('__SOFTWARE_VERSION__', SOFTWARE_VERSION),
+  usersJs: fs.readFileSync(path.join(publicDir, 'admin', 'users.js')),
+  css: fs.readFileSync(path.join(publicDir, 'admin', 'admin.css')),
+  js: fs.readFileSync(path.join(publicDir, 'admin', 'admin.js')),
+  favicon: faviconIco,
+} : null;
 const tlsOptions = sslRequested ? loadTlsOptions() : null;
 const tlsEnabled = Boolean(tlsOptions);
 const hlsRoot = compressedEnabled ? fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-hls-')) : '';
@@ -137,12 +307,7 @@ try {
   fatal(err.message);
 }
 const streamsByName = new Map(streams.map((stream) => [stream.name, stream]));
-const lastHeardStore = createLastHeardStore({
-  filePath: path.join(__dirname, 'data', 'last-heard.json'),
-  fs,
-  logger,
-  path,
-});
+const lastHeardStore = storage.createLastHeardStore();
 lastHeardStore.apply(streams);
 const nativeMultiAac = createNativeMultiAac({
   aacBitrate,
@@ -161,27 +326,57 @@ const webProtocol = tlsEnabled ? 'https' : 'http';
 const webServer = tlsEnabled
   ? https.createServer(tlsOptions, handleHttpRequest)
   : http.createServer(handleHttpRequest);
+const webAdmin = webAdminEnabled ? createWebAdmin({
+  assets: adminAssets,
+  getGeoStats: () => aggregateGeoStats(geoCache.entries()),
+  getState: getWebAdminState,
+  host: webAdminHost,
+  http,
+  logger,
+  onReloadStreams: reloadStreamsFromDisk,
+  onReplaceStreams: replaceStreamsFromAdmin,
+  onRestart: () => process.kill(process.pid, 'SIGTERM'),
+  port: webAdminPort,
+  softwareVersion: SOFTWARE_VERSION,
+}) : null;
 
 attachUpgradeHandler(webServer);
 attachShutdownHandlers();
-startUdpServers();
+startUdpServers().then(startWebServers).catch((err) => fatal(err.message));
 
 function startUdpServers() {
-  let pendingUdpBinds = streams.length;
-  for (const stream of streams) {
+  return bindUdpServers(streams, true);
+}
+
+function bindUdpServers(items, logStartup = false) {
+  return Promise.all(items.map((stream) => (
+    bindUdpServer(stream, logStartup)
+      .then(() => ({ ok: true }))
+      .catch((error) => ({ error, ok: false }))
+  ))).then((results) => {
+    const failed = results.find((result) => !result.ok);
+    if (failed) throw failed.error;
+  });
+}
+
+function bindUdpServer(stream, logStartup) {
+  return new Promise((resolve, reject) => {
     const udpServer = dgram.createSocket('udp4');
     stream.udpServer = udpServer;
 
     udpServer.on('message', (msg) => handleUdpMessage(stream, msg));
-    udpServer.on('error', (err) => fatal(`UDP error on ${stream.name}: ${err.message}`));
+    const onBindError = (err) => {
+      udpServer.removeListener('error', onBindError);
+      reject(new Error(`UDP error on ${stream.name}: ${err.message}`));
+    };
+    udpServer.once('error', onBindError);
     udpServer.bind(stream.udpPort, stream.udpHost, () => {
-      logger.plain('info', formatStreamStartupLine(stream));
-      pendingUdpBinds -= 1;
-      if (pendingUdpBinds === 0) {
-        startWebServers();
-      }
+      udpServer.removeListener('error', onBindError);
+      udpServer.on('error', (err) => logger.error('udp_socket_error', { stream: stream.name, error: err.message }));
+      if (logStartup) logger.plain('info', formatStreamStartupLine(stream));
+      resolve();
     });
-  }
+  });
 }
 
 function handleUdpMessage(stream, msg) {
@@ -272,28 +467,6 @@ function handleHttpRequest(req, res) {
     sendAsset(res, multiJs, 'application/javascript; charset=utf-8');
     return;
   }
-  if (pathname === '/status') {
-    if (!apiEnabled) {
-      sendNotFound(res);
-      return;
-    }
-    sendJsonResponse(res, streams.map(publicStreamStatus));
-    return;
-  }
-  if (pathname.startsWith('/status/')) {
-    if (!apiEnabled) {
-      sendNotFound(res);
-      return;
-    }
-    const streamName = pathname.slice('/status/'.length);
-    const stream = streamsByName.get(streamName);
-    if (!stream) {
-      sendNotFound(res);
-      return;
-    }
-    sendJsonResponse(res, publicStreamStatus(stream));
-    return;
-  }
 
   const hlsMatch = pathname.match(/^\/([^/]+)\/hls\/([^/]+)\/([^/]+)$/);
   if (hlsMatch) {
@@ -338,7 +511,11 @@ function attachUpgradeHandler(server) {
     }
     const match = pathname.match(/^\/([^/]+)\/(audio|control|adpcm|opus|aac)$/);
     if (!match) {
-      logger.warn('websocket_rejected', { path: requestUrl.pathname, reason: 'invalid_route', remote: remoteAddress });
+      logger.warn('websocket_rejected', {
+        path: requestUrl.pathname,
+        reason: 'invalid_route',
+        remote: geoService.safeAddress(remoteAddress),
+      });
       socket.destroy();
       return;
     }
@@ -346,7 +523,11 @@ function attachUpgradeHandler(server) {
     const stream = streamsByName.get(match[1]);
     const socketType = match[2];
     if (!stream || !acceptWebSocket(req, socket, crypto)) {
-      logger.warn('websocket_rejected', { path: requestUrl.pathname, reason: stream ? 'invalid_handshake' : 'unknown_stream', remote: remoteAddress });
+      logger.warn('websocket_rejected', {
+        path: requestUrl.pathname,
+        reason: stream ? 'invalid_handshake' : 'unknown_stream',
+        remote: geoService.safeAddress(remoteAddress),
+      });
       socket.destroy();
       return;
     }
@@ -357,6 +538,7 @@ function attachUpgradeHandler(server) {
       const monitorOnly = requestUrl.searchParams.get('monitor') === '1';
       connectionLogMode = monitorOnly ? 'control-monitor' : 'control';
       stream.controlClients.set(socket, clientId);
+      if (monitorOnly) stream.monitorClients.add(socket);
       if (!monitorOnly) addListenerMode(stream, clientId, 'control');
       sendWsJson(socket, streamConfig(stream));
       recordClientActivity('connected', stream.name, connectionLogMode, clientId, remoteAddress);
@@ -393,6 +575,10 @@ function attachShutdownHandlers() {
     shuttingDown = true;
     logger.info('shutdown', { signal });
     lastHeardStore.flush();
+    userHistory.record(clientLifecycleLog.activeCount());
+    userHistory.flush();
+    geoCache.flush();
+    storage.close();
     process.exit(signal === 'SIGINT' ? 130 : 143);
   }
   process.once('SIGINT', () => shutdown('SIGINT'));
@@ -400,11 +586,16 @@ function attachShutdownHandlers() {
 }
 
 function recordClientActivity(action, streamName, mode, clientId, remote) {
-  logger.debug(`client_${action}`, { stream: streamName, mode, client: clientId, remote });
+  logger.debug(`client_${action}`, {
+    stream: streamName,
+    mode,
+    client: clientId,
+    remote: geoService.safeAddress(remote),
+  });
   clientLifecycleLog.record(action, clientId, remote);
 }
 
-function createClientLifecycleLog(activityLogger) {
+function createClientLifecycleLog(activityLogger, onCountChanged, onClientConnected, sanitizeRemote) {
   const disconnectGraceMs = 2000;
   const clients = new Map();
 
@@ -420,18 +611,35 @@ function createClientLifecycleLog(activityLogger) {
   }
 
   function recordConnect(clientId, remote) {
+    const safeRemote = sanitizeRemote ? sanitizeRemote(remote) : remote;
     let entry = clients.get(clientId);
     if (!entry) {
-      entry = { socketCount: 0, remote, connectedAt: Date.now(), disconnectTimer: null };
+      entry = { socketCount: 0, remote: safeRemote, connectedAt: Date.now(), disconnectTimer: null };
       clients.set(clientId, entry);
-      activityLogger.info('client_connected', { client: clientId, remote, activeClients: clients.size });
+      activityLogger.info('client_connected', { client: clientId, remote: safeRemote, activeClients: clients.size });
+      if (onCountChanged) onCountChanged(clients.size);
+      if (onClientConnected) {
+        try {
+          Promise.resolve(onClientConnected(remote)).catch((err) => {
+            activityLogger.debug('geo_observation_failed', {
+              remote: safeRemote,
+              reason: err && err.code ? String(err.code) : 'observation_failed',
+            });
+          });
+        } catch (err) {
+          activityLogger.debug('geo_observation_failed', {
+            remote: safeRemote,
+            reason: err && err.code ? String(err.code) : 'observation_failed',
+          });
+        }
+      }
     }
     if (entry.disconnectTimer) {
       clearTimeout(entry.disconnectTimer);
       entry.disconnectTimer = null;
     }
     entry.socketCount += 1;
-    if (remote) entry.remote = remote;
+    if (safeRemote) entry.remote = safeRemote;
   }
 
   function recordDisconnect(clientId) {
@@ -449,18 +657,54 @@ function createClientLifecycleLog(activityLogger) {
         durationSec: Math.max(0, Math.round((Date.now() - latest.connectedAt) / 1000)),
         activeClients: clients.size,
       });
+      if (onCountChanged) onCountChanged(clients.size);
     }, disconnectGraceMs);
     if (typeof entry.disconnectTimer.unref === 'function') entry.disconnectTimer.unref();
   }
 
-  return { record };
+  return {
+    activeCount: () => clients.size,
+    record,
+  };
 }
 
 function startWebServers() {
   if (debugEnabled) {
     logger.debug('debug_enabled', { flag: '-D' });
   }
-  webServer.listen(httpPort, httpHost, () => {
+  const publicStart = new Promise((resolve, reject) => {
+    webServer.once('error', reject);
+    webServer.listen(httpPort, httpHost, () => {
+      webServer.removeListener('error', reject);
+      resolve();
+    });
+  });
+  const adminStart = webAdmin ? webAdmin.start() : Promise.resolve();
+
+  Promise.all([publicStart, adminStart]).then(() => {
+    logger.plain('info', `Compressed: ${compressedEnabled ? formatCompressedStatus() : 'disabled by config'}`);
+    if (compressedEnabled && !compressedAvailable) {
+      logger.warn('compressed_unavailable', { codec: compressedCodec, ffmpeg: ffmpegPath });
+    }
+    if (webAdmin) {
+      if (webAdminConfigOverridden) {
+        logger.info('webadmin_config_override', {
+          source: webAdminCliFlag || '--webadmin-host',
+          priority: 'command-line',
+          serverConfig: serverConfigPath,
+          overridden: [
+            webAdminCliFlag ? 'admin.enabled,admin.port' : '',
+            args.webadminHost !== undefined ? 'admin.host' : '',
+          ].filter(Boolean).join(','),
+          host: webAdminHost,
+          port: webAdminPort,
+        });
+      }
+      logger.plain('info', `Web admin: ${formatUrl('http', webAdminHost, webAdminPort)}/`);
+      if (!isLoopbackHost(webAdminHost)) {
+        logger.warn('webadmin_exposed', { host: webAdminHost, port: webAdminPort, recommendation: 'bind to 127.0.0.1 and use an authenticated proxy or SSH tunnel' });
+      }
+    }
     logger.plain('info', `Web player: ${formatUrl(webProtocol, httpHost, httpPort)}/`);
     logger.info('startup', {
       version: SOFTWARE_VERSION,
@@ -468,47 +712,284 @@ function startWebServers() {
       serverConfigLoaded: serverConfigExists,
       streamsConfig: configPath,
       streamsConfigLoaded: streamsConfigExists,
-      apiEnabled,
+      webAdminEnabled,
+      webAdminHost: webAdminEnabled ? webAdminHost : undefined,
+      webAdminPort: webAdminEnabled ? webAdminPort : undefined,
+      runtimeMode,
+      storageBackend,
+      storagePath: storageBackend === 'sqlite' ? sqliteFile : dataDir,
+      geoEnabled,
+      geoProvider: geoEnabled ? geoProvider : undefined,
+      geoKeyConfigured: Boolean(geoKey),
       logLevel: logger.level,
     });
-  });
+  }).catch((err) => fatal(err.message));
 
-  logger.plain('info', `Compressed: ${compressedEnabled ? formatCompressedStatus() : 'disabled by config'}`);
-  if (compressedEnabled && !compressedAvailable) {
-    logger.warn('compressed_unavailable', { codec: compressedCodec, ffmpeg: ffmpegPath });
-  }
+  setInterval(() => userHistory.record(clientLifecycleLog.activeCount()), 60 * 1000);
   setInterval(broadcastStreamStats, 250);
   if (compressedEnabled) {
     setInterval(() => compressed.writeSilenceKeepalive(streams, opusKeepaliveMs), opusKeepaliveMs);
   }
 }
 
-function publicStreamStatus(stream) {
-  const activeListeners = getActiveListeners(stream);
-  const lastHeard = getLastHeard(stream, Date.now());
+let streamUpdateQueue = Promise.resolve();
+
+function replaceStreamsFromAdmin(payload) {
+  const operation = streamUpdateQueue.then(() => applyStreamReplacement(payload));
+  streamUpdateQueue = operation.catch(() => {});
+  return operation;
+}
+
+function reloadStreamsFromDisk() {
+  const operation = streamUpdateQueue.then(() => {
+    let payload;
+    try {
+      payload = JSON.parse(fs.readFileSync(path.resolve(configPath), 'utf8'));
+    } catch (err) {
+      const reloadError = new Error(`Could not read ${configPath}: ${err.message}`);
+      reloadError.statusCode = err.code === 'ENOENT' ? 404 : 400;
+      throw reloadError;
+    }
+    return applyStreamReplacement(payload);
+  });
+  streamUpdateQueue = operation.catch(() => {});
+  return operation;
+}
+
+async function applyStreamReplacement(payload) {
+  let candidateStreams;
+  try {
+    candidateStreams = loadStreamsFromConfig(payload, {
+      configPath,
+      defaultUdpHost,
+      opusKeepaliveMs,
+    });
+    validateStreams(candidateStreams);
+  } catch (err) {
+    const validationError = new Error(err.message);
+    validationError.statusCode = 400;
+    throw validationError;
+  }
+
+  const resolvedConfigPath = path.resolve(configPath);
+  const temporaryConfigPath = `${resolvedConfigPath}.${process.pid}.tmp`;
+  const serializedConfig = `${JSON.stringify({ streams: candidateStreams.map(streamFileEntry) }, null, 2)}\n`;
+  try {
+    fs.mkdirSync(path.dirname(resolvedConfigPath), { recursive: true });
+    fs.writeFileSync(temporaryConfigPath, serializedConfig, { mode: 0o600 });
+  } catch (err) {
+    const saveError = new Error(`Could not stage ${configPath}: ${err.message}`);
+    saveError.statusCode = 500;
+    throw saveError;
+  }
+
+  const previousStreams = streams;
+  if (canUpdateStreamsInPlace(previousStreams, candidateStreams)) {
+    try {
+      fs.renameSync(temporaryConfigPath, resolvedConfigPath);
+    } catch (err) {
+      safeUnlink(temporaryConfigPath);
+      const saveError = new Error(`Could not save ${configPath}: ${err.message}`);
+      saveError.statusCode = 500;
+      throw saveError;
+    }
+    for (let index = 0; index < previousStreams.length; index += 1) {
+      previousStreams[index].label = candidateStreams[index].label;
+      broadcastControlEvent(previousStreams[index], {
+        type: 'streamUpdated',
+        stream: publicStreamState(previousStreams[index]),
+      });
+    }
+    logger.info('streams_reloaded', {
+      count: streams.length,
+      names: streams.map((stream) => stream.name).join(','),
+      listenersPreserved: true,
+    });
+    return {
+      ok: true,
+      message: `${streams.length} stream${streams.length === 1 ? '' : 's'} updated without interrupting listeners.`,
+      streams: streams.map(adminStreamState),
+    };
+  }
+
+  await closeUdpServers(previousStreams);
+
+  try {
+    await bindUdpServers(candidateStreams);
+  } catch (err) {
+    await closeUdpServers(candidateStreams);
+    try {
+      await bindUdpServers(previousStreams);
+    } catch (rollbackError) {
+      logger.error('stream_reload_rollback_failed', { error: rollbackError.message });
+    }
+    safeUnlink(temporaryConfigPath);
+    const bindError = new Error(`${err.message}. The previous stream configuration was restored.`);
+    bindError.statusCode = 409;
+    throw bindError;
+  }
+
+  try {
+    fs.renameSync(temporaryConfigPath, resolvedConfigPath);
+  } catch (err) {
+    await closeUdpServers(candidateStreams);
+    await bindUdpServers(previousStreams);
+    safeUnlink(temporaryConfigPath);
+    const saveError = new Error(`Could not save ${configPath}: ${err.message}`);
+    saveError.statusCode = 500;
+    throw saveError;
+  }
+
+  notifyStructuralStreamChanges(previousStreams, candidateStreams);
+  lastHeardStore.apply(candidateStreams);
+  streams = candidateStreams;
+  streamsByName.clear();
+  for (const stream of streams) streamsByName.set(stream.name, stream);
+
+  nativeMultiAac.cleanupAll();
+  for (const stream of previousStreams) closeStreamClients(stream);
+
+  logger.info('streams_reloaded', {
+    count: streams.length,
+    names: streams.map((stream) => stream.name).join(','),
+  });
+  return {
+    ok: true,
+    message: `${streams.length} stream${streams.length === 1 ? '' : 's'} applied without restarting the server.`,
+    streams: streams.map(adminStreamState),
+  };
+}
+
+function canUpdateStreamsInPlace(currentStreams, candidateStreams) {
+  if (currentStreams.length !== candidateStreams.length) return false;
+  return currentStreams.every((stream, index) => {
+    const candidate = candidateStreams[index];
+    return hasSameStreamTransport(stream, candidate);
+  });
+}
+
+function closeUdpServers(items) {
+  return Promise.all(items.map((stream) => new Promise((resolve) => {
+    const udpServer = stream.udpServer;
+    stream.udpServer = null;
+    if (!udpServer) {
+      resolve();
+      return;
+    }
+    try {
+      udpServer.close(resolve);
+    } catch {
+      resolve();
+    }
+  })));
+}
+
+function closeStreamClients(stream) {
+  for (const socket of Array.from(stream.controlClients.keys())) {
+    socket.end();
+    const destroyTimer = setTimeout(() => socket.destroy(), 250);
+    if (typeof destroyTimer.unref === 'function') destroyTimer.unref();
+  }
+  for (const socket of Array.from(stream.rawClients.keys())) socket.destroy();
+  for (const client of Array.from(stream.opusClients)) compressed.cleanupClient(stream, client);
+  stream.controlClients.clear();
+  stream.monitorClients.clear();
+  stream.rawClients.clear();
+  stream.listenerStats.clear();
+}
+
+function notifyStructuralStreamChanges(previousStreams, candidateStreams) {
+  const candidateByName = new Map(candidateStreams.map((stream) => [stream.name, stream]));
+  const catalog = candidateStreams.map(publicStreamState);
+
+  for (const stream of previousStreams) {
+    const candidate = candidateByName.get(stream.name);
+    const unavailable = !candidate || !hasSameStreamTransport(stream, candidate);
+    for (const socket of stream.controlClients.keys()) {
+      if (socket.destroyed) continue;
+      if (stream.monitorClients.has(socket)) {
+        sendWsJson(socket, {
+          type: 'streamCatalogChanged',
+          streams: catalog,
+        });
+      } else if (unavailable) {
+        sendWsJson(socket, {
+          type: 'streamUnavailable',
+          reason: candidate ? 'configuration_changed' : 'removed',
+          stream: publicStreamState(stream),
+          redirectTo: '/',
+        });
+      } else if (candidate.label !== stream.label) {
+        sendWsJson(socket, {
+          type: 'streamUpdated',
+          stream: publicStreamState(candidate),
+        });
+      }
+    }
+  }
+}
+
+function broadcastControlEvent(stream, event) {
+  for (const socket of stream.controlClients.keys()) {
+    if (!socket.destroyed) sendWsJson(socket, event);
+  }
+}
+
+function publicStreamState(stream) {
   return {
     name: stream.name,
     label: stream.label,
     sampleRate: stream.sampleRate,
     channels: stream.channels,
-    activeListeners: activeListeners.length,
-    lastHeardAt: lastHeard.at,
-    lastHeardLabel: lastHeard.label,
-    secondsSinceLastHeard: lastHeard.secondsSince,
-    hasUdp: stream.packetCount > 0,
-    url: `/${stream.name}`,
-    compressedEnabled,
-    compressedAvailable,
-    compressedCodec,
-    adpcmAvailable: compressedEnabled,
-    adpcmFrameMs,
-    opusAvailable,
-    aacAvailable: opusAvailable && compressedCodec === 'aac',
-    hlsAvailable: opusAvailable && compressedCodec === 'hls',
-    tlsEnabled,
-    softwareVersion: SOFTWARE_VERSION,
-    serverInstanceId,
   };
+}
+
+function hasSameStreamTransport(stream, candidate) {
+  return stream.name === candidate.name
+    && stream.udpHost === candidate.udpHost
+    && stream.udpPort === candidate.udpPort
+    && stream.sampleRate === candidate.sampleRate
+    && stream.channels === candidate.channels;
+}
+
+function streamFileEntry(stream) {
+  return {
+    name: stream.name,
+    label: stream.label,
+    udpHost: stream.udpHost,
+    udpPort: stream.udpPort,
+    sampleRate: stream.sampleRate,
+    channels: stream.channels,
+  };
+}
+
+function adminStreamState(stream) {
+  return {
+    ...streamFileEntry(stream),
+    activeListeners: getActiveListeners(stream).length,
+    hasUdp: stream.packetCount > 0,
+    lastUdpAt: stream.lastUdpAt,
+  };
+}
+
+function getWebAdminState() {
+  return {
+    version: SOFTWARE_VERSION,
+    uptimeSeconds: Math.floor(process.uptime()),
+    activeUsers: clientLifecycleLog.activeCount(),
+    configPath,
+    runtimeMode,
+    streams: streams.map(adminStreamState),
+    userHistory: userHistory.snapshot(),
+  };
+}
+
+function safeUnlink(filePath) {
+  try {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch (err) {
+    logger.warn('temporary_file_cleanup_failed', { path: filePath, error: err.message });
+  }
 }
 
 function streamConfig(stream) {
@@ -665,6 +1146,22 @@ function formatUrl(protocol, host, port) {
   return `${protocol}://${host}${port === defaultPort ? '' : `:${port}`}`;
 }
 
+function isLoopbackHost(host) {
+  const normalized = String(host).trim().toLowerCase();
+  return normalized === '127.0.0.1' || normalized === '::1' || normalized === 'localhost';
+}
+
+function isOverlappingHost(first, second) {
+  const normalizedFirst = String(first).trim().toLowerCase();
+  const normalizedSecond = String(second).trim().toLowerCase();
+  return normalizedFirst === normalizedSecond
+    || (isLoopbackHost(normalizedFirst) && isLoopbackHost(normalizedSecond))
+    || normalizedFirst === '0.0.0.0'
+    || normalizedSecond === '0.0.0.0'
+    || normalizedFirst === '::'
+    || normalizedSecond === '::';
+}
+
 function formatStreamStartupLine(stream) {
   const channelLabel = stream.channels === 1 ? 'mono' : 'stereo';
   return `Stream: ${stream.name} ( ${stream.udpHost}:${stream.udpPort} ) -> /${stream.name} (${stream.label}) ${channelLabel} @ ${stream.sampleRate} Hz`;
@@ -716,4 +1213,142 @@ function securityHeaders() {
 function fatal(message) {
   logger.error('fatal', { message });
   process.exit(1);
+}
+
+function warnWhenJsonStorageIsActive() {
+  if (storageBackend !== 'json') return;
+  const separator = '############################################################';
+  logger.plain('warn', [
+    separator,
+    'Storage recommendation: SQLite is recommended for production.',
+    `  Current storage: JSON files in ${dataDir}`,
+    `  Recommended storage: SQLite database at ${sqliteFile}`,
+    `  Node.js version: ${process.versions.node}`,
+    `  ${getSqliteRuntimeGuidance(process.versions.node)}`,
+    '  To migrate: stop the server, then run: node server.js --migrate sqlite',
+    '  The migration keeps the old JSON files and updates [storage].backend in server.conf after confirmation.',
+    separator,
+  ].join('\n'));
+}
+
+function getSqliteRuntimeGuidance(version) {
+  const [major, minor] = String(version).split('.').map((part) => Number(part));
+  if (major === 18) {
+    return 'Node 18 needs npm install better-sqlite3, or upgrade to Node 22.13+ for built-in node:sqlite.';
+  }
+  if (major > 22 || (major === 22 && minor >= 13)) {
+    return 'This Node version includes node:sqlite without extra SQLite packages.';
+  }
+  if (major === 22) {
+    return 'Upgrade to Node 22.13+ for node:sqlite without flags, or run npm install better-sqlite3.';
+  }
+  return 'Run npm install better-sqlite3, or use Node 22.13+ for built-in node:sqlite.';
+}
+
+function getOppositeStorageBackend(backend) {
+  return backend === 'json' ? 'sqlite' : 'json';
+}
+
+function confirmStorageMigration({ source, target, serverConfigPath, sqliteFile }) {
+  logger.plain('warn', [
+    'Storage migration requested.',
+    `  From: ${source}`,
+    `  To: ${target}`,
+    `  Server config to update: ${serverConfigPath}`,
+    `  SQLite file: ${sqliteFile}`,
+    '  Existing destination data will be merged. Source data will not be deleted.',
+  ].join('\n'));
+
+  const answer = readTerminalConfirmation(`Continue migration ${source} -> ${target}? Type Y to continue or N to cancel: `);
+  if (!['y', 'yes'].includes(answer.toLowerCase())) {
+    throw new Error('Storage migration cancelled by user.');
+  }
+}
+
+function readTerminalConfirmation(question) {
+  const device = process.platform === 'win32' ? 'CON' : '/dev/tty';
+  let fd;
+  try {
+    fd = fs.openSync(device, 'r+');
+    fs.writeSync(fd, question);
+    const buffer = Buffer.alloc(32);
+    const bytes = fs.readSync(fd, buffer, 0, buffer.length, null);
+    return buffer.subarray(0, bytes).toString('utf8').trim();
+  } catch (err) {
+    throw new Error(`Storage migration requires an interactive terminal confirmation. ${err.message}`);
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+function printHelp() {
+  process.stdout.write(`UDP Airband Server ${SOFTWARE_VERSION}
+
+Usage:
+  node server.js [options]
+  npm start -- [options]
+
+Core options:
+  --help, -h                    Show this help and exit.
+  -D                            Enable debug logging, timestamps, colors, and encoder output.
+  --server-config PATH          Server configuration file. Default: server.conf.
+  --server-conf PATH            Alias for --server-config.
+  --config PATH                 Streams configuration file. Overrides [streams].file.
+  --data-dir PATH               Directory for runtime data. Default: ./data.
+
+Storage:
+  --storage-backend BACKEND     Persistence backend: json or sqlite. Overrides [storage].backend.
+  --sqlite-file PATH            SQLite database path. Relative paths use --data-dir.
+  --migrate [json|sqlite]       Merge persisted data into the selected destination and exit.
+                                Without a value, migrates to the opposite backend.
+                                Requires Y/N confirmation and updates server.conf on success.
+
+Public web player:
+  --http-host HOST              Web player bind host. Overrides [web].host.
+  --http-port PORT              Web player port. Overrides [web].port.
+  --http PORT                   Alias for --http-port.
+
+Web Admin:
+  --webserver PORT              Enable Web Admin on PORT. Overrides [admin].enabled and [admin].port.
+  --webadmin PORT               Alias for --webserver.
+  --webadmin-host HOST          Web Admin bind host. Overrides [admin].host.
+
+UDP and streams:
+  --udp-host HOST               Default UDP bind host for streams without udpHost.
+
+Geolocation:
+  --geo-key VALUE               Reserved geolocation API key setting. ipwhois does not require it.
+
+TLS / HTTPS:
+  --ssl-enabled true|false      Enable HTTPS when valid key and cert are configured.
+  --tls-enabled true|false      Alias for --ssl-enabled.
+  --tls-key PATH                TLS private key path. Overrides [ssl].key.
+  --https-key PATH              Alias for --tls-key.
+  --tls-cert PATH               TLS certificate path. Overrides [ssl].cert.
+  --https-cert PATH             Alias for --tls-cert.
+
+Compressed audio:
+  --compressed-enabled true|false
+                                Enable or disable compressed audio modes.
+  --compressed-codec CODEC      Compressed codec: adpcm, opus, aac, or hls.
+  --codec CODEC                 Alias for --compressed-codec.
+  --adpcm-frame-ms MS           ADPCM frame duration, 10-100 ms. Default: 40.
+  --ffmpeg PATH                 ffmpeg executable path.
+  --opus-bitrate RATE           Opus bitrate for ffmpeg modes. Default: 24k.
+  --aac-bitrate RATE            AAC bitrate for native/compatible modes. Default: 32k.
+  --opus-keepalive-ms MS        Silence keepalive interval, 20-1000 ms.
+
+Logging:
+  --log-level LEVEL             off, error, warn, info, or debug.
+  --log-timestamps true|false   Add timestamps to logs.
+  --log-colors true|false       Color console log levels.
+
+Examples:
+  node server.js
+  node server.js -D
+  node server.js --webserver 8584
+  node server.js --migrate sqlite
+  node server.js --migrate
+  node server.js --config streams.json --http-host 0.0.0.0 --http-port 8585
+`);
 }

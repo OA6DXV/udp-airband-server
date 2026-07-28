@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.7 - 2026-07-28
+
+### English
+
+- Big release: added the Web Admin panel on a separate administration port, with live stream configuration editing, validation, reload/revert actions, and runtime-aware server controls.
+- Added Web Admin monitoring: online/restarting/offline state, 12-hour connected-user history, EN/ES UI, and a privacy-preserving listener geography map.
+- Added JSON/SQLite runtime persistence for user history, Last Heard, and geolocation cache, with bidirectional `--migrate [json|sqlite]` support and startup guidance.
+- Added live listener notifications for stream configuration changes, preserving active audio for label-only edits and guiding affected listeners back home when structural stream settings change.
+- Removed the public `/status` API and kept operational data inside Web Admin.
+- JSON remains available for compatibility in 1.7, but this is planned to be the last release where JSON is supported as the general runtime database. SQLite is recommended for production; install `better-sqlite3` on older Node.js or use Node.js 22.13+ / current Node.js for built-in `node:sqlite`.
+
+### Espanol
+
+- Big release: se agrego el panel Web Admin en un puerto separado de administracion, con edicion en vivo de streams, validacion, acciones de reload/revert y controles de servidor segun el entorno.
+- Se agrego monitoreo en Web Admin: estado online/restarting/offline, historial de usuarios conectados de 12 horas, interfaz EN/ES y mapa de geografia de oyentes con privacidad.
+- Se agrego persistencia JSON/SQLite para historial de usuarios, Last Heard y cache de geolocalizacion, con soporte bidireccional `--migrate [json|sqlite]` y guia al iniciar.
+- Se agregaron notificaciones en vivo para cambios de configuracion de streams, conservando audio activo cuando solo cambian etiquetas y guiando a los listeners afectados de vuelta al inicio cuando cambian ajustes estructurales.
+- Se elimino la API publica `/status` y la informacion operativa queda dentro de Web Admin.
+- JSON sigue disponible por compatibilidad en 1.7, pero esta planeada como la ultima version con soporte de JSON como base general de ejecucion. SQLite queda recomendado para produccion; instala `better-sqlite3` en Node.js antiguo o usa Node.js 22.13+ / Node.js actual para `node:sqlite` integrado.
+
 ## 1.6 - 2026-07-26
 
 ### English
