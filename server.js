@@ -192,10 +192,7 @@ if (webAdminEnabled) {
     ({ createAdminAuth, loadAdminAuthConfig } = require('./lib/admin-auth'));
     const adminSecrets = ensureAdminSecrets({ crypto, dataDir, env: process.env, fs, path });
     if (adminSecrets.generated) {
-      logger.warn('webadmin_secrets_generated', {
-        file: adminSecrets.filePath,
-        recommendation: 'keep this file private and include it in backups',
-      });
+      logGeneratedAdminSecrets(adminSecrets.filePath);
     }
     adminAuthConfig = loadAdminAuthConfig(adminSecrets.env);
     adminProxyTrust = createProxyTrust(adminSecrets.env.ADMIN_TRUSTED_PROXIES || '127.0.0.1,::1');
@@ -1244,6 +1241,20 @@ function fatal(message) {
   process.exit(1);
 }
 
+function logGeneratedAdminSecrets(filePath) {
+  const separator = '############################################################';
+  logger.plain('warn', [
+    separator,
+    'Web Admin secrets were generated automatically on first startup.',
+    '  File: ' + filePath,
+    '  Keep this file private and include it in backups.',
+    '  These secrets protect admin sessions, CSRF tokens, and ALTCHA challenges.',
+    '  You can replace them with custom ADMIN_AUTH_SECRET and ADMIN_ALTCHA_SECRET values.',
+    '  If you want custom secrets, configure them before creating admin users or accepting real admin sessions.',
+    '  Changing secrets later invalidates existing Web Admin sessions and login challenges.',
+    separator,
+  ].join('\n'));
+}
 function handleLegacyJsonRuntimeStorage(inspection) {
   if (!inspection || inspection.action === 'none') return;
   const separator = '############################################################';
