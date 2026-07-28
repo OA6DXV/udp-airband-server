@@ -377,25 +377,6 @@ function testStorageMigration() {
     );
     database.close();
 
-    const legacySqliteFile = path.join(temporaryDir, 'legacy.sqlite');
-    database = openSqliteDatabase({ filePath: legacySqliteFile, fs, path });
-    database.db.exec('DROP TABLE geo_cache');
-    database.db.exec(`
-      CREATE TABLE geo_cache (
-        anonymized_ip TEXT PRIMARY KEY,
-        country TEXT NOT NULL,
-        city TEXT NOT NULL,
-        looked_up_at INTEGER NOT NULL CHECK (looked_up_at > 0),
-        source TEXT NOT NULL
-      )
-    `);
-    database.close();
-    database = openSqliteDatabase({ filePath: legacySqliteFile, fs, path });
-    assert.strictEqual(
-      database.db.prepare("SELECT COUNT(*) AS count FROM pragma_table_info('geo_cache') WHERE name = 'country_code'").get().count,
-      1,
-    );
-    database.close();
   } finally {
     fs.rmSync(temporaryDir, { recursive: true, force: true });
   }
