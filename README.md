@@ -54,7 +54,7 @@ port = 8585
 [admin]
 host = 127.0.0.1
 port = 8584
-enabled = false
+enabled = true
 
 [streams]
 file = streams.json
@@ -96,7 +96,7 @@ Important fields:
 
 - `[udp].host`: default UDP bind address used by streams that do not define their own `udpHost`.
 - `[web].host` and `[web].port`: bind address and port for the browser interface. The same port is used for HTTP or HTTPS depending on `[ssl]`.
-- `[admin].enabled`: enables the separate Web Admin server. It remains `false` by default.
+- `[admin].enabled`: enables the separate Web Admin server. It is `true` by default and binds to loopback unless you change `[admin].host`.
 - `[admin].host` and `[admin].port`: bind address and port for Web Admin. Keep the default loopback host unless access is protected by an SSH tunnel or authenticated reverse proxy.
 - `[streams].file`: JSON file that defines the feeds.
 - `[storage].backend`: persistence backend for connected-user history, Last Heard values, and the geolocation cache. Supported values are `json` (default) and `sqlite`. SQLite is recommended for production.
@@ -127,7 +127,7 @@ node server.js --migrate sqlite
 node server.js --migrate json
 ```
 
-`--migrate` without a value uses `[storage].backend` as the destination. Migration shows the current source and target, asks for `Y/N` confirmation, merges with existing destination data, keeps the newest Last Heard and geolocation values, preserves history points, and does not delete the source. After a successful migration, the server updates `[storage].backend` in `server.conf` automatically.
+`--migrate` without a value migrates to the opposite backend: JSON installations migrate to SQLite, and SQLite installations migrate back to JSON. Migration shows the current source and target, asks for `Y/N` confirmation, merges with existing destination data, keeps the newest Last Heard and geolocation values, preserves history points, and does not delete the source. After a successful migration, the server updates `[storage].backend` in `server.conf` automatically.
 
 ### Optional Geolocation And Privacy
 
@@ -284,7 +284,7 @@ When `-D` is active, ffmpeg-backed encoders such as Opus, AAC, and HLS are start
 
 ## Web Admin
 
-The administration page is disabled by default and is not served from the public player port. It can be enabled persistently in `server.conf`:
+The administration page runs on a separate loopback-only port by default and is not served from the public player port. It can be configured in `server.conf`:
 
 ```conf
 [admin]
@@ -293,7 +293,7 @@ port = 8584
 enabled = true
 ```
 
-It can also be enabled for one run by passing a separate port:
+It can also be moved to another port for one run:
 
 ```bash
 node server.js --webserver 8584

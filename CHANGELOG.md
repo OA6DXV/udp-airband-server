@@ -5,7 +5,7 @@
 ### English
 
 - Started the 1.7 preview cycle.
-- Added an opt-in Web Admin server on a separate port, configurable from `[admin]` in `server.conf` or overridden at startup with `--webserver PORT` / `--webadmin PORT`.
+- Added a Web Admin server on a separate loopback-only port, configurable from `[admin]` in `server.conf` or overridden at startup with `--webserver PORT` / `--webadmin PORT`.
 - Added live `streams.json` editing from Web Admin, including validation, safe file writes, UDP socket rebinding, rollback on bind failure, and listener-preserving display-name updates.
 - Added a `Reload streams` action for applying disk changes without a full server restart, with a pending-change pulse after saved stream edits.
 - Added a `Discard changes` action to restore the latest loaded stream configuration before applying edits.
@@ -15,8 +15,8 @@
 - Added persistent unique-user history with a 12-hour administration chart.
 - Added `--help` / `-h` command-line documentation and refined Web Admin action buttons so Apply/Discard only enable when stream configuration really changed.
 - Added selectable JSON or SQLite runtime persistence for connected-user history and Last Heard values.
-- Added bidirectional, non-destructive `--migrate [json|sqlite]` storage migration with destination-data merging, interactive `Y/N` confirmation, and automatic `[storage].backend` updates in `server.conf`.
-- Kept JSON as the default runtime storage backend for compatibility, while recommending SQLite at startup with readable Node.js version-specific migration guidance.
+- Added bidirectional, non-destructive `--migrate [json|sqlite]` storage migration with destination-data merging, interactive `Y/N` confirmation, automatic opposite-backend selection when no target is provided, and automatic `[storage].backend` updates in `server.conf`.
+- Kept JSON as the default runtime storage backend for compatibility, while recommending SQLite at startup with a readable warning block and Node.js version-specific migration guidance.
 - Added privacy-preserving ipwhois geolocation enabled by default with `/24` IPv4 and `/48` IPv6 anonymization, a 30-day JSON/SQLite cache, local-address exclusion, request deduplication, and rate-limit backoff.
 - Extended storage migration to carry the geolocation cache bidirectionally without replacing newer destination records.
 - Changed the default Web Admin port to `8584`, removed the public `/status` API, and moved the reserved future API key setting to `[geo].key`.
@@ -25,7 +25,7 @@
 ### Espanol
 
 - Se inicio el ciclo preview de 1.7.
-- Se agrego un servidor Web Admin opcional en un puerto separado, configurable desde `[admin]` en `server.conf` o sobrescrito al iniciar con `--webserver PUERTO` / `--webadmin PUERTO`.
+- Se agrego un servidor Web Admin en un puerto separado solo en loopback, configurable desde `[admin]` en `server.conf` o sobrescrito al iniciar con `--webserver PUERTO` / `--webadmin PUERTO`.
 - Se agrego edicion en vivo de `streams.json` desde Web Admin, con validacion, escritura segura del archivo, reapertura de sockets UDP, restauracion ante errores de bind y cambios de nombres visibles sin interrumpir listeners.
 - Se agrego la accion `Reload streams` para aplicar cambios desde disco sin reiniciar todo el servidor, con parpadeo pendiente despues de guardar ediciones.
 - Se agrego la accion `Discard changes` para restaurar la ultima configuracion cargada antes de aplicar cambios.
@@ -35,8 +35,8 @@
 - Se agrego historial persistente de usuarios unicos con una grafica administrativa de 12 horas.
 - Se agrego documentacion de flags con `--help` / `-h` y se ajustaron los botones Apply/Discard para activarse solo cuando la configuracion de streams realmente cambio.
 - Se agrego persistencia seleccionable JSON o SQLite para el historial de usuarios conectados y los valores Last Heard.
-- Se agrego migracion bidireccional y no destructiva con `--migrate [json|sqlite]`, combinando los datos existentes en el destino, confirmacion interactiva `Y/N` y actualizacion automatica de `[storage].backend` en `server.conf`.
-- Se mantuvo JSON como backend de almacenamiento predeterminado por compatibilidad, recomendando SQLite al iniciar con una guia legible segun la version de Node.js.
+- Se agrego migracion bidireccional y no destructiva con `--migrate [json|sqlite]`, combinando los datos existentes en el destino, confirmacion interactiva `Y/N`, seleccion automatica del backend contrario cuando no se indica destino y actualizacion automatica de `[storage].backend` en `server.conf`.
+- Se mantuvo JSON como backend de almacenamiento predeterminado por compatibilidad, recomendando SQLite al iniciar con un bloque de warning legible segun la version de Node.js.
 - Se agrego geolocalizacion ipwhois activada por defecto con privacidad, anonimizacion IPv4 `/24` e IPv6 `/48`, cache JSON/SQLite de 30 dias, exclusion de direcciones locales, deduplicacion de consultas y pausa ante limites de la API.
 - Se amplio la migracion para transferir el cache de geolocalizacion en ambas direcciones sin reemplazar registros mas recientes en el destino.
 - Se cambio el puerto predeterminado de Web Admin a `8584`, se elimino la API publica `/status` y se movio el campo reservado de API key futura a `[geo].key`.

@@ -60,7 +60,7 @@ const serverConfigUpdated = ensureServerConfigDefaults(serverConfigPath, [
     keys: [
       { key: 'host', value: '127.0.0.1' },
       { key: 'port', value: '8584' },
-      { key: 'enabled', value: 'false' },
+      { key: 'enabled', value: 'true' },
     ],
   },
   {
@@ -145,7 +145,7 @@ try {
   fatal(err.message);
 }
 if (args.migrate !== undefined) {
-  const migrationTarget = args.migrate === true ? storageBackend : args.migrate;
+  const migrationTarget = args.migrate === true ? getOppositeStorageBackend(storageBackend) : args.migrate;
   try {
     const normalizedMigrationTarget = normalizeStorageBackend(migrationTarget);
     const migrationSource = normalizedMigrationTarget === 'sqlite' ? 'json' : 'sqlite';
@@ -1151,14 +1151,18 @@ function fatal(message) {
 
 function warnWhenJsonStorageIsActive() {
   if (storageBackend !== 'json') return;
+  const separator = '############################################################';
   logger.plain('warn', [
+    separator,
     'Storage recommendation: SQLite is recommended for production.',
+    separator,
     `  Current storage: JSON files in ${dataDir}`,
     `  Recommended storage: SQLite database at ${sqliteFile}`,
     `  Node.js version: ${process.versions.node}`,
     `  ${getSqliteRuntimeGuidance(process.versions.node)}`,
     '  To migrate: stop the server, then run: node server.js --migrate sqlite',
     '  The migration keeps the old JSON files and updates [storage].backend in server.conf after confirmation.',
+    separator,
   ].join('\n'));
 }
 
@@ -1174,6 +1178,10 @@ function getSqliteRuntimeGuidance(version) {
     return 'Upgrade to Node 22.13+ for node:sqlite without flags, or run npm install for better-sqlite3.';
   }
   return 'Run npm install for better-sqlite3, or use Node 22.13+ for built-in node:sqlite.';
+}
+
+function getOppositeStorageBackend(backend) {
+  return backend === 'json' ? 'sqlite' : 'json';
 }
 
 function confirmStorageMigration({ source, target, serverConfigPath, sqliteFile }) {
@@ -1227,7 +1235,7 @@ Storage:
   --storage-backend BACKEND     Persistence backend: json or sqlite. Overrides [storage].backend.
   --sqlite-file PATH            SQLite database path. Relative paths use --data-dir.
   --migrate [json|sqlite]       Merge persisted data into the selected destination and exit.
-                                Without a value, the destination is [storage].backend.
+                                Without a value, migrates to the opposite backend.
                                 Requires Y/N confirmation and updates server.conf on success.
 
 Public web player:

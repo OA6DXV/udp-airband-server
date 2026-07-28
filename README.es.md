@@ -54,7 +54,7 @@ port = 8585
 [admin]
 host = 127.0.0.1
 port = 8584
-enabled = false
+enabled = true
 
 [streams]
 file = streams.json
@@ -96,7 +96,7 @@ Campos importantes:
 
 - `[udp].host`: direccion UDP predeterminada para streams que no definan su propio `udpHost`.
 - `[web].host` y `[web].port`: direccion y puerto para la interfaz web. El mismo puerto se usa para HTTP o HTTPS segun `[ssl]`.
-- `[admin].enabled`: activa el servidor Web Admin separado. Se mantiene en `false` por defecto.
+- `[admin].enabled`: activa el servidor Web Admin separado. Esta en `true` por defecto y queda enlazado a loopback salvo que cambies `[admin].host`.
 - `[admin].host` y `[admin].port`: direccion y puerto de Web Admin. Conserva el host loopback predeterminado salvo que el acceso este protegido por un tunel SSH o reverse proxy autenticado.
 - `[streams].file`: archivo JSON que define los feeds.
 - `[storage].backend`: backend de persistencia para el historial de usuarios conectados, los valores Last Heard y el cache de geolocalizacion. Los valores soportados son `json` (predeterminado) y `sqlite`. SQLite se recomienda para produccion.
@@ -127,7 +127,7 @@ node server.js --migrate sqlite
 node server.js --migrate json
 ```
 
-`--migrate` sin valor utiliza `[storage].backend` como destino. La migracion muestra el origen y destino, pide confirmacion `Y/N`, combina los datos que ya existan en el destino, conserva los valores Last Heard y de geolocalizacion mas recientes, mantiene los puntos del historial y no borra el origen. Despues de una migracion exitosa, el servidor actualiza automaticamente `[storage].backend` en `server.conf`.
+`--migrate` sin valor migra al backend contrario: instalaciones JSON migran a SQLite, e instalaciones SQLite vuelven a JSON. La migracion muestra el origen y destino, pide confirmacion `Y/N`, combina los datos que ya existan en el destino, conserva los valores Last Heard y de geolocalizacion mas recientes, mantiene los puntos del historial y no borra el origen. Despues de una migracion exitosa, el servidor actualiza automaticamente `[storage].backend` en `server.conf`.
 
 ### Geolocalizacion Opcional Y Privacidad
 
@@ -284,7 +284,7 @@ Cuando `-D` esta activo, los encoders basados en ffmpeg como Opus, AAC y HLS se 
 
 ## Administracion Web
 
-La pagina de administracion esta desactivada por defecto y no se publica desde el puerto del reproductor. Puede activarse de forma persistente en `server.conf`:
+La pagina de administracion corre por defecto en un puerto separado solo en loopback y no se publica desde el puerto del reproductor. Puede configurarse en `server.conf`:
 
 ```conf
 [admin]
@@ -293,7 +293,7 @@ port = 8584
 enabled = true
 ```
 
-Tambien puede habilitarse para una ejecucion indicando un puerto separado:
+Tambien puede moverse a otro puerto para una ejecucion:
 
 ```bash
 node server.js --webserver 8584
