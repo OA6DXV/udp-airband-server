@@ -3,3 +3,6 @@ npm-debug.log*
 .DS_Store
 server.conf
 data/
+.env
+.env.*
+!.env.example

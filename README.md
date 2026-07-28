@@ -60,7 +60,6 @@ enabled = true
 file = streams.json
 
 [storage]
-backend = json
 sqlite_file = localdb.sqlite
 
 [geo]
@@ -99,7 +98,6 @@ Important fields:
 - `[admin].enabled`: enables the separate Web Admin server. It is `true` by default and binds to loopback unless you change `[admin].host`.
 - `[admin].host` and `[admin].port`: bind address and port for Web Admin. Keep the default loopback host unless access is protected by an SSH tunnel or authenticated reverse proxy.
 - `[streams].file`: JSON file that defines the feeds.
-- `[storage].backend`: persistence backend for connected-user history, Last Heard values, and the geolocation cache. Supported values are `json` (default) and `sqlite`. SQLite is recommended for production.
 - `[storage].sqlite_file`: SQLite database path. Relative paths are resolved inside the runtime data directory (`data/` by default).
 - `[geo].enabled`: enables server-side IP geolocation through ipwhois. It is enabled by default and keeps public IPs anonymized before storage.
 - `[geo].key`: reserved for future geolocation providers that require an API key. ipwhois does not require one, so this can remain empty.
@@ -113,23 +111,15 @@ Important fields:
 - `[compressed].enabled`: set to `false` to disable all compressed modes and their transcoding/framing logic.
 - `[compressed].codec`: compressed mode backend. `adpcm` is the default low-latency option and does not require `ffmpeg`.
 
-JSON storage is the compatibility default and uses `data/user-history.json`, `data/last-heard.json`, and `data/geo-cache.json`. SQLite is recommended for production and stores runtime data in `data/localdb.sqlite` by default.
+Runtime metrics, Last Heard values, geolocation data, and Web Admin authentication are stored exclusively in SQLite at `data/localdb.sqlite` by default. On Node.js 22.13+ (including Node 24), the built-in `node:sqlite` module is used automatically with no warning or extra package. Older Node.js installations must install the compatibility driver with `npm install better-sqlite3`.
 
-Version 1.7 is planned to be the final release that supports JSON as the general runtime database. New production installs should migrate to SQLite by installing `better-sqlite3` on older Node.js versions, or by running Node.js 22.13+ / current Node.js with built-in `node:sqlite`.
-
-When JSON storage is active, the server prints a readable startup warning with the current Node.js version and migration guidance. On Node 18, install the optional compatibility driver with `npm install better-sqlite3` before using SQLite. On Node 22.13+ the built-in `node:sqlite` module is available, so no extra SQLite package is required.
-
-To migrate existing data, first stop the running server and use one of these commands:
+If an upgrade detects legacy `data/user-history.json`, `data/last-heard.json`, or `data/geo-cache.json` files, startup prints a migration warning. Stop the server and run:
 
 ```bash
-# JSON to SQLite
-node server.js --migrate sqlite
-
-# SQLite to JSON
-node server.js --migrate json
+node server.js --migrate
 ```
 
-`--migrate` without a value migrates to the opposite backend: JSON installations migrate to SQLite, and SQLite installations migrate back to JSON. Migration shows the current source and target, asks for `Y/N` confirmation, merges with existing destination data, keeps the newest Last Heard and geolocation values, preserves history points, and does not delete the source. After a successful migration, the server updates `[storage].backend` in `server.conf` automatically.
+Migration is one-way from JSON to SQLite. It asks for `Y/N` confirmation, merges legacy records into the SQLite database, and moves the source JSON files into a timestamped `data/legacy-json-backups/` directory. SQLite-to-JSON migration is no longer supported.
 
 ### Optional Geolocation And Privacy
 
@@ -295,6 +285,65 @@ port = 8584
 enabled = true
 ```
 
+Web Admin requires an administrator stored in the same SQLite runtime database. Authentication uses a singleton administrator, scrypt password hashing, server-side SQLite sessions, CSRF protection, account/IP rate limits, and self-hosted ALTCHA Proof-of-Work v2 after three failed logins. Session tokens and ALTCHA secrets are never stored in browser storage.
+
+Install dependencies, generate two independent secrets, and keep the resulting environment file readable only by the service account:
+
+```bash
+npm install
+sudo install -m 600 -o airband -g airband /dev/null /etc/udp-airband-admin.env
+printf 'ADMIN_AUTH_SECRET=%s\n' "$(openssl rand -base64 48)" | sudo tee -a /etc/udp-airband-admin.env >/dev/null
+printf 'ADMIN_ALTCHA_SECRET=%s\n' "$(openssl rand -base64 48)" | sudo tee -a /etc/udp-airband-admin.env >/dev/null
+printf 'ADMIN_TRUSTED_PROXIES=127.0.0.1,::1\n' | sudo tee -a /etc/udp-airband-admin.env >/dev/null
+```
+
+Create or replace the only administrator interactively. The password is read without echo and is never accepted as a command-line argument:
+
+```bash
+npm run admin:setup
+```
+
+If custom paths are used:
+
+```bash
+npm run admin:setup -- --server-config /opt/udp-airband-server/server.conf --data-dir /opt/udp-airband-server/data
+```
+
+Add the protected environment file to the `systemd` service:
+
+```ini
+[Service]
+EnvironmentFile=/etc/udp-airband-admin.env
+```
+
+The complete list of supported authentication settings and safe defaults is in [`.env.example`](.env.example). Both secrets must contain at least 32 bytes and must be different. Startup fails while Web Admin is enabled if secrets, rate limits, ALTCHA parameters, or trusted-proxy ranges are unsafe. The default session lasts 8 hours with a 30-minute inactivity timeout. Login limits are 20 attempts per IP and 15 per account in 15 minutes. Challenge generation is limited to 10 per IP and 10 per account per minute. Responses over those limits use HTTP `429` and `Retry-After`.
+
+### Reverse proxy and Cloudflare
+
+Keep Node bound to `127.0.0.1:8584`; do not expose that port in the firewall. Cloudflare should use **Full (strict)** to a valid certificate on Apache. Apache may proxy HTTPS publicly to Node over loopback HTTP. Enable `proxy`, `proxy_http`, `headers`, and `remoteip`, then configure the virtual host along these lines:
+
+```apache
+RemoteIPHeader CF-Connecting-IP
+# Add every current Cloudflare IPv4 and IPv6 range as RemoteIPTrustedProxy.
+RemoteIPTrustedProxy 173.245.48.0/20
+# ...remaining current Cloudflare ranges...
+
+ProxyPreserveHost On
+ProxyPass        / http://127.0.0.1:8584/
+ProxyPassReverse / http://127.0.0.1:8584/
+
+# Overwrite, never append, the values passed to Node.
+RequestHeader set X-Forwarded-For "expr=%{REMOTE_ADDR}"
+RequestHeader set X-Forwarded-Host "expr=%{HTTP_HOST}"
+RequestHeader set X-Forwarded-Proto "https"
+```
+
+Download the complete, current Cloudflare ranges from `https://www.cloudflare.com/ips/`; the single range above is only a syntax example. Run `apache2ctl configtest` before reloading Apache. `ADMIN_TRUSTED_PROXIES` must contain only the address or CIDR of the proxy that connects directly to Node. With Apache on the same host, keep `127.0.0.1,::1`. Do not put Cloudflare ranges there unless Cloudflare connects directly to Node.
+
+Node ignores `CF-Connecting-IP`, `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto` when the immediate peer is not trusted. The proxy must overwrite forwarded headers so a browser cannot choose its own rate-limit IP. A trusted `X-Forwarded-Proto: https` marks the session cookie `Secure` while preserving HTTP on the internal Apache-to-Node hop; Node does not redirect that internal request.
+
+The failed-login flow is persistent: attempts 1-3 check the password without ALTCHA; the third failure enables the challenge requirement; attempt 4 and every later attempt must consume a fresh, short-lived challenge before password hashing. Waiting or changing IP does not clear it. Only a successful login resets the account counter. A successful login also invalidates previous sessions for this single-administrator panel.
+
 It can also be moved to another port for one run:
 
 ```bash
@@ -313,13 +362,14 @@ Then open `http://127.0.0.1:8584/` in the local browser. Do not expose this port
 
 Applying stream changes validates the complete configuration, updates `streams.json`, and rebinds UDP inputs without restarting Node. The yellow **Reload streams** button rereads changes made directly to `streams.json` and applies them through the same validation and rollback path. Display-name-only changes preserve current listeners. Changes to routes or audio inputs reconnect affected browser audio sessions. If a new UDP port cannot be bound, the previous runtime configuration and file are restored.
 
-The connected-user chart uses the server's internal unique client counter instead of parsing logs. One-minute samples are retained for 12 hours in the selected JSON or SQLite storage backend.
+The connected-user chart uses the server's internal unique client counter instead of parsing logs. One-minute samples are retained for 12 hours in SQLite.
 
 The restart button sends the process a graceful termination signal after confirmation. Web Admin detects `systemd` from its runtime environment and warns whether the service must be configured for automatic restart or the console process will need to be started manually. A `systemd` unit should include, for example:
 
 ```ini
 [Service]
 ExecStart=/usr/bin/node /opt/udp-airband-server/server.js --webserver 8584
+EnvironmentFile=/etc/udp-airband-admin.env
 Restart=on-failure
 ```
 
@@ -419,7 +469,7 @@ The stream page shows listener count, UDP/stream state, buffering, bandwidth, la
 
 When the stream has been validated by at least one UDP packet, the status changes to `Connected`. Pressing `Connected` switches the page to `Push to Reconnect`, closes only the audio stream socket, and stops bandwidth consumption without closing the web page or the control/status connection. Pressing `Push to Reconnect` resumes the same mode that was active before pausing.
 
-Last transmission time is tracked by the server and persisted in the selected JSON or SQLite storage backend, so the home page and new listeners can still see the latest known activity after a server restart.
+Last transmission time is tracked by the server and persisted in SQLite, so the home page and new listeners can still see the latest known activity after a server restart.
 
 The home page lists all configured feeds under `Real-time Airband audio streams`, shows the active user count, language selector, route, channel/sample-rate information, and the server-side last transmission time for each feed.
 

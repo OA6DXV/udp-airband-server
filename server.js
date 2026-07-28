@@ -10,6 +10,8 @@ const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 
+const { createAdminAuth, loadAdminAuthConfig } = require('./lib/admin-auth');
+const { createProxyTrust, resolveRequestContext } = require('./lib/proxy-trust');
 const { normalizeClientId } = require('./lib/clients');
 const {
   ensureServerConfigDefaults,
@@ -17,7 +19,6 @@ const {
   loadServerConfig,
   parseArgs,
   parseBoolean,
-  setServerConfigSetting,
 } = require('./lib/config');
 const {
   addListenerBytes,
@@ -37,13 +38,13 @@ const { createGeoService } = require('./lib/geo-service');
 const { aggregateGeoStats } = require('./lib/geo-stats');
 const { createNativeMultiAac } = require('./lib/native-multi-aac');
 const { detectRuntimeMode } = require('./lib/runtime');
-const { createStorage, normalizeStorageBackend } = require('./lib/storage');
-const { migrateStorage } = require('./lib/storage-migration');
-const { createWebAdmin } = require('./lib/web-admin');
+const { createStorage } = require('./lib/storage');
+const { findLegacyJsonFiles, migrateStorage } = require('./lib/storage-migration');
+const { createWebAdmin } = require('./lib/web-admin-secure');
 
 const MAX_SOCKET_BUFFER_BYTES = 1024 * 1024;
 const MAX_OPUS_STDIN_BUFFER_BYTES = 512 * 1024;
-const SOFTWARE_VERSION = '1.7';
+const SOFTWARE_VERSION = '1.8-unstable';
 const COMPRESSED_CODECS = new Set(['adpcm', 'opus', 'aac', 'hls']);
 const serverInstanceId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
 
@@ -66,9 +67,8 @@ const serverConfigUpdated = ensureServerConfigDefaults(serverConfigPath, [
   },
   {
     name: 'storage',
-    comments: ['Runtime persistence backend. Supported values: json and sqlite.'],
+    comments: ['Runtime metrics, Last Heard, geolocation, and Web Admin authentication use SQLite.'],
     keys: [
-      { key: 'backend', value: 'json' },
       { key: 'sqlite_file', value: 'localdb.sqlite' },
     ],
   },
@@ -108,7 +108,6 @@ const webAdminHost = String(args.webadminHost || adminConfigHost);
 const webAdminConfigOverridden = Boolean(webAdminCliFlag || args.webadminHost !== undefined);
 const configPath = args.config || getSetting(serverConfig, 'streams.file', 'streams.json');
 const dataDir = path.resolve(args.dataDir || path.join(__dirname, 'data'));
-const storageBackendSetting = args.storageBackend || getSetting(serverConfig, 'storage.backend', 'json');
 const sqliteFileSetting = String(
   args.sqliteFile || getSetting(serverConfig, 'storage.sqliteFile', '') || 'localdb.sqlite',
 ).trim();
@@ -139,53 +138,39 @@ const logTimestamps = parseBoolean(args.logTimestamps !== undefined ? args.logTi
 const logColors = parseBoolean(args.logColors !== undefined ? args.logColors : (debugEnabled ? true : getSetting(serverConfig, 'logging.colors', false)));
 const logger = createLogger({ debug: debugEnabled, level: logLevel, timestamps: logTimestamps, colors: logColors });
 const runtimeMode = detectRuntimeMode();
-let storageBackend;
-try {
-  storageBackend = normalizeStorageBackend(storageBackendSetting);
-} catch (err) {
-  fatal(err.message);
+if (args.storageBackend !== undefined) {
+  fatal('--storage-backend was removed in 1.8 because runtime persistence now uses SQLite exclusively.');
 }
 if (args.migrate !== undefined) {
-  const migrationTarget = args.migrate === true ? getOppositeStorageBackend(storageBackend) : args.migrate;
   try {
-    const normalizedMigrationTarget = normalizeStorageBackend(migrationTarget);
-    const migrationSource = normalizedMigrationTarget === 'sqlite' ? 'json' : 'sqlite';
-    confirmStorageMigration({
-      source: migrationSource,
-      target: normalizedMigrationTarget,
-      serverConfigPath,
-      sqliteFile,
-    });
+    if (args.migrate !== true && String(args.migrate).trim().toLowerCase() !== 'sqlite') {
+      throw new Error('--migrate only supports JSON to SQLite. Use --migrate or --migrate sqlite.');
+    }
+    confirmStorageMigration({ serverConfigPath, sqliteFile });
     const result = migrateStorage({
       dataDir,
       fs,
       logger,
       path,
       sqliteFile,
-      target: normalizedMigrationTarget,
-    });
-    setServerConfigSetting(serverConfigPath, 'storage', 'backend', normalizedMigrationTarget, fs, path);
-    logger.warn('storage_backend_config_updated', {
-      serverConfig: serverConfigPath,
-      storageBackend: normalizedMigrationTarget,
     });
     logger.info('storage_migration_summary', {
-      from: migrationSource,
-      to: normalizedMigrationTarget,
+      from: 'json',
+      to: 'sqlite',
       userHistory: result.userHistory,
       lastHeard: result.lastHeard,
       geoCache: result.geoCache,
+      jsonBackup: result.backupDir,
     });
     process.exit(0);
   } catch (err) {
     fatal(`Storage migration failed: ${err.message}`);
   }
 }
-warnWhenJsonStorageIsActive();
+warnWhenLegacyJsonStorageExists();
 let storage;
 try {
   storage = createStorage({
-    backend: storageBackend,
     dataDir,
     fs,
     logger,
@@ -194,6 +179,17 @@ try {
   });
 } catch (err) {
   fatal(err.message);
+}
+const adminDatabase = webAdminEnabled ? storage.database : null;
+let adminAuthConfig = null;
+let adminProxyTrust = null;
+if (webAdminEnabled) {
+  try {
+    adminAuthConfig = loadAdminAuthConfig(process.env);
+    adminProxyTrust = createProxyTrust(process.env.ADMIN_TRUSTED_PROXIES || '127.0.0.1,::1');
+  } catch (err) {
+    fatal(`Web Admin authentication configuration is unsafe: ${err.message}`);
+  }
 }
 const userHistory = storage.createUserHistory();
 const geoCache = storage.createGeoCache();
@@ -251,6 +247,12 @@ const multiJs = fs.readFileSync(path.join(publicDir, 'assets', 'multi.js'));
 const faviconIco = fs.readFileSync(path.join(publicDir, 'assets', 'favicon.ico'));
 const adminAssets = webAdminEnabled ? {
   html: fs.readFileSync(path.join(publicDir, 'admin', 'index.html')),
+  loginHtml: fs.readFileSync(path.join(publicDir, 'admin', 'login.html')),
+  loginJs: fs.readFileSync(path.join(publicDir, 'admin', 'login.js')),
+  loginCss: fs.readFileSync(path.join(publicDir, 'admin', 'login.css')),
+  altchaJs: fs.readFileSync(path.join(publicDir, 'node_modules', 'altcha', 'dist', 'external', 'altcha.js')),
+  altchaCss: fs.readFileSync(path.join(publicDir, 'node_modules', 'altcha', 'dist', 'external', 'altcha.css')),
+  altchaPbkdf2Worker: fs.readFileSync(path.join(publicDir, 'node_modules', 'altcha', 'dist', 'workers', 'pbkdf2.js')),
   usersHtml: fs.readFileSync(path.join(publicDir, 'admin', 'users.html'), 'utf8')
     .replace('__SOFTWARE_VERSION__', SOFTWARE_VERSION),
   usersJs: fs.readFileSync(path.join(publicDir, 'admin', 'users.js')),
@@ -326,19 +328,8 @@ const webProtocol = tlsEnabled ? 'https' : 'http';
 const webServer = tlsEnabled
   ? https.createServer(tlsOptions, handleHttpRequest)
   : http.createServer(handleHttpRequest);
-const webAdmin = webAdminEnabled ? createWebAdmin({
-  assets: adminAssets,
-  getGeoStats: () => aggregateGeoStats(geoCache.entries()),
-  getState: getWebAdminState,
-  host: webAdminHost,
-  http,
-  logger,
-  onReloadStreams: reloadStreamsFromDisk,
-  onReplaceStreams: replaceStreamsFromAdmin,
-  onRestart: () => process.kill(process.pid, 'SIGTERM'),
-  port: webAdminPort,
-  softwareVersion: SOFTWARE_VERSION,
-}) : null;
+let webAdmin = null;
+let adminAuth = null;
 
 attachUpgradeHandler(webServer);
 attachShutdownHandlers();
@@ -578,6 +569,7 @@ function attachShutdownHandlers() {
     userHistory.record(clientLifecycleLog.activeCount());
     userHistory.flush();
     geoCache.flush();
+    if (adminAuth) adminAuth.close();
     storage.close();
     process.exit(signal === 'SIGINT' ? 130 : 143);
   }
@@ -668,7 +660,29 @@ function createClientLifecycleLog(activityLogger, onCountChanged, onClientConnec
   };
 }
 
-function startWebServers() {
+async function startWebServers() {
+  if (webAdminEnabled) {
+    adminAuth = await createAdminAuth({
+      config: adminAuthConfig,
+      database: adminDatabase,
+      logger,
+    });
+    webAdmin = createWebAdmin({
+      assets: adminAssets,
+      auth: adminAuth,
+      getGeoStats: () => aggregateGeoStats(geoCache.entries()),
+      getState: getWebAdminState,
+      host: webAdminHost,
+      http,
+      logger,
+      onReloadStreams: reloadStreamsFromDisk,
+      onReplaceStreams: replaceStreamsFromAdmin,
+      onRestart: () => process.kill(process.pid, 'SIGTERM'),
+      port: webAdminPort,
+      resolveRequest: (req) => resolveRequestContext(req, adminProxyTrust),
+      softwareVersion: SOFTWARE_VERSION,
+    });
+  }
   if (debugEnabled) {
     logger.debug('debug_enabled', { flag: '-D' });
   }
@@ -716,8 +730,8 @@ function startWebServers() {
       webAdminHost: webAdminEnabled ? webAdminHost : undefined,
       webAdminPort: webAdminEnabled ? webAdminPort : undefined,
       runtimeMode,
-      storageBackend,
-      storagePath: storageBackend === 'sqlite' ? sqliteFile : dataDir,
+      storageBackend: 'sqlite',
+      storagePath: sqliteFile,
       geoEnabled,
       geoProvider: geoEnabled ? geoProvider : undefined,
       geoKeyConfigured: Boolean(geoKey),
@@ -1215,51 +1229,33 @@ function fatal(message) {
   process.exit(1);
 }
 
-function warnWhenJsonStorageIsActive() {
-  if (storageBackend !== 'json') return;
+function warnWhenLegacyJsonStorageExists() {
+  const legacyFiles = findLegacyJsonFiles({ dataDir, fs, path });
+  if (!legacyFiles.length) return;
   const separator = '############################################################';
   logger.plain('warn', [
     separator,
-    'Storage recommendation: SQLite is recommended for production.',
-    `  Current storage: JSON files in ${dataDir}`,
-    `  Recommended storage: SQLite database at ${sqliteFile}`,
-    `  Node.js version: ${process.versions.node}`,
-    `  ${getSqliteRuntimeGuidance(process.versions.node)}`,
-    '  To migrate: stop the server, then run: node server.js --migrate sqlite',
-    '  The migration keeps the old JSON files and updates [storage].backend in server.conf after confirmation.',
+    'Legacy JSON runtime data was detected.',
+    '  Version 1.8 uses SQLite exclusively and will not read these JSON files during normal startup.',
+    `  Files: ${legacyFiles.join(', ')}`,
+    `  SQLite destination: ${sqliteFile}`,
+    '  Stop the server and migrate the data with: node server.js --migrate',
+    '  Migration merges the data into SQLite and preserves the JSON files in a backup directory.',
     separator,
   ].join('\n'));
 }
 
-function getSqliteRuntimeGuidance(version) {
-  const [major, minor] = String(version).split('.').map((part) => Number(part));
-  if (major === 18) {
-    return 'Node 18 needs npm install better-sqlite3, or upgrade to Node 22.13+ for built-in node:sqlite.';
-  }
-  if (major > 22 || (major === 22 && minor >= 13)) {
-    return 'This Node version includes node:sqlite without extra SQLite packages.';
-  }
-  if (major === 22) {
-    return 'Upgrade to Node 22.13+ for node:sqlite without flags, or run npm install better-sqlite3.';
-  }
-  return 'Run npm install better-sqlite3, or use Node 22.13+ for built-in node:sqlite.';
-}
-
-function getOppositeStorageBackend(backend) {
-  return backend === 'json' ? 'sqlite' : 'json';
-}
-
-function confirmStorageMigration({ source, target, serverConfigPath, sqliteFile }) {
+function confirmStorageMigration({ serverConfigPath, sqliteFile }) {
   logger.plain('warn', [
     'Storage migration requested.',
-    `  From: ${source}`,
-    `  To: ${target}`,
-    `  Server config to update: ${serverConfigPath}`,
+    '  From: legacy JSON runtime files',
+    '  To: SQLite',
+    `  Server config: ${serverConfigPath}`,
     `  SQLite file: ${sqliteFile}`,
-    '  Existing destination data will be merged. Source data will not be deleted.',
+    '  Existing SQLite data will be merged. The JSON files will be moved to a backup directory.',
   ].join('\n'));
 
-  const answer = readTerminalConfirmation(`Continue migration ${source} -> ${target}? Type Y to continue or N to cancel: `);
+  const answer = readTerminalConfirmation('Continue migration JSON -> SQLite? Type Y to continue or N to cancel: ');
   if (!['y', 'yes'].includes(answer.toLowerCase())) {
     throw new Error('Storage migration cancelled by user.');
   }
@@ -1297,11 +1293,9 @@ Core options:
   --data-dir PATH               Directory for runtime data. Default: ./data.
 
 Storage:
-  --storage-backend BACKEND     Persistence backend: json or sqlite. Overrides [storage].backend.
   --sqlite-file PATH            SQLite database path. Relative paths use --data-dir.
-  --migrate [json|sqlite]       Merge persisted data into the selected destination and exit.
-                                Without a value, migrates to the opposite backend.
-                                Requires Y/N confirmation and updates server.conf on success.
+  --migrate [sqlite]            Import legacy JSON runtime data into SQLite and exit.
+                                Requires Y/N confirmation and preserves JSON files as backups.
 
 Public web player:
   --http-host HOST              Web player bind host. Overrides [web].host.
@@ -1347,7 +1341,6 @@ Examples:
   node server.js
   node server.js -D
   node server.js --webserver 8584
-  node server.js --migrate sqlite
   node server.js --migrate
   node server.js --config streams.json --http-host 0.0.0.0 --http-port 8585
 `);

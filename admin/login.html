@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UDP Airband Admin Login</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="stylesheet" href="/admin.css">
+  <link rel="stylesheet" href="/login.css">
+  <link rel="stylesheet" href="/altcha.css">
+  <script type="module" src="/altcha.js"></script>
+  <script type="module" src="/login.js"></script>
+</head>
+<body class="login-page">
+  <main class="login-shell">
+    <section class="login-panel" aria-labelledby="loginTitle">
+      <p class="eyebrow">UDP Airband Server</p>
+      <h1 id="loginTitle">Web Admin</h1>
+      <form id="loginForm" autocomplete="on">
+        <label for="username">Username</label>
+        <input id="username" name="username" maxlength="128" autocomplete="username" required>
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" maxlength="1024" autocomplete="current-password" required>
+        <div id="challengeContainer" class="login-challenge" hidden>
+          <altcha-widget id="altchaWidget" auto="off" name="altcha" type="checkbox" workers="2"></altcha-widget>
+        </div>
+        <p id="loginMessage" class="login-message" role="alert" aria-live="polite"></p>
+        <button id="loginButton" class="button primary login-submit" type="submit">Sign in</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>
