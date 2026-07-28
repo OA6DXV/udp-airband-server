@@ -272,11 +272,13 @@ main {
 
 .geo-chart-area {
   min-width: 0;
+  padding-bottom: 18px;
 }
 
 .geo-chart {
   width: 100%;
-  min-height: 490px;
+  height: clamp(360px, 48vw, 680px);
+  min-height: 360px;
 }
 
 .country-detail {
@@ -330,7 +332,7 @@ main {
 
 .geo-message {
   display: none;
-  margin: -8px 20px 18px;
+  margin: 0 20px;
   color: var(--muted);
   font-size: 13px;
   text-align: center;
@@ -601,6 +603,7 @@ dialog::backdrop {
   }
 
   .geo-chart {
+    height: 370px;
     min-height: 370px;
   }
 
