@@ -271,8 +271,13 @@ main {
 }
 
 .geo-chart-area {
+  grid-column: 1 / -1;
   min-width: 0;
   padding-bottom: 18px;
+}
+
+.geo-layout.detail-visible .geo-chart-area {
+  grid-column: auto;
 }
 
 .geo-chart {

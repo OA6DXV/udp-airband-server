@@ -37,6 +37,7 @@ const translations = {
 const languageSelect = document.getElementById('languageSelect');
 const geoMessage = document.getElementById('geoMessage');
 const geoChartElement = document.getElementById('geoChart');
+const geoLayout = document.getElementById('geoLayout');
 const statusDot = document.querySelector('.status-dot');
 const countryDetail = document.getElementById('countryDetail');
 let language = localStorage.getItem(LANGUAGE_STORAGE_KEY);
@@ -137,6 +138,7 @@ function handleSelection() {
 function renderSelectedCountry() {
   if (!selectedCode) {
     countryDetail.hidden = true;
+    geoLayout.classList.remove('detail-visible');
     return;
   }
   const country = geoStats.countries.find((entry) => entry.code === selectedCode);
@@ -163,6 +165,7 @@ function renderSelectedCountry() {
     });
   }
   countryDetail.hidden = false;
+  geoLayout.classList.add('detail-visible');
 }
 
 function buildTooltip(country) {
