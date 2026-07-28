@@ -18,7 +18,9 @@
 - Added bidirectional, non-destructive `--migrate [json|sqlite]` storage migration with destination-data merging, interactive `Y/N` confirmation, automatic opposite-backend selection when no target is provided, and automatic `[storage].backend` updates in `server.conf`.
 - Kept JSON as the default runtime storage backend for compatibility, while recommending SQLite at startup with a readable warning block and Node.js version-specific migration guidance.
 - Added privacy-preserving ipwhois geolocation enabled by default with `/24` IPv4 and `/48` IPv6 anonymization, a 30-day JSON/SQLite cache, local-address exclusion, request deduplication, and rate-limit backoff.
+- Added ISO country-code storage to the geolocation cache so Web Admin maps can use aggregated country/city data later.
 - Extended storage migration to carry the geolocation cache bidirectionally without replacing newer destination records.
+- Added a Web Admin stream-configuration revert button for restoring the state that existed before the last applied change.
 - Changed the default Web Admin port to `8584`, removed the public `/status` API, and moved the reserved future API key setting to `[geo].key`.
 - Added live stream-configuration notifications: label changes update open hub, single-player, and Multi Stream pages without interrupting audio, while incompatible stream changes stop affected players and guide listeners back to the refreshed home page.
 - Refined Web Admin change notices so display-name-only edits do not request reloads, while unnecessary reloads ask for confirmation before interrupting listeners.
@@ -41,7 +43,9 @@
 - Se agrego migracion bidireccional y no destructiva con `--migrate [json|sqlite]`, combinando los datos existentes en el destino, confirmacion interactiva `Y/N`, seleccion automatica del backend contrario cuando no se indica destino y actualizacion automatica de `[storage].backend` en `server.conf`.
 - Se mantuvo JSON como backend de almacenamiento predeterminado por compatibilidad, recomendando SQLite al iniciar con un bloque de warning legible segun la version de Node.js.
 - Se agrego geolocalizacion ipwhois activada por defecto con privacidad, anonimizacion IPv4 `/24` e IPv6 `/48`, cache JSON/SQLite de 30 dias, exclusion de direcciones locales, deduplicacion de consultas y pausa ante limites de la API.
+- Se agrego almacenamiento de codigo ISO de pais al cache de geolocalizacion para que luego Web Admin pueda usar datos agregados por pais/ciudad en mapas.
 - Se amplio la migracion para transferir el cache de geolocalizacion en ambas direcciones sin reemplazar registros mas recientes en el destino.
+- Se agrego un boton en Web Admin para revertir la configuracion de streams al estado anterior al ultimo cambio aplicado.
 - Se cambio el puerto predeterminado de Web Admin a `8584`, se elimino la API publica `/status` y se movio el campo reservado de API key futura a `[geo].key`.
 - Se agregaron notificaciones en vivo de configuracion: los cambios de etiqueta actualizan el hub, reproductores individuales y Multi Stream sin interrumpir el audio, mientras que los cambios incompatibles detienen los reproductores afectados y guian al listener de vuelta a la pagina principal actualizada.
 - Se ajustaron los avisos de Web Admin para que cambios solo de nombre visible no pidan recarga, mientras que recargas innecesarias pidan confirmacion antes de interrumpir listeners.

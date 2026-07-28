@@ -95,6 +95,7 @@ async function run() {
     assert.match(adminPage.body, /Web Admin/);
     assert.match(adminPage.body, /last 12 hours/);
     assert.match(adminPage.body, /id="languageSelect"/);
+    assert.match(adminPage.body, /id="revertStreams"/);
     assert.match(adminPage.headers['content-security-policy'], /frame-ancestors 'none'/);
 
     const usersPage = await request(adminPort, '/users');
@@ -265,6 +266,7 @@ function testStorageMigration() {
     fs.writeFileSync(geoCachePath, JSON.stringify({
       '203.0.114.0': {
         anonymizedIp: '203.0.114.0',
+        countryCode: 'PE',
         country: 'Peru',
         city: 'Cusco',
         lookedUpAt: now - 4000,
@@ -291,12 +293,16 @@ function testStorageMigration() {
       database.db.prepare('SELECT city FROM geo_cache WHERE anonymized_ip = ?').get('203.0.114.0').city,
       'Cusco',
     );
+    assert.strictEqual(
+      database.db.prepare('SELECT country_code FROM geo_cache WHERE anonymized_ip = ?').get('203.0.114.0').country_code,
+      'PE',
+    );
     database.db.prepare('INSERT INTO user_history (at, count) VALUES (?, ?)').run(now, 4);
     database.db.prepare('INSERT INTO last_heard (stream_name, last_heard_at) VALUES (?, ?)').run('beta', now - 3000);
     database.db.prepare(`
-      INSERT INTO geo_cache (anonymized_ip, country, city, looked_up_at, source)
-      VALUES (?, ?, ?, ?, ?)
-    `).run('2001:4860:4860::', 'United States', 'Mountain View', now - 2000, 'ipwhois');
+      INSERT INTO geo_cache (anonymized_ip, country_code, country, city, looked_up_at, source)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run('2001:4860:4860::', 'US', 'United States', 'Mountain View', now - 2000, 'ipwhois');
     database.close();
 
     fs.writeFileSync(historyPath, JSON.stringify([
@@ -309,6 +315,7 @@ function testStorageMigration() {
     fs.writeFileSync(geoCachePath, JSON.stringify({
       '203.0.114.0': {
         anonymizedIp: '203.0.114.0',
+        countryCode: 'PE',
         country: 'Peru',
         city: 'Lima',
         lookedUpAt: now - 8000,
@@ -335,7 +342,9 @@ function testStorageMigration() {
       beta: now - 3000,
     });
     const migratedGeo = JSON.parse(fs.readFileSync(geoCachePath, 'utf8'));
+    assert.strictEqual(migratedGeo['203.0.114.0'].countryCode, 'PE');
     assert.strictEqual(migratedGeo['203.0.114.0'].city, 'Cusco');
+    assert.strictEqual(migratedGeo['2001:4860:4860::'].countryCode, 'US');
     assert.strictEqual(migratedGeo['2001:4860:4860::'].city, 'Mountain View');
 
     const storage = createStorage({
@@ -357,6 +366,7 @@ function testStorageMigration() {
     history.record(7, now + 1000);
     const recentHistory = history.snapshot(now);
     assert.strictEqual(recentHistory[recentHistory.length - 1].count, 7);
+    assert.strictEqual(geoCache.get('203.0.114.0').countryCode, 'PE');
     assert.strictEqual(geoCache.get('203.0.114.0').country, 'Peru');
     storage.close();
 
@@ -364,6 +374,26 @@ function testStorageMigration() {
     assert.strictEqual(
       database.db.prepare('SELECT last_heard_at FROM last_heard WHERE stream_name = ?').get('alpha').last_heard_at,
       now,
+    );
+    database.close();
+
+    const legacySqliteFile = path.join(temporaryDir, 'legacy.sqlite');
+    database = openSqliteDatabase({ filePath: legacySqliteFile, fs, path });
+    database.db.exec('DROP TABLE geo_cache');
+    database.db.exec(`
+      CREATE TABLE geo_cache (
+        anonymized_ip TEXT PRIMARY KEY,
+        country TEXT NOT NULL,
+        city TEXT NOT NULL,
+        looked_up_at INTEGER NOT NULL CHECK (looked_up_at > 0),
+        source TEXT NOT NULL
+      )
+    `);
+    database.close();
+    database = openSqliteDatabase({ filePath: legacySqliteFile, fs, path });
+    assert.strictEqual(
+      database.db.prepare("SELECT COUNT(*) AS count FROM pragma_table_info('geo_cache') WHERE name = 'country_code'").get().count,
+      1,
     );
     database.close();
   } finally {
@@ -415,7 +445,7 @@ async function testGeoPrivacyAndCache() {
     lookup: async (address) => {
       lookups += 1;
       assert.strictEqual(address, '8.8.8.8');
-      return { country: 'United States', city: 'Mountain View' };
+      return { countryCode: 'US', country: 'United States', city: 'Mountain View' };
     },
     now: () => now,
     ttlMs: 30 * 24 * 60 * 60 * 1000,
@@ -424,6 +454,7 @@ async function testGeoPrivacyAndCache() {
   await service.observe('10.0.0.7');
   assert.deepStrictEqual(records.get('10.0.0.7'), {
     anonymizedIp: '10.0.0.7',
+    countryCode: '',
     country: 'Local IP',
     city: 'Local IP',
     lookedUpAt: now,
@@ -431,6 +462,7 @@ async function testGeoPrivacyAndCache() {
   });
   await Promise.all([service.observe('8.8.8.8'), service.observe('8.8.8.8')]);
   assert.strictEqual(lookups, 1);
+  assert.strictEqual(records.get('8.8.8.0').countryCode, 'US');
   assert.strictEqual(records.get('8.8.8.0').city, 'Mountain View');
   await service.observe('8.8.8.8');
   assert.strictEqual(lookups, 1);

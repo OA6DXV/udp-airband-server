@@ -6,6 +6,7 @@ const rowTemplate = document.getElementById('streamRowTemplate');
 const addButton = document.getElementById('addStream');
 const saveButton = document.getElementById('saveStreams');
 const discardButton = document.getElementById('discardStreams');
+const revertButton = document.getElementById('revertStreams');
 const messageEl = document.getElementById('message');
 const dirtyStateEl = document.getElementById('dirtyState');
 const reloadButton = document.getElementById('reloadStreams');
@@ -63,6 +64,7 @@ const translations = {
     labelChangesApplied: 'Display name changes were saved and applied live. Reload is not needed.',
     structuralChangesApplied: 'Structural changes were saved. Reload streams to confirm the runtime configuration; affected listeners were notified.',
     discardChanges: 'Discard changes',
+    revertConfiguration: 'Revert configuration',
     applyChanges: 'Apply changes',
     reloadStreams: 'Reload streams',
     reloadTitle: 'Reload streams?',
@@ -75,6 +77,7 @@ const translations = {
     newStream: 'New stream',
     atLeastOneStream: 'At least one stream is required.',
     streamsUpdated: 'Streams updated.',
+    streamsReverted: 'Previous stream configuration restored.',
     streamsReloaded: 'Streams reloaded from disk.',
     restartTitle: 'Restart server?',
     shutdownTitle: 'Shut down server?',
@@ -129,6 +132,7 @@ const translations = {
     labelChangesApplied: 'Los nombres visibles se guardaron y actualizaron en vivo. No es necesario recargar.',
     structuralChangesApplied: 'Los cambios estructurales se guardaron. Recarga los streams para confirmar la configuración activa; los oyentes afectados fueron notificados.',
     discardChanges: 'Descartar cambios',
+    revertConfiguration: 'Revertir configuración',
     applyChanges: 'Aplicar cambios',
     reloadStreams: 'Recargar streams',
     reloadTitle: '¿Recargar streams?',
@@ -141,6 +145,7 @@ const translations = {
     newStream: 'Nuevo stream',
     atLeastOneStream: 'Se requiere al menos un stream.',
     streamsUpdated: 'Streams actualizados.',
+    streamsReverted: 'Configuración anterior de streams restaurada.',
     streamsReloaded: 'Streams recargados desde el disco.',
     restartTitle: '¿Reiniciar servidor?',
     shutdownTitle: '¿Apagar servidor?',
@@ -175,12 +180,14 @@ let softwareVersion = '';
 let changeScope = 'none';
 let postSaveNotice = null;
 let reloadPending = false;
+let previousAppliedStreams = null;
 let language = localStorage.getItem(LANGUAGE_STORAGE_KEY);
 if (!translations[language]) language = 'en';
 
 form.addEventListener('input', markDirty);
 form.addEventListener('submit', saveStreams);
 discardButton.addEventListener('click', discardChanges);
+revertButton.addEventListener('click', revertConfiguration);
 addButton.addEventListener('click', () => {
   appendRow({
     name: `stream-${rowsEl.children.length + 1}`,
@@ -270,7 +277,16 @@ async function saveStreams(event) {
   if (!form.reportValidity()) return;
 
   const streams = collectFormStreams();
+  await applyStreamConfiguration(streams, {
+    previousStreams: savedStreams,
+    successKey: null,
+    updateRevert: true,
+  });
+}
+
+async function applyStreamConfiguration(streams, { previousStreams, successKey, updateRevert }) {
   const appliedScope = classifyStreamChanges(streams, savedStreams);
+  const revertCandidate = previousStreams.map((stream) => ({ ...stream }));
 
   setBusy(true);
   try {
@@ -284,13 +300,14 @@ async function saveStreams(event) {
     });
     dirty = false;
     changeScope = 'none';
-    postSaveNotice = appliedScope === 'none'
+    postSaveNotice = successKey || (appliedScope === 'none'
       ? 'streamsUpdated'
       : appliedScope === 'label'
         ? 'labelChangesApplied'
-        : 'structuralChangesApplied';
+        : 'structuralChangesApplied');
     reloadPending = appliedScope === 'structural';
     reloadButton.classList.toggle('reload-pending', reloadPending);
+    previousAppliedStreams = updateRevert ? revertCandidate : null;
     updateDirtyState();
     showMessage(translate(postSaveNotice || 'streamsUpdated'), 'success');
     await loadState(true);
@@ -299,6 +316,16 @@ async function saveStreams(event) {
   } finally {
     setBusy(false);
   }
+}
+
+async function revertConfiguration() {
+  if (!previousAppliedStreams || !previousAppliedStreams.length) return;
+  clearMessage();
+  await applyStreamConfiguration(previousAppliedStreams, {
+    previousStreams: savedStreams,
+    successKey: 'streamsReverted',
+    updateRevert: false,
+  });
 }
 
 async function reloadStreams() {
@@ -314,6 +341,7 @@ async function reloadStreams() {
     changeScope = 'none';
     postSaveNotice = null;
     reloadPending = false;
+    previousAppliedStreams = null;
     updateDirtyState();
     reloadButton.classList.remove('reload-pending');
     showMessage(translate('streamsReloaded'), 'success');
@@ -483,6 +511,8 @@ function updateControls() {
   const unavailable = operationBusy || serverState !== 'online';
   saveButton.disabled = unavailable || !dirty;
   discardButton.disabled = unavailable || !dirty;
+  revertButton.hidden = !previousAppliedStreams;
+  revertButton.disabled = unavailable || !previousAppliedStreams;
   addButton.disabled = unavailable;
   reloadButton.disabled = unavailable;
   restartButton.disabled = unavailable;
