@@ -63,6 +63,14 @@ file = streams.json
 backend = json
 sqlite_file = udp-airband-server.sqlite
 
+[geo]
+enabled = false
+provider = ipwhois
+cache_ttl_days = 30
+timeout_ms = 1500
+ipv4_anonymize = /24
+ipv6_anonymize = /48
+
 [logging]
 level = info
 timestamps = false
@@ -90,8 +98,12 @@ Important fields:
 - `[admin].enabled`: enables the separate Web Admin server. It remains `false` by default.
 - `[admin].host` and `[admin].port`: bind address and port for Web Admin. Keep the default loopback host unless access is protected by an SSH tunnel or authenticated reverse proxy.
 - `[streams].file`: JSON file that defines the feeds.
-- `[storage].backend`: persistence backend for connected-user history and Last Heard values. Supported values are `json` (default) and `sqlite`.
+- `[storage].backend`: persistence backend for connected-user history, Last Heard values, and the optional geolocation cache. Supported values are `json` (default) and `sqlite`.
 - `[storage].sqlite_file`: SQLite database path. Relative paths are resolved inside the runtime data directory (`data/` by default).
+- `[geo].enabled`: enables optional server-side IP geolocation through ipwhois. It is disabled by default.
+- `[geo].cache_ttl_days`: rechecks public network locations after 30 days by default.
+- `[geo].timeout_ms`: maximum time allowed for a geolocation request. Lookups never block a listener connection.
+- `[geo].ipv4_anonymize` and `[geo].ipv6_anonymize`: document the enforced `/24` and `/48` public-IP anonymization policies.
 - `[logging].level`: service-friendly logging level. Supported values are `off`, `error`, `warn`, `info`, and `debug`. The default is `info`.
 - `[logging].timestamps`: set to `true` to prepend ISO timestamps. With `systemd`, this can usually stay `false` because `journalctl` already adds timestamps.
 - `[logging].colors`: set to `true` to color terminal logs. Keep it `false` for normal `systemd` service logs.
@@ -99,7 +111,7 @@ Important fields:
 - `[compressed].enabled`: set to `false` to disable all compressed modes and their transcoding/framing logic.
 - `[compressed].codec`: compressed mode backend. `adpcm` is the default low-latency option and does not require `ffmpeg`.
 
-JSON storage uses `data/user-history.json` and `data/last-heard.json`. SQLite stores both datasets in `data/udp-airband-server.sqlite` by default. On Node.js versions without the built-in SQLite module, run `npm install` so the optional `better-sqlite3` compatibility driver is available.
+JSON storage uses `data/user-history.json`, `data/last-heard.json`, and, when geolocation is enabled, `data/geo-cache.json`. SQLite stores the same datasets in `data/udp-airband-server.sqlite` by default. On Node.js versions without the built-in SQLite module, run `npm install` so the optional `better-sqlite3` compatibility driver is available.
 
 To migrate existing data, first stop the running server and use one of these commands:
 
@@ -111,7 +123,15 @@ node server.js --migrate sqlite
 node server.js --migrate json
 ```
 
-`--migrate` without a value uses `[storage].backend` as the destination. Migration merges with existing destination data, keeps the newest Last Heard value for each stream, preserves history points, and does not delete the source. After verifying the result, set `[storage].backend` to the desired backend and start the server normally.
+`--migrate` without a value uses `[storage].backend` as the destination. Migration merges with existing destination data, keeps the newest Last Heard and geolocation values, preserves history points, and does not delete the source. After verifying the result, set `[storage].backend` to the desired backend and start the server normally.
+
+### Optional Geolocation And Privacy
+
+When `[geo].enabled = true`, the server can use [ipwhois](https://ipwhois.io/) to cache only the country and city returned for a listener network. Country and city are stored exactly as returned by the provider and are not translated.
+
+The complete public IP is used only in memory for the outgoing lookup and is never written to JSON, SQLite, or application logs. Before persistence, IPv4 addresses are reduced to a `/24` network (`8.8.8.45` becomes `8.8.8.0`) and IPv6 addresses to `/48`. Cached results avoid repeated requests and are refreshed after 30 days. If a refresh fails, the previous cached location remains available.
+
+Private, loopback, link-local, and other non-public addresses are never sent to ipwhois. They are stored as-is with `Local IP` for both country and city. Geolocation is best-effort: timeouts, provider errors, or rate limits never delay or reject an audio connection.
 
 `streams.json` defines the actual feeds:
 

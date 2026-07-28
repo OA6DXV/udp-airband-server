@@ -9,6 +9,8 @@ const net = require('net');
 const os = require('os');
 const path = require('path');
 const { parseArgs } = require('../lib/config');
+const { createGeoService } = require('../lib/geo-service');
+const { classifyAddress } = require('../lib/ip-privacy');
 const { detectRuntimeMode } = require('../lib/runtime');
 const { openSqliteDatabase } = require('../lib/sqlite-database');
 const { createStorage } = require('../lib/storage');
@@ -26,6 +28,7 @@ async function run() {
   testRuntimeDetection();
   testUserHistoryWindow();
   testStorageMigration();
+  await testGeoPrivacyAndCache();
   const temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-admin-test-'));
   const publicPort = await reserveTcpPort();
   const adminPort = await reserveTcpPort();
@@ -199,6 +202,7 @@ function testStorageMigration() {
   const sqliteFile = path.join(temporaryDir, 'runtime.sqlite');
   const historyPath = path.join(temporaryDir, 'user-history.json');
   const lastHeardPath = path.join(temporaryDir, 'last-heard.json');
+  const geoCachePath = path.join(temporaryDir, 'geo-cache.json');
   const now = Date.now();
   const logger = {
     info: () => {},
@@ -212,6 +216,15 @@ function testStorageMigration() {
     ]));
     fs.writeFileSync(lastHeardPath, JSON.stringify({
       alpha: now - 5000,
+    }));
+    fs.writeFileSync(geoCachePath, JSON.stringify({
+      '203.0.114.0': {
+        anonymizedIp: '203.0.114.0',
+        country: 'Peru',
+        city: 'Cusco',
+        lookedUpAt: now - 4000,
+        source: 'ipwhois',
+      },
     }));
 
     migrateStorage({
@@ -229,8 +242,16 @@ function testStorageMigration() {
       database.db.prepare('SELECT last_heard_at FROM last_heard WHERE stream_name = ?').get('alpha').last_heard_at,
       now - 5000,
     );
+    assert.strictEqual(
+      database.db.prepare('SELECT city FROM geo_cache WHERE anonymized_ip = ?').get('203.0.114.0').city,
+      'Cusco',
+    );
     database.db.prepare('INSERT INTO user_history (at, count) VALUES (?, ?)').run(now, 4);
     database.db.prepare('INSERT INTO last_heard (stream_name, last_heard_at) VALUES (?, ?)').run('beta', now - 3000);
+    database.db.prepare(`
+      INSERT INTO geo_cache (anonymized_ip, country, city, looked_up_at, source)
+      VALUES (?, ?, ?, ?, ?)
+    `).run('2001:4860:4860::', 'United States', 'Mountain View', now - 2000, 'ipwhois');
     database.close();
 
     fs.writeFileSync(historyPath, JSON.stringify([
@@ -239,6 +260,15 @@ function testStorageMigration() {
     fs.writeFileSync(lastHeardPath, JSON.stringify({
       alpha: now - 6000,
       gamma: now - 1000,
+    }));
+    fs.writeFileSync(geoCachePath, JSON.stringify({
+      '203.0.114.0': {
+        anonymizedIp: '203.0.114.0',
+        country: 'Peru',
+        city: 'Lima',
+        lookedUpAt: now - 8000,
+        source: 'ipwhois',
+      },
     }));
     migrateStorage({
       dataDir: temporaryDir,
@@ -259,6 +289,9 @@ function testStorageMigration() {
       gamma: now - 1000,
       beta: now - 3000,
     });
+    const migratedGeo = JSON.parse(fs.readFileSync(geoCachePath, 'utf8'));
+    assert.strictEqual(migratedGeo['203.0.114.0'].city, 'Cusco');
+    assert.strictEqual(migratedGeo['2001:4860:4860::'].city, 'Mountain View');
 
     const storage = createStorage({
       backend: 'sqlite',
@@ -270,6 +303,7 @@ function testStorageMigration() {
     });
     const history = storage.createUserHistory();
     const lastHeard = storage.createLastHeardStore();
+    const geoCache = storage.createGeoCache();
     const streams = [{ name: 'alpha', lastUdpAt: 0 }];
     lastHeard.apply(streams);
     assert.strictEqual(streams[0].lastUdpAt, now - 5000);
@@ -278,6 +312,7 @@ function testStorageMigration() {
     history.record(7, now + 1000);
     const recentHistory = history.snapshot(now);
     assert.strictEqual(recentHistory[recentHistory.length - 1].count, 7);
+    assert.strictEqual(geoCache.get('203.0.114.0').country, 'Peru');
     storage.close();
 
     database = openSqliteDatabase({ filePath: sqliteFile, fs, path });
@@ -289,6 +324,75 @@ function testStorageMigration() {
   } finally {
     fs.rmSync(temporaryDir, { recursive: true, force: true });
   }
+}
+
+async function testGeoPrivacyAndCache() {
+  assert.deepStrictEqual(classifyAddress('::ffff:192.168.1.45'), {
+    anonymized: '192.168.1.45',
+    family: 4,
+    isLocal: true,
+    normalized: '192.168.1.45',
+  });
+  assert.strictEqual(classifyAddress('8.8.8.8').anonymized, '8.8.8.0');
+  assert.strictEqual(classifyAddress('2001:4860:4860::8888').anonymized, '2001:4860:4860::');
+
+  const records = new Map();
+  const cache = {
+    get: (key) => records.get(key) || null,
+    set: (record) => {
+      records.set(record.anonymizedIp, { ...record });
+      return true;
+    },
+  };
+  const messages = [];
+  const logger = {
+    debug: (event, fields) => messages.push({ event, fields }),
+    warn: (event, fields) => messages.push({ event, fields }),
+  };
+  let now = 1_700_000_000_000;
+  let lookups = 0;
+  const disabledService = createGeoService({
+    cache,
+    enabled: false,
+    logger,
+    lookup: async () => {
+      throw new Error('disabled geolocation must not make requests');
+    },
+    now: () => now,
+  });
+  await disabledService.observe('10.0.0.7');
+  assert.strictEqual(records.size, 0);
+
+  const service = createGeoService({
+    cache,
+    enabled: true,
+    logger,
+    lookup: async (address) => {
+      lookups += 1;
+      assert.strictEqual(address, '8.8.8.8');
+      return { country: 'United States', city: 'Mountain View' };
+    },
+    now: () => now,
+    ttlMs: 30 * 24 * 60 * 60 * 1000,
+  });
+
+  await service.observe('10.0.0.7');
+  assert.deepStrictEqual(records.get('10.0.0.7'), {
+    anonymizedIp: '10.0.0.7',
+    country: 'Local IP',
+    city: 'Local IP',
+    lookedUpAt: now,
+    source: 'local',
+  });
+  await Promise.all([service.observe('8.8.8.8'), service.observe('8.8.8.8')]);
+  assert.strictEqual(lookups, 1);
+  assert.strictEqual(records.get('8.8.8.0').city, 'Mountain View');
+  await service.observe('8.8.8.8');
+  assert.strictEqual(lookups, 1);
+  now += (30 * 24 * 60 * 60 * 1000) + 1;
+  await service.observe('8.8.8.8');
+  assert.strictEqual(lookups, 2);
+  assert.strictEqual(messages.some((message) => message.fields.remote === '8.8.8.8'), false);
 }
 
 async function testConfigEnabledStartup() {

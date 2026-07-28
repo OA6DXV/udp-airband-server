@@ -26,6 +26,7 @@ const { createLogger } = require('./lib/logger');
 const { DEFAULT_STREAMS, loadStreams, loadStreamsFromConfig, renderMultiStreamPage, renderStreamList, validateStreams } = require('./lib/streams');
 const { acceptWebSocket, sendWsBinary, sendWsJson } = require('./lib/websocket');
 const { createCompressedManager } = require('./lib/compressed');
+const { createGeoService } = require('./lib/geo-service');
 const { createNativeMultiAac } = require('./lib/native-multi-aac');
 const { detectRuntimeMode } = require('./lib/runtime');
 const { createStorage, normalizeStorageBackend } = require('./lib/storage');
@@ -68,6 +69,21 @@ const serverConfigUpdated = ensureServerConfigDefaults(serverConfigPath, [
       { key: 'sqlite_file', value: 'udp-airband-server.sqlite' },
     ],
   },
+  {
+    name: 'geo',
+    comments: [
+      'Optional server-side IP geolocation. Public addresses are anonymized before storage.',
+      'Private/local addresses never leave the server.',
+    ],
+    keys: [
+      { key: 'enabled', value: 'false' },
+      { key: 'provider', value: 'ipwhois' },
+      { key: 'cache_ttl_days', value: '30' },
+      { key: 'timeout_ms', value: '1500' },
+      { key: 'ipv4_anonymize', value: '/24' },
+      { key: 'ipv6_anonymize', value: '/48' },
+    ],
+  },
 ], fs, path);
 const serverConfig = loadServerConfig(serverConfigPath, fs, path);
 const defaultUdpHost = args.udpHost || getSetting(serverConfig, 'udp.host', '0.0.0.0');
@@ -95,6 +111,12 @@ const sqliteFileSetting = String(
 const sqliteFile = path.isAbsolute(sqliteFileSetting)
   ? path.normalize(sqliteFileSetting)
   : path.resolve(dataDir, sqliteFileSetting);
+const geoEnabled = parseBoolean(getSetting(serverConfig, 'geo.enabled', false));
+const geoProvider = String(getSetting(serverConfig, 'geo.provider', 'ipwhois')).trim().toLowerCase();
+const geoCacheTtlDays = Number(getSetting(serverConfig, 'geo.cacheTtlDays', 30));
+const geoTimeoutMs = Number(getSetting(serverConfig, 'geo.timeoutMs', 1500));
+const geoIpv4Anonymize = String(getSetting(serverConfig, 'geo.ipv4Anonymize', '/24')).trim();
+const geoIpv6Anonymize = String(getSetting(serverConfig, 'geo.ipv6Anonymize', '/48')).trim();
 const apiEnabledSetting = args.api ? true : (args.apiEnabled !== undefined ? args.apiEnabled : getSetting(serverConfig, 'api.enabled', false));
 const apiEnabled = parseBoolean(apiEnabledSetting);
 const compressedEnabled = parseBoolean(args.compressedEnabled !== undefined ? args.compressedEnabled : getSetting(serverConfig, 'compressed.enabled', true));
@@ -150,10 +172,35 @@ try {
   fatal(err.message);
 }
 const userHistory = storage.createUserHistory();
-const clientLifecycleLog = createClientLifecycleLog(logger, (count) => userHistory.record(count));
+const geoCache = storage.createGeoCache();
+const geoService = createGeoService({
+  cache: geoCache,
+  enabled: geoEnabled,
+  logger,
+  timeoutMs: geoTimeoutMs,
+  ttlMs: geoCacheTtlDays * 24 * 60 * 60 * 1000,
+});
+const clientLifecycleLog = createClientLifecycleLog(
+  logger,
+  (count) => userHistory.record(count),
+  (remote) => geoService.observe(remote),
+  (remote) => geoService.safeAddress(remote),
+);
 
 if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) {
   fatal('--http-port must be a valid port');
+}
+if (geoProvider !== 'ipwhois') {
+  fatal('[geo].provider must be ipwhois');
+}
+if (!Number.isFinite(geoCacheTtlDays) || geoCacheTtlDays < 1) {
+  fatal('[geo].cache_ttl_days must be at least 1');
+}
+if (!Number.isInteger(geoTimeoutMs) || geoTimeoutMs < 100 || geoTimeoutMs > 30000) {
+  fatal('[geo].timeout_ms must be between 100 and 30000');
+}
+if (geoIpv4Anonymize !== '/24' || geoIpv6Anonymize !== '/48') {
+  fatal('[geo] currently supports ipv4_anonymize = /24 and ipv6_anonymize = /48');
 }
 if (webAdminEnabled && (!Number.isInteger(webAdminPort) || webAdminPort < 1 || webAdminPort > 65535)) {
   fatal(webAdminCliFlag
@@ -458,7 +505,11 @@ function attachUpgradeHandler(server) {
     }
     const match = pathname.match(/^\/([^/]+)\/(audio|control|adpcm|opus|aac)$/);
     if (!match) {
-      logger.warn('websocket_rejected', { path: requestUrl.pathname, reason: 'invalid_route', remote: remoteAddress });
+      logger.warn('websocket_rejected', {
+        path: requestUrl.pathname,
+        reason: 'invalid_route',
+        remote: geoService.safeAddress(remoteAddress),
+      });
       socket.destroy();
       return;
     }
@@ -466,7 +517,11 @@ function attachUpgradeHandler(server) {
     const stream = streamsByName.get(match[1]);
     const socketType = match[2];
     if (!stream || !acceptWebSocket(req, socket, crypto)) {
-      logger.warn('websocket_rejected', { path: requestUrl.pathname, reason: stream ? 'invalid_handshake' : 'unknown_stream', remote: remoteAddress });
+      logger.warn('websocket_rejected', {
+        path: requestUrl.pathname,
+        reason: stream ? 'invalid_handshake' : 'unknown_stream',
+        remote: geoService.safeAddress(remoteAddress),
+      });
       socket.destroy();
       return;
     }
@@ -515,6 +570,7 @@ function attachShutdownHandlers() {
     lastHeardStore.flush();
     userHistory.record(clientLifecycleLog.activeCount());
     userHistory.flush();
+    geoCache.flush();
     storage.close();
     process.exit(signal === 'SIGINT' ? 130 : 143);
   }
@@ -523,11 +579,16 @@ function attachShutdownHandlers() {
 }
 
 function recordClientActivity(action, streamName, mode, clientId, remote) {
-  logger.debug(`client_${action}`, { stream: streamName, mode, client: clientId, remote });
+  logger.debug(`client_${action}`, {
+    stream: streamName,
+    mode,
+    client: clientId,
+    remote: geoService.safeAddress(remote),
+  });
   clientLifecycleLog.record(action, clientId, remote);
 }
 
-function createClientLifecycleLog(activityLogger, onCountChanged) {
+function createClientLifecycleLog(activityLogger, onCountChanged, onClientConnected, sanitizeRemote) {
   const disconnectGraceMs = 2000;
   const clients = new Map();
 
@@ -543,19 +604,35 @@ function createClientLifecycleLog(activityLogger, onCountChanged) {
   }
 
   function recordConnect(clientId, remote) {
+    const safeRemote = sanitizeRemote ? sanitizeRemote(remote) : remote;
     let entry = clients.get(clientId);
     if (!entry) {
-      entry = { socketCount: 0, remote, connectedAt: Date.now(), disconnectTimer: null };
+      entry = { socketCount: 0, remote: safeRemote, connectedAt: Date.now(), disconnectTimer: null };
       clients.set(clientId, entry);
-      activityLogger.info('client_connected', { client: clientId, remote, activeClients: clients.size });
+      activityLogger.info('client_connected', { client: clientId, remote: safeRemote, activeClients: clients.size });
       if (onCountChanged) onCountChanged(clients.size);
+      if (onClientConnected) {
+        try {
+          Promise.resolve(onClientConnected(remote)).catch((err) => {
+            activityLogger.debug('geo_observation_failed', {
+              remote: safeRemote,
+              reason: err && err.code ? String(err.code) : 'observation_failed',
+            });
+          });
+        } catch (err) {
+          activityLogger.debug('geo_observation_failed', {
+            remote: safeRemote,
+            reason: err && err.code ? String(err.code) : 'observation_failed',
+          });
+        }
+      }
     }
     if (entry.disconnectTimer) {
       clearTimeout(entry.disconnectTimer);
       entry.disconnectTimer = null;
     }
     entry.socketCount += 1;
-    if (remote) entry.remote = remote;
+    if (safeRemote) entry.remote = safeRemote;
   }
 
   function recordDisconnect(clientId) {
@@ -635,6 +712,8 @@ function startWebServers() {
       runtimeMode,
       storageBackend,
       storagePath: storageBackend === 'sqlite' ? sqliteFile : dataDir,
+      geoEnabled,
+      geoProvider: geoEnabled ? geoProvider : undefined,
       logLevel: logger.level,
     });
   }).catch((err) => fatal(err.message));

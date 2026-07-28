@@ -63,6 +63,14 @@ file = streams.json
 backend = json
 sqlite_file = udp-airband-server.sqlite
 
+[geo]
+enabled = false
+provider = ipwhois
+cache_ttl_days = 30
+timeout_ms = 1500
+ipv4_anonymize = /24
+ipv6_anonymize = /48
+
 [logging]
 level = info
 timestamps = false
@@ -90,8 +98,12 @@ Campos importantes:
 - `[admin].enabled`: activa el servidor Web Admin separado. Se mantiene en `false` por defecto.
 - `[admin].host` y `[admin].port`: direccion y puerto de Web Admin. Conserva el host loopback predeterminado salvo que el acceso este protegido por un tunel SSH o reverse proxy autenticado.
 - `[streams].file`: archivo JSON que define los feeds.
-- `[storage].backend`: backend de persistencia para el historial de usuarios conectados y los valores Last Heard. Los valores soportados son `json` (predeterminado) y `sqlite`.
+- `[storage].backend`: backend de persistencia para el historial de usuarios conectados, los valores Last Heard y el cache opcional de geolocalizacion. Los valores soportados son `json` (predeterminado) y `sqlite`.
 - `[storage].sqlite_file`: ruta de la base SQLite. Las rutas relativas se resuelven dentro del directorio de datos de ejecucion (`data/` de forma predeterminada).
+- `[geo].enabled`: activa la geolocalizacion server-side opcional mediante ipwhois. Esta desactivada de forma predeterminada.
+- `[geo].cache_ttl_days`: vuelve a consultar la ubicacion de redes publicas despues de 30 dias de forma predeterminada.
+- `[geo].timeout_ms`: tiempo maximo permitido para una consulta. La consulta nunca bloquea la conexion de un listener.
+- `[geo].ipv4_anonymize` y `[geo].ipv6_anonymize`: documentan las politicas obligatorias de anonimizacion `/24` y `/48`.
 - `[logging].level`: nivel de logging amigable para servicio. Valores soportados: `off`, `error`, `warn`, `info` y `debug`. El valor predeterminado es `info`.
 - `[logging].timestamps`: usa `true` para anteponer timestamps ISO. Con `systemd`, normalmente puede quedar en `false` porque `journalctl` ya agrega timestamps.
 - `[logging].colors`: usa `true` para colorear logs en terminal. Mantenlo en `false` para logs normales de servicio con `systemd`.
@@ -99,7 +111,7 @@ Campos importantes:
 - `[compressed].enabled`: usa `false` para desactivar todos los modos comprimidos y su logica de transcoding/framing.
 - `[compressed].codec`: backend del modo comprimido. `adpcm` es la opcion predeterminada de baja latencia y no requiere `ffmpeg`.
 
-El almacenamiento JSON utiliza `data/user-history.json` y `data/last-heard.json`. SQLite guarda ambos conjuntos de datos en `data/udp-airband-server.sqlite` de forma predeterminada. En versiones de Node.js sin el modulo SQLite integrado, ejecuta `npm install` para instalar el driver de compatibilidad opcional `better-sqlite3`.
+El almacenamiento JSON utiliza `data/user-history.json`, `data/last-heard.json` y, cuando la geolocalizacion esta activa, `data/geo-cache.json`. SQLite guarda los mismos conjuntos de datos en `data/udp-airband-server.sqlite` de forma predeterminada. En versiones de Node.js sin el modulo SQLite integrado, ejecuta `npm install` para instalar el driver de compatibilidad opcional `better-sqlite3`.
 
 Para migrar datos existentes, primero detiene el servidor en ejecucion y usa uno de estos comandos:
 
@@ -111,7 +123,15 @@ node server.js --migrate sqlite
 node server.js --migrate json
 ```
 
-`--migrate` sin valor utiliza `[storage].backend` como destino. La migracion combina los datos que ya existan en el destino, conserva el Last Heard mas reciente de cada stream, mantiene los puntos del historial y no borra el origen. Despues de verificar el resultado, cambia `[storage].backend` al backend deseado e inicia el servidor normalmente.
+`--migrate` sin valor utiliza `[storage].backend` como destino. La migracion combina los datos que ya existan en el destino, conserva los valores Last Heard y de geolocalizacion mas recientes, mantiene los puntos del historial y no borra el origen. Despues de verificar el resultado, cambia `[storage].backend` al backend deseado e inicia el servidor normalmente.
+
+### Geolocalizacion Opcional Y Privacidad
+
+Cuando `[geo].enabled = true`, el servidor puede usar [ipwhois](https://ipwhois.io/) para guardar en cache unicamente el pais y la ciudad devueltos para la red de un listener. El pais y la ciudad se almacenan exactamente como los entrega el proveedor y no se traducen.
+
+La IP publica completa solo se usa temporalmente en memoria para realizar la consulta y nunca se escribe en JSON, SQLite ni en los logs de la aplicacion. Antes de persistirla, una IPv4 se reduce a su red `/24` (`8.8.8.45` pasa a `8.8.8.0`) y una IPv6 a `/48`. El cache evita consultas repetidas y se renueva despues de 30 dias. Si una renovacion falla, se conserva la ubicacion anterior.
+
+Las direcciones privadas, loopback, link-local y otras direcciones no publicas nunca se envian a ipwhois. Se almacenan sin truncar con `Local IP` como pais y ciudad. La geolocalizacion es best-effort: un timeout, error del proveedor o limite de consultas nunca retrasa ni rechaza una conexion de audio.
 
 `streams.json` define los feeds:
 
