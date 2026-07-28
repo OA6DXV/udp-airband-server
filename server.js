@@ -38,7 +38,7 @@ const { aggregateGeoStats } = require('./lib/geo-stats');
 const { createNativeMultiAac } = require('./lib/native-multi-aac');
 const { detectRuntimeMode } = require('./lib/runtime');
 const { createStorage } = require('./lib/storage');
-const { findLegacyJsonFiles, migrateStorage } = require('./lib/storage-migration');
+const { archiveLegacyJsonFiles, inspectLegacyJsonRuntimeStorage, migrateStorage, verifySqliteIntegrity } = require('./lib/storage-migration');
 const { createWebAdmin } = require('./lib/web-admin-secure');
 
 const MAX_SOCKET_BUFFER_BYTES = 1024 * 1024;
@@ -166,7 +166,7 @@ if (args.migrate !== undefined) {
     fatal(`Storage migration failed: ${err.message}`);
   }
 }
-warnWhenLegacyJsonStorageExists();
+const legacyStorageInspection = inspectLegacyJsonRuntimeStorage({ dataDir, fs, path, sqliteFile });
 let storage;
 try {
   storage = createStorage({
@@ -176,9 +176,11 @@ try {
     path,
     sqliteFile,
   });
+  verifySqliteIntegrity(storage.database);
 } catch (err) {
   fatal(err.message);
 }
+handleLegacyJsonRuntimeStorage(legacyStorageInspection);
 const adminDatabase = webAdminEnabled ? storage.database : null;
 let createAdminAuth = null;
 let loadAdminAuthConfig = null;
@@ -1234,16 +1236,37 @@ function fatal(message) {
   process.exit(1);
 }
 
-function warnWhenLegacyJsonStorageExists() {
-  const legacyFiles = findLegacyJsonFiles({ dataDir, fs, path });
-  if (!legacyFiles.length) return;
+function handleLegacyJsonRuntimeStorage(inspection) {
+  if (!inspection || inspection.action === 'none') return;
   const separator = '############################################################';
+  if (inspection.action === 'archive') {
+    const backupDir = archiveLegacyJsonFiles({
+      dataDir,
+      files: inspection.legacyFiles,
+      fs,
+      path,
+    });
+    logger.plain('warn', [
+      separator,
+      'Legacy JSON runtime data was detected, but SQLite is newer and passed integrity checks.',
+      '  The JSON files look like leftovers from an older migration and were archived automatically.',
+      `  Files: ${inspection.legacyFiles.join(', ')}`,
+      `  Newest SQLite file: ${inspection.newestSqliteFile || sqliteFile}`,
+      `  JSON backup: ${backupDir}`,
+      separator,
+    ].join('\n'));
+    return;
+  }
+
   logger.plain('warn', [
     separator,
     'Legacy JSON runtime data was detected.',
     '  Version 1.8 uses SQLite exclusively and will not read these JSON files during normal startup.',
-    `  Files: ${legacyFiles.join(', ')}`,
+    `  Files: ${inspection.legacyFiles.join(', ')}`,
     `  SQLite destination: ${sqliteFile}`,
+    inspection.reason === 'json_newer_than_sqlite'
+      ? `  The JSON files are newer than SQLite. Newest JSON: ${inspection.newestJsonFile}`
+      : '  No existing SQLite runtime database was found.',
     '  Stop the server and migrate the data with: node server.js --migrate',
     '  Migration merges the data into SQLite and preserves the JSON files in a backup directory.',
     separator,
