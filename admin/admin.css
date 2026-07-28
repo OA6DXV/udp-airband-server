@@ -433,7 +433,7 @@ input:invalid {
 }
 
 .row-actions {
-  width: 48px;
+  width: 150px;
   text-align: right;
 }
 
@@ -619,6 +619,15 @@ dialog::backdrop {
     flex-direction: column;
   }
 
+  .history-panel .section-heading {
+    align-items: center;
+    flex-direction: row;
+  }
+
+  .history-panel .section-heading p {
+    display: none;
+  }
+
   .geo-total {
     text-align: left;
   }
@@ -665,8 +674,7 @@ dialog::backdrop {
   }
 
   tr {
-    position: relative;
-    padding: 14px 48px 8px 14px;
+    padding: 14px;
     border-bottom: 1px solid var(--border);
   }
 
@@ -688,15 +696,17 @@ dialog::backdrop {
   }
 
   .row-actions {
-    position: absolute;
-    top: 12px;
-    right: 10px;
     display: block;
-    width: auto;
+    width: 100%;
+    padding-top: 12px;
   }
 
   .row-actions::before {
     content: none;
+  }
+
+  .row-actions .remove-stream {
+    width: 100%;
   }
 
   input,

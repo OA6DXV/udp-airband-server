@@ -133,6 +133,16 @@
     </form>
   </dialog>
 
+  <dialog id="removeStreamDialog">
+    <form method="dialog">
+      <p data-i18n="removeStreamConfirm">Are you sure you want to delete the stream?</p>
+      <div class="dialog-actions">
+        <button class="button secondary" value="cancel" data-i18n="no">No</button>
+        <button id="confirmRemoveStream" class="button danger" value="confirm" data-i18n="yes">Yes</button>
+      </div>
+    </form>
+  </dialog>
+
   <template id="streamRowTemplate">
     <tr>
       <td data-label="Route name" data-i18n-label="routeName"><input name="name" required pattern="[A-Za-z0-9][A-Za-z0-9_\-]*" autocomplete="off"></td>
@@ -146,7 +156,7 @@
           <option value="2" data-i18n="stereo">Stereo</option>
         </select>
       </td>
-      <td class="row-actions"><button class="icon-button remove-stream" type="button" title="Remove stream" aria-label="Remove stream" data-i18n-title="removeStream" data-i18n-aria="removeStream">&times;</button></td>
+      <td class="row-actions"><button class="button secondary remove-stream" type="button" title="Remove stream" aria-label="Remove stream" data-i18n="removeStream" data-i18n-title="removeStream" data-i18n-aria="removeStream">Remove stream</button></td>
     </tr>
   </template>
 

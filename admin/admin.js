@@ -17,6 +17,8 @@ const restartWarning = document.getElementById('restartWarning');
 const confirmRestartButton = document.getElementById('confirmRestart');
 const reloadDialog = document.getElementById('reloadDialog');
 const confirmReloadButton = document.getElementById('confirmReload');
+const removeStreamDialog = document.getElementById('removeStreamDialog');
+const confirmRemoveStreamButton = document.getElementById('confirmRemoveStream');
 const serverStatusEl = document.getElementById('serverStatus');
 const versionEl = document.getElementById('version');
 const languageSelect = document.getElementById('languageSelect');
@@ -74,6 +76,9 @@ const translations = {
     restartServer: 'Restart server',
     cancel: 'Cancel',
     removeStream: 'Remove stream',
+    removeStreamConfirm: 'Are you sure you want to delete the stream?',
+    yes: 'Yes',
+    no: 'No',
     newStream: 'New stream',
     atLeastOneStream: 'At least one stream is required.',
     streamsUpdated: 'Streams updated.',
@@ -142,6 +147,9 @@ const translations = {
     restartServer: 'Reiniciar servidor',
     cancel: 'Cancelar',
     removeStream: 'Eliminar stream',
+    removeStreamConfirm: 'Estas seguro de borrar el stream?',
+    yes: 'Sí',
+    no: 'No',
     newStream: 'Nuevo stream',
     atLeastOneStream: 'Se requiere al menos un stream.',
     streamsUpdated: 'Streams actualizados.',
@@ -181,6 +189,7 @@ let changeScope = 'none';
 let postSaveNotice = null;
 let reloadPending = false;
 let previousAppliedStreams = null;
+let pendingRemoveRow = null;
 let language = localStorage.getItem(LANGUAGE_STORAGE_KEY);
 if (!translations[language]) language = 'en';
 
@@ -189,18 +198,20 @@ form.addEventListener('submit', saveStreams);
 discardButton.addEventListener('click', discardChanges);
 revertButton.addEventListener('click', revertConfiguration);
 addButton.addEventListener('click', () => {
-  appendRow({
+  const row = appendRow({
     name: `stream-${rowsEl.children.length + 1}`,
     label: translate('newStream'),
     udpHost: '0.0.0.0',
     udpPort: nextPort(),
     sampleRate: 8000,
     channels: 1,
-  });
+  }, { position: 'start' });
+  row.querySelector('[name="name"]').focus();
   markDirty();
 });
 reloadButton.addEventListener('click', requestReload);
 confirmReloadButton.addEventListener('click', reloadStreams);
+confirmRemoveStreamButton.addEventListener('click', removePendingStream);
 restartButton.addEventListener('click', openRestartDialog);
 confirmRestartButton.addEventListener('click', requestRestart);
 languageSelect.addEventListener('change', () => {
@@ -253,7 +264,7 @@ function scheduleStateRefresh(delay) {
   refreshTimer = setTimeout(() => loadState(false), delay);
 }
 
-function appendRow(stream) {
+function appendRow(stream, options = {}) {
   const row = rowTemplate.content.firstElementChild.cloneNode(true);
   for (const key of ['name', 'label', 'udpHost', 'udpPort', 'sampleRate', 'channels']) {
     const input = row.querySelector(`[name="${key}"]`);
@@ -264,11 +275,22 @@ function appendRow(stream) {
       showMessage(translate('atLeastOneStream'), 'error');
       return;
     }
-    row.remove();
-    markDirty();
+    pendingRemoveRow = row;
+    removeStreamDialog.showModal();
   });
   applyTranslations(row);
-  rowsEl.appendChild(row);
+  if (options.position === 'start') rowsEl.prepend(row);
+  else rowsEl.appendChild(row);
+  return row;
+}
+
+function removePendingStream(event) {
+  event.preventDefault();
+  removeStreamDialog.close();
+  if (!pendingRemoveRow) return;
+  pendingRemoveRow.remove();
+  pendingRemoveRow = null;
+  markDirty();
 }
 
 async function saveStreams(event) {
