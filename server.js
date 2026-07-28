@@ -58,9 +58,9 @@ const serverConfigUpdated = ensureServerConfigDefaults(serverConfigPath, [
   },
   {
     name: 'storage',
-    comments: ['Runtime persistence backend. Supported values: sqlite and json.'],
+    comments: ['Runtime persistence backend. Supported values: json and sqlite.'],
     keys: [
-      { key: 'backend', value: 'sqlite' },
+      { key: 'backend', value: 'json' },
       { key: 'sqlite_file', value: 'localdb.sqlite' },
     ],
   },
@@ -100,7 +100,7 @@ const webAdminHost = String(args.webadminHost || adminConfigHost);
 const webAdminConfigOverridden = Boolean(webAdminCliFlag || args.webadminHost !== undefined);
 const configPath = args.config || getSetting(serverConfig, 'streams.file', 'streams.json');
 const dataDir = path.resolve(args.dataDir || path.join(__dirname, 'data'));
-const storageBackendSetting = args.storageBackend || getSetting(serverConfig, 'storage.backend', 'sqlite');
+const storageBackendSetting = args.storageBackend || getSetting(serverConfig, 'storage.backend', 'json');
 const sqliteFileSetting = String(
   args.sqliteFile || getSetting(serverConfig, 'storage.sqliteFile', '') || 'localdb.sqlite',
 ).trim();
@@ -153,29 +153,7 @@ if (args.migrate !== undefined) {
     fatal(`Storage migration failed: ${err.message}`);
   }
 }
-if (storageBackend === 'sqlite' && hasJsonStorageFiles(dataDir)) {
-  try {
-    const result = migrateStorage({
-      dataDir,
-      fs,
-      logger,
-      path,
-      sqliteFile,
-      target: 'sqlite',
-    });
-    logger.warn('storage_auto_migrated_json_to_sqlite', {
-      reason: 'sqlite is the default storage backend',
-      userHistory: result.userHistory,
-      lastHeard: result.lastHeard,
-      geoCache: result.geoCache,
-      source: dataDir,
-      destination: sqliteFile,
-      keepJson: 'set [storage].backend = json to keep the legacy storage backend',
-    });
-  } catch (err) {
-    fatal(`Automatic JSON to SQLite migration failed: ${err.message}`);
-  }
-}
+warnWhenJsonStorageIsActive();
 let storage;
 try {
   storage = createStorage({
@@ -1144,9 +1122,30 @@ function fatal(message) {
   process.exit(1);
 }
 
-function hasJsonStorageFiles(directory) {
-  return ['user-history.json', 'last-heard.json', 'geo-cache.json']
-    .some((file) => fs.existsSync(path.join(directory, file)));
+function warnWhenJsonStorageIsActive() {
+  if (storageBackend !== 'json') return;
+  logger.warn('storage_sqlite_recommended', {
+    currentBackend: 'json',
+    recommendedBackend: 'sqlite',
+    nodeVersion: process.versions.node,
+    migration: 'stop server, run: node server.js --migrate sqlite, then set [storage].backend = sqlite',
+    sqliteFile,
+    nodeGuidance: getSqliteRuntimeGuidance(process.versions.node),
+  });
+}
+
+function getSqliteRuntimeGuidance(version) {
+  const [major, minor] = String(version).split('.').map((part) => Number(part));
+  if (major === 18) {
+    return 'Node 18 needs npm install so better-sqlite3 is available, or upgrade to Node 22.13+ for built-in node:sqlite.';
+  }
+  if (major > 22 || (major === 22 && minor >= 13)) {
+    return 'This Node version includes node:sqlite without extra SQLite packages.';
+  }
+  if (major === 22) {
+    return 'Upgrade to Node 22.13+ for node:sqlite without flags, or run npm install for better-sqlite3.';
+  }
+  return 'Run npm install for better-sqlite3, or use Node 22.13+ for built-in node:sqlite.';
 }
 
 function printHelp() {

@@ -60,7 +60,7 @@ enabled = false
 file = streams.json
 
 [storage]
-backend = sqlite
+backend = json
 sqlite_file = localdb.sqlite
 
 [geo]
@@ -99,7 +99,7 @@ Campos importantes:
 - `[admin].enabled`: activa el servidor Web Admin separado. Se mantiene en `false` por defecto.
 - `[admin].host` y `[admin].port`: direccion y puerto de Web Admin. Conserva el host loopback predeterminado salvo que el acceso este protegido por un tunel SSH o reverse proxy autenticado.
 - `[streams].file`: archivo JSON que define los feeds.
-- `[storage].backend`: backend de persistencia para el historial de usuarios conectados, los valores Last Heard y el cache de geolocalizacion. Los valores soportados son `sqlite` (predeterminado) y `json`.
+- `[storage].backend`: backend de persistencia para el historial de usuarios conectados, los valores Last Heard y el cache de geolocalizacion. Los valores soportados son `json` (predeterminado) y `sqlite`. SQLite se recomienda para produccion.
 - `[storage].sqlite_file`: ruta de la base SQLite. Las rutas relativas se resuelven dentro del directorio de datos de ejecucion (`data/` de forma predeterminada).
 - `[geo].enabled`: activa la geolocalizacion server-side mediante ipwhois. Esta activada por defecto y mantiene las IP publicas anonimizadas antes de guardarlas.
 - `[geo].key`: reservado para futuros proveedores de geolocalizacion que requieran API key. ipwhois no requiere una, asi que puede quedar vacio.
@@ -113,9 +113,9 @@ Campos importantes:
 - `[compressed].enabled`: usa `false` para desactivar todos los modos comprimidos y su logica de transcoding/framing.
 - `[compressed].codec`: backend del modo comprimido. `adpcm` es la opcion predeterminada de baja latencia y no requiere `ffmpeg`.
 
-SQLite guarda los datos de ejecucion en `data/localdb.sqlite` de forma predeterminada. El almacenamiento JSON sigue disponible con `[storage].backend = json` y utiliza `data/user-history.json`, `data/last-heard.json` y `data/geo-cache.json`. En versiones de Node.js sin el modulo SQLite integrado, ejecuta `npm install` para instalar el driver de compatibilidad opcional `better-sqlite3`.
+El almacenamiento JSON es el valor predeterminado de compatibilidad y utiliza `data/user-history.json`, `data/last-heard.json` y `data/geo-cache.json`. SQLite se recomienda para produccion y guarda los datos de ejecucion en `data/localdb.sqlite` de forma predeterminada.
 
-Cuando `[storage].backend = sqlite` y se encuentran archivos JSON antiguos, el servidor los importa automaticamente al iniciar, muestra el warning `storage_auto_migrated_json_to_sqlite` y conserva los JSON originales sin borrarlos. Define `[storage].backend = json` si prefieres mantener el backend JSON anterior.
+Cuando el almacenamiento JSON esta activo, el servidor muestra el warning `storage_sqlite_recommended` al iniciar con la version actual de Node.js y la guia de migracion. En Node 18, ejecuta `npm install` para instalar el driver opcional de compatibilidad `better-sqlite3` antes de usar SQLite. En Node 22.13+ el modulo integrado `node:sqlite` esta disponible, asi que no se requiere ningun paquete SQLite adicional.
 
 Para migrar datos existentes, primero detiene el servidor en ejecucion y usa uno de estos comandos:
 
@@ -127,7 +127,7 @@ node server.js --migrate sqlite
 node server.js --migrate json
 ```
 
-`--migrate` sin valor utiliza `[storage].backend` como destino. La migracion combina los datos que ya existan en el destino, conserva los valores Last Heard y de geolocalizacion mas recientes, mantiene los puntos del historial y no borra el origen. Despues de verificar el resultado, cambia `[storage].backend` al backend deseado e inicia el servidor normalmente.
+`--migrate` sin valor utiliza `[storage].backend` como destino. La migracion combina los datos que ya existan en el destino, conserva los valores Last Heard y de geolocalizacion mas recientes, mantiene los puntos del historial y no borra el origen. Despues de verificar el resultado, define `[storage].backend = sqlite` e inicia el servidor normalmente.
 
 ### Geolocalizacion Opcional Y Privacidad
 

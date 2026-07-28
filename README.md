@@ -60,7 +60,7 @@ enabled = false
 file = streams.json
 
 [storage]
-backend = sqlite
+backend = json
 sqlite_file = localdb.sqlite
 
 [geo]
@@ -99,7 +99,7 @@ Important fields:
 - `[admin].enabled`: enables the separate Web Admin server. It remains `false` by default.
 - `[admin].host` and `[admin].port`: bind address and port for Web Admin. Keep the default loopback host unless access is protected by an SSH tunnel or authenticated reverse proxy.
 - `[streams].file`: JSON file that defines the feeds.
-- `[storage].backend`: persistence backend for connected-user history, Last Heard values, and the geolocation cache. Supported values are `sqlite` (default) and `json`.
+- `[storage].backend`: persistence backend for connected-user history, Last Heard values, and the geolocation cache. Supported values are `json` (default) and `sqlite`. SQLite is recommended for production.
 - `[storage].sqlite_file`: SQLite database path. Relative paths are resolved inside the runtime data directory (`data/` by default).
 - `[geo].enabled`: enables server-side IP geolocation through ipwhois. It is enabled by default and keeps public IPs anonymized before storage.
 - `[geo].key`: reserved for future geolocation providers that require an API key. ipwhois does not require one, so this can remain empty.
@@ -113,9 +113,9 @@ Important fields:
 - `[compressed].enabled`: set to `false` to disable all compressed modes and their transcoding/framing logic.
 - `[compressed].codec`: compressed mode backend. `adpcm` is the default low-latency option and does not require `ffmpeg`.
 
-SQLite stores runtime data in `data/localdb.sqlite` by default. JSON storage remains available through `[storage].backend = json` and uses `data/user-history.json`, `data/last-heard.json`, and `data/geo-cache.json`. On Node.js versions without the built-in SQLite module, run `npm install` so the optional `better-sqlite3` compatibility driver is available.
+JSON storage is the compatibility default and uses `data/user-history.json`, `data/last-heard.json`, and `data/geo-cache.json`. SQLite is recommended for production and stores runtime data in `data/localdb.sqlite` by default.
 
-When `[storage].backend = sqlite` and legacy JSON storage files are found, the server imports them automatically at startup, logs `storage_auto_migrated_json_to_sqlite` as a warning, and keeps the original JSON files untouched. Set `[storage].backend = json` if you prefer to keep the older JSON backend.
+When JSON storage is active, the server logs `storage_sqlite_recommended` at startup with the current Node.js version and migration guidance. On Node 18, run `npm install` so the optional `better-sqlite3` compatibility driver is available before using SQLite. On Node 22.13+ the built-in `node:sqlite` module is available, so no extra SQLite package is required.
 
 To migrate existing data, first stop the running server and use one of these commands:
 
@@ -127,7 +127,7 @@ node server.js --migrate sqlite
 node server.js --migrate json
 ```
 
-`--migrate` without a value uses `[storage].backend` as the destination. Migration merges with existing destination data, keeps the newest Last Heard and geolocation values, preserves history points, and does not delete the source. After verifying the result, set `[storage].backend` to the desired backend and start the server normally.
+`--migrate` without a value uses `[storage].backend` as the destination. Migration merges with existing destination data, keeps the newest Last Heard and geolocation values, preserves history points, and does not delete the source. After verifying the result, set `[storage].backend = sqlite` and start the server normally.
 
 ### Optional Geolocation And Privacy
 

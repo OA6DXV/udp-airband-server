@@ -16,7 +16,7 @@
 - Added `--help` / `-h` command-line documentation and refined Web Admin action buttons so Apply/Discard only enable when stream configuration really changed.
 - Added selectable JSON or SQLite runtime persistence for connected-user history and Last Heard values.
 - Added bidirectional, non-destructive `--migrate [json|sqlite]` storage migration with destination-data merging.
-- Changed the default runtime storage backend to SQLite at `data/localdb.sqlite`, with automatic JSON-to-SQLite import when legacy JSON files are found and SQLite is active.
+- Kept JSON as the default runtime storage backend for compatibility, while recommending SQLite at startup with Node.js version-specific migration guidance.
 - Added privacy-preserving ipwhois geolocation enabled by default with `/24` IPv4 and `/48` IPv6 anonymization, a 30-day JSON/SQLite cache, local-address exclusion, request deduplication, and rate-limit backoff.
 - Extended storage migration to carry the geolocation cache bidirectionally without replacing newer destination records.
 - Changed the default Web Admin port to `8584`, removed the public `/status` API, and moved the reserved future API key setting to `[geo].key`.
@@ -36,7 +36,7 @@
 - Se agrego documentacion de flags con `--help` / `-h` y se ajustaron los botones Apply/Discard para activarse solo cuando la configuracion de streams realmente cambio.
 - Se agrego persistencia seleccionable JSON o SQLite para el historial de usuarios conectados y los valores Last Heard.
 - Se agrego migracion bidireccional y no destructiva con `--migrate [json|sqlite]`, combinando los datos existentes en el destino.
-- Se cambio el backend de almacenamiento predeterminado a SQLite en `data/localdb.sqlite`, con importacion automatica desde JSON cuando se encuentran archivos JSON antiguos y SQLite esta activo.
+- Se mantuvo JSON como backend de almacenamiento predeterminado por compatibilidad, recomendando SQLite al iniciar con una guia de migracion segun la version de Node.js.
 - Se agrego geolocalizacion ipwhois activada por defecto con privacidad, anonimizacion IPv4 `/24` e IPv6 `/48`, cache JSON/SQLite de 30 dias, exclusion de direcciones locales, deduplicacion de consultas y pausa ante limites de la API.
 - Se amplio la migracion para transferir el cache de geolocalizacion en ambas direcciones sin reemplazar registros mas recientes en el destino.
 - Se cambio el puerto predeterminado de Web Admin a `8584`, se elimino la API publica `/status` y se movio el campo reservado de API key futura a `[geo].key`.
