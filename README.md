@@ -115,7 +115,7 @@ Important fields:
 
 JSON storage is the compatibility default and uses `data/user-history.json`, `data/last-heard.json`, and `data/geo-cache.json`. SQLite is recommended for production and stores runtime data in `data/localdb.sqlite` by default.
 
-When JSON storage is active, the server logs `storage_sqlite_recommended` at startup with the current Node.js version and migration guidance. On Node 18, run `npm install` so the optional `better-sqlite3` compatibility driver is available before using SQLite. On Node 22.13+ the built-in `node:sqlite` module is available, so no extra SQLite package is required.
+When JSON storage is active, the server prints a readable startup warning with the current Node.js version and migration guidance. On Node 18, run `npm install` so the optional `better-sqlite3` compatibility driver is available before using SQLite. On Node 22.13+ the built-in `node:sqlite` module is available, so no extra SQLite package is required.
 
 To migrate existing data, first stop the running server and use one of these commands:
 
@@ -127,7 +127,7 @@ node server.js --migrate sqlite
 node server.js --migrate json
 ```
 
-`--migrate` without a value uses `[storage].backend` as the destination. Migration merges with existing destination data, keeps the newest Last Heard and geolocation values, preserves history points, and does not delete the source. After verifying the result, set `[storage].backend = sqlite` and start the server normally.
+`--migrate` without a value uses `[storage].backend` as the destination. Migration shows the current source and target, asks for `Y/N` confirmation, merges with existing destination data, keeps the newest Last Heard and geolocation values, preserves history points, and does not delete the source. After a successful migration, the server updates `[storage].backend` in `server.conf` automatically.
 
 ### Optional Geolocation And Privacy
 

@@ -8,7 +8,7 @@ const http = require('http');
 const net = require('net');
 const os = require('os');
 const path = require('path');
-const { parseArgs } = require('../lib/config');
+const { loadServerConfig, parseArgs, setServerConfigSetting } = require('../lib/config');
 const { createGeoService } = require('../lib/geo-service');
 const { classifyAddress } = require('../lib/ip-privacy');
 const { detectRuntimeMode } = require('../lib/runtime');
@@ -26,6 +26,7 @@ run().catch((err) => {
 
 async function run() {
   testRuntimeDetection();
+  testServerConfigSettingUpdate();
   testUserHistoryWindow();
   testStorageMigration();
   await testGeoPrivacyAndCache();
@@ -172,6 +173,29 @@ async function run() {
   }
 
   await testConfigEnabledStartup();
+}
+
+function testServerConfigSettingUpdate() {
+  const temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-config-test-'));
+  const filePath = path.join(temporaryDir, 'server.conf');
+  try {
+    fs.writeFileSync(filePath, [
+      '[web]',
+      'port = 8585',
+      '',
+      '[storage]',
+      '# keep this comment',
+      'backend = json',
+      'sqlite_file = localdb.sqlite',
+      '',
+    ].join('\n'));
+    setServerConfigSetting(filePath, 'storage', 'backend', 'sqlite', fs, path);
+    const config = loadServerConfig(filePath, fs, path);
+    assert.strictEqual(config['storage.backend'], 'sqlite');
+    assert.match(fs.readFileSync(filePath, 'utf8'), /# keep this comment/);
+  } finally {
+    fs.rmSync(temporaryDir, { recursive: true, force: true });
+  }
 }
 
 function testRuntimeDetection() {

@@ -115,7 +115,7 @@ Campos importantes:
 
 El almacenamiento JSON es el valor predeterminado de compatibilidad y utiliza `data/user-history.json`, `data/last-heard.json` y `data/geo-cache.json`. SQLite se recomienda para produccion y guarda los datos de ejecucion en `data/localdb.sqlite` de forma predeterminada.
 
-Cuando el almacenamiento JSON esta activo, el servidor muestra el warning `storage_sqlite_recommended` al iniciar con la version actual de Node.js y la guia de migracion. En Node 18, ejecuta `npm install` para instalar el driver opcional de compatibilidad `better-sqlite3` antes de usar SQLite. En Node 22.13+ el modulo integrado `node:sqlite` esta disponible, asi que no se requiere ningun paquete SQLite adicional.
+Cuando el almacenamiento JSON esta activo, el servidor muestra un warning legible al iniciar con la version actual de Node.js y la guia de migracion. En Node 18, ejecuta `npm install` para instalar el driver opcional de compatibilidad `better-sqlite3` antes de usar SQLite. En Node 22.13+ el modulo integrado `node:sqlite` esta disponible, asi que no se requiere ningun paquete SQLite adicional.
 
 Para migrar datos existentes, primero detiene el servidor en ejecucion y usa uno de estos comandos:
 
@@ -127,7 +127,7 @@ node server.js --migrate sqlite
 node server.js --migrate json
 ```
 
-`--migrate` sin valor utiliza `[storage].backend` como destino. La migracion combina los datos que ya existan en el destino, conserva los valores Last Heard y de geolocalizacion mas recientes, mantiene los puntos del historial y no borra el origen. Despues de verificar el resultado, define `[storage].backend = sqlite` e inicia el servidor normalmente.
+`--migrate` sin valor utiliza `[storage].backend` como destino. La migracion muestra el origen y destino, pide confirmacion `Y/N`, combina los datos que ya existan en el destino, conserva los valores Last Heard y de geolocalizacion mas recientes, mantiene los puntos del historial y no borra el origen. Despues de una migracion exitosa, el servidor actualiza automaticamente `[storage].backend` en `server.conf`.
 
 ### Geolocalizacion Opcional Y Privacidad
 

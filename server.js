@@ -11,7 +11,14 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 
 const { normalizeClientId } = require('./lib/clients');
-const { ensureServerConfigDefaults, getSetting, loadServerConfig, parseArgs, parseBoolean } = require('./lib/config');
+const {
+  ensureServerConfigDefaults,
+  getSetting,
+  loadServerConfig,
+  parseArgs,
+  parseBoolean,
+  setServerConfigSetting,
+} = require('./lib/config');
 const {
   addListenerBytes,
   addListenerMode,
@@ -140,13 +147,33 @@ try {
 if (args.migrate !== undefined) {
   const migrationTarget = args.migrate === true ? storageBackend : args.migrate;
   try {
-    migrateStorage({
+    const normalizedMigrationTarget = normalizeStorageBackend(migrationTarget);
+    const migrationSource = normalizedMigrationTarget === 'sqlite' ? 'json' : 'sqlite';
+    confirmStorageMigration({
+      source: migrationSource,
+      target: normalizedMigrationTarget,
+      serverConfigPath,
+      sqliteFile,
+    });
+    const result = migrateStorage({
       dataDir,
       fs,
       logger,
       path,
       sqliteFile,
-      target: migrationTarget,
+      target: normalizedMigrationTarget,
+    });
+    setServerConfigSetting(serverConfigPath, 'storage', 'backend', normalizedMigrationTarget, fs, path);
+    logger.warn('storage_backend_config_updated', {
+      serverConfig: serverConfigPath,
+      storageBackend: normalizedMigrationTarget,
+    });
+    logger.info('storage_migration_summary', {
+      from: migrationSource,
+      to: normalizedMigrationTarget,
+      userHistory: result.userHistory,
+      lastHeard: result.lastHeard,
+      geoCache: result.geoCache,
     });
     process.exit(0);
   } catch (err) {
@@ -1124,14 +1151,15 @@ function fatal(message) {
 
 function warnWhenJsonStorageIsActive() {
   if (storageBackend !== 'json') return;
-  logger.warn('storage_sqlite_recommended', {
-    currentBackend: 'json',
-    recommendedBackend: 'sqlite',
-    nodeVersion: process.versions.node,
-    migration: 'stop server, run: node server.js --migrate sqlite, then set [storage].backend = sqlite',
-    sqliteFile,
-    nodeGuidance: getSqliteRuntimeGuidance(process.versions.node),
-  });
+  logger.plain('warn', [
+    'Storage recommendation: SQLite is recommended for production.',
+    `  Current storage: JSON files in ${dataDir}`,
+    `  Recommended storage: SQLite database at ${sqliteFile}`,
+    `  Node.js version: ${process.versions.node}`,
+    `  ${getSqliteRuntimeGuidance(process.versions.node)}`,
+    '  To migrate: stop the server, then run: node server.js --migrate sqlite',
+    '  The migration keeps the old JSON files and updates [storage].backend in server.conf after confirmation.',
+  ].join('\n'));
 }
 
 function getSqliteRuntimeGuidance(version) {
@@ -1146,6 +1174,38 @@ function getSqliteRuntimeGuidance(version) {
     return 'Upgrade to Node 22.13+ for node:sqlite without flags, or run npm install for better-sqlite3.';
   }
   return 'Run npm install for better-sqlite3, or use Node 22.13+ for built-in node:sqlite.';
+}
+
+function confirmStorageMigration({ source, target, serverConfigPath, sqliteFile }) {
+  logger.plain('warn', [
+    'Storage migration requested.',
+    `  From: ${source}`,
+    `  To: ${target}`,
+    `  Server config to update: ${serverConfigPath}`,
+    `  SQLite file: ${sqliteFile}`,
+    '  Existing destination data will be merged. Source data will not be deleted.',
+  ].join('\n'));
+
+  const answer = readTerminalConfirmation(`Continue migration ${source} -> ${target}? Type Y to continue or N to cancel: `);
+  if (!['y', 'yes'].includes(answer.toLowerCase())) {
+    throw new Error('Storage migration cancelled by user.');
+  }
+}
+
+function readTerminalConfirmation(question) {
+  const device = process.platform === 'win32' ? 'CON' : '/dev/tty';
+  let fd;
+  try {
+    fd = fs.openSync(device, 'r+');
+    fs.writeSync(fd, question);
+    const buffer = Buffer.alloc(32);
+    const bytes = fs.readSync(fd, buffer, 0, buffer.length, null);
+    return buffer.subarray(0, bytes).toString('utf8').trim();
+  } catch (err) {
+    throw new Error(`Storage migration requires an interactive terminal confirmation. ${err.message}`);
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
 }
 
 function printHelp() {
@@ -1168,6 +1228,7 @@ Storage:
   --sqlite-file PATH            SQLite database path. Relative paths use --data-dir.
   --migrate [json|sqlite]       Merge persisted data into the selected destination and exit.
                                 Without a value, the destination is [storage].backend.
+                                Requires Y/N confirmation and updates server.conf on success.
 
 Public web player:
   --http-host HOST              Web player bind host. Overrides [web].host.
