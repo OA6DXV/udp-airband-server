@@ -114,11 +114,10 @@ function drawChart() {
     datalessRegionColor: '#29323c',
     defaultColor: '#4fb477',
     displayMode: 'regions',
-    legend: {
-      textStyle: { color: '#9aa8b7' },
-    },
+    legend: 'none',
     tooltip: {
       isHtml: true,
+      trigger: 'focus',
       textStyle: { color: '#edf1f5' },
     },
   });
@@ -172,10 +171,11 @@ function renderSelectedCountry() {
 
 function buildTooltip(country) {
   const lines = [
+    `<div class="geo-tooltip-country">${escapeHtml(country.code)}</div>`,
     `<strong>${escapeHtml(translate('listeners'))}: ${country.listeners}</strong>`,
     ...country.topCities.map((city) => `${escapeHtml(city.city)}: ${city.listeners}`),
   ];
-  return `<div class="geo-tooltip">${lines.join('<br>')}</div>`;
+  return `<div class="geo-tooltip">${lines.join('')}</div>`;
 }
 
 function applyLanguage() {

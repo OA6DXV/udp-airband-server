@@ -329,10 +329,37 @@ main {
 
 .geo-tooltip {
   min-width: 150px;
-  padding: 8px 10px;
+  padding: 10px 12px;
   background: var(--surface-2);
   color: var(--text);
-  font: 13px/1.65 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 35%);
+  font: 13px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.geo-tooltip strong,
+.geo-tooltip div {
+  display: block;
+}
+
+.geo-tooltip-country {
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.google-visualization-tooltip {
+  border: 1px solid var(--border) !important;
+  background: var(--surface-2) !important;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 35%) !important;
+  color: var(--text) !important;
+}
+
+.google-visualization-tooltip > ul,
+.google-visualization-tooltip > div {
+  margin: 0 !important;
+  background: var(--surface-2) !important;
+  color: var(--text) !important;
 }
 
 .geo-message {
