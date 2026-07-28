@@ -38,6 +38,10 @@ form.addEventListener('submit', async (event) => {
     showMessage('Reload this page before trying again.');
     return;
   }
+  if (!usernameInput.value.trim() || !passwordInput.value) {
+    showMessage('Enter username and password.');
+    return;
+  }
   setBusy(true);
   showMessage('');
   let altchaPayload = '';

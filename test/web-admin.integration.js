@@ -109,6 +109,7 @@ async function run() {
   try {
     const loginPage = await waitFor(() => request(adminPort, '/'));
     assert.match(loginPage.body, /id="loginForm"/);
+    assert.match(loginPage.body, /<form[^>]+novalidate/);
     assert.strictEqual((await request(adminPort, '/api/state')).statusCode, 401);
     const altchaWorker = await request(adminPort, '/altcha-pbkdf2.js');
     assert.strictEqual(altchaWorker.statusCode, 200);

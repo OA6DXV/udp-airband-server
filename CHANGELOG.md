@@ -5,6 +5,7 @@
 ### English
 
 - Added secure Web Admin authentication with hardened sessions, CSRF protection, login rate limiting, and challenge handling.
+- Fixed Web Admin login submission when the ALTCHA challenge is hidden and reduced noisy browser warnings on non-HTTPS admin testing.
 - Added automatic first-run generation of private Web Admin secrets in `data/admin-secrets.env` when environment-provided secrets are absent, with startup/login notices explaining storage, backups, custom-secret timing, and missing administrator setup.
 - Made SQLite the exclusive runtime database for listener metrics, Last Heard, geolocation, and Web Admin authentication.
 - Changed `--migrate` to a one-way legacy JSON-to-SQLite import that preserves the source files in a timestamped backup directory.
@@ -14,6 +15,7 @@
 ### Espanol
 
 - Se agrego autenticacion segura para Web Admin con sesiones reforzadas, proteccion CSRF, limites de intentos de login y sistema de desafios.
+- Se corrigio el envio del login de Web Admin cuando el desafio ALTCHA esta oculto y se redujeron warnings del navegador durante pruebas admin sin HTTPS.
 - Se agrego generacion automatica de secretos privados de Web Admin en `data/admin-secrets.env` durante el primer arranque cuando no existen secretos por entorno, con avisos de inicio/login sobre almacenamiento, respaldos, cuando conviene definir secretos custom y configuracion pendiente del administrador.
 - SQLite paso a ser la unica base de datos de ejecucion para metricas de listeners, Last Heard, geolocalizacion y autenticacion de Web Admin.
 - `--migrate` ahora importa unicamente de JSON heredado a SQLite y conserva los archivos originales en una carpeta de respaldo con fecha.
