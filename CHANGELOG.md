@@ -25,6 +25,7 @@
 - Added live stream-configuration notifications: label changes update open hub, single-player, and Multi Stream pages without interrupting audio, while incompatible stream changes stop affected players and guide listeners back to the refreshed home page.
 - Refined Web Admin change notices so display-name-only edits do not request reloads, while unnecessary reloads ask for confirmation before interrupting listeners.
 - Refined the Web Admin connected-user chart scale and added a placeholder connected-users detail page.
+- Added a privacy-preserving Google GeoChart to Web Admin with country totals, up to three leading cities in localized tooltips, and selectable country details.
 - Documented Web Admin usage in both English and Spanish README files.
 
 ### Espanol
@@ -50,6 +51,7 @@
 - Se agregaron notificaciones en vivo de configuracion: los cambios de etiqueta actualizan el hub, reproductores individuales y Multi Stream sin interrumpir el audio, mientras que los cambios incompatibles detienen los reproductores afectados y guian al listener de vuelta a la pagina principal actualizada.
 - Se ajustaron los avisos de Web Admin para que cambios solo de nombre visible no pidan recarga, mientras que recargas innecesarias pidan confirmacion antes de interrumpir listeners.
 - Se ajusto la escala del grafico de usuarios conectados en Web Admin y se agrego una pagina base para el detalle de usuarios conectados.
+- Se agrego un Google GeoChart con privacidad a Web Admin, con totales por pais, hasta tres ciudades principales en tooltips localizados y detalle seleccionable por pais.
 - Se documento el uso de Web Admin en los README en ingles y espanol.
 
 ## 1.6 - 2026-07-26

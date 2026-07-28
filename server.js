@@ -34,6 +34,7 @@ const { DEFAULT_STREAMS, loadStreams, loadStreamsFromConfig, renderMultiStreamPa
 const { acceptWebSocket, sendWsBinary, sendWsJson } = require('./lib/websocket');
 const { createCompressedManager } = require('./lib/compressed');
 const { createGeoService } = require('./lib/geo-service');
+const { aggregateGeoStats } = require('./lib/geo-stats');
 const { createNativeMultiAac } = require('./lib/native-multi-aac');
 const { detectRuntimeMode } = require('./lib/runtime');
 const { createStorage, normalizeStorageBackend } = require('./lib/storage');
@@ -252,6 +253,7 @@ const adminAssets = webAdminEnabled ? {
   html: fs.readFileSync(path.join(publicDir, 'admin', 'index.html')),
   usersHtml: fs.readFileSync(path.join(publicDir, 'admin', 'users.html'), 'utf8')
     .replace('__SOFTWARE_VERSION__', SOFTWARE_VERSION),
+  usersJs: fs.readFileSync(path.join(publicDir, 'admin', 'users.js')),
   css: fs.readFileSync(path.join(publicDir, 'admin', 'admin.css')),
   js: fs.readFileSync(path.join(publicDir, 'admin', 'admin.js')),
   favicon: faviconIco,
@@ -326,6 +328,7 @@ const webServer = tlsEnabled
   : http.createServer(handleHttpRequest);
 const webAdmin = webAdminEnabled ? createWebAdmin({
   assets: adminAssets,
+  getGeoStats: () => aggregateGeoStats(geoCache.entries()),
   getState: getWebAdminState,
   host: webAdminHost,
   http,

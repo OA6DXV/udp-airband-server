@@ -6,6 +6,8 @@
   <title>UDP Airband Admin - Users</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="stylesheet" href="/admin.css">
+  <script src="https://www.gstatic.com/charts/loader.js"></script>
+  <script src="/users.js" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -18,13 +20,39 @@
         <span class="status-dot online" role="status" aria-label="Server online" title="Server online"></span>
         <span>__SOFTWARE_VERSION__</span>
       </div>
-      <select class="language-select" aria-label="Language">
+      <select id="languageSelect" class="language-select" aria-label="Language">
         <option value="en">EN</option>
         <option value="es">ES</option>
       </select>
     </div>
   </header>
 
-  <main></main>
+  <main>
+    <a class="users-back" href="/" data-i18n="backToAdmin">&lt; Web Admin</a>
+
+    <section class="panel geo-panel">
+      <div class="section-heading">
+        <div>
+          <h2 data-i18n="listenerGeography">Listener geography</h2>
+          <p data-i18n="geoDescription">Anonymized listener locations stored by the server</p>
+        </div>
+        <div class="geo-total">
+          <span data-i18n="knownListeners">Known listeners</span>
+          <strong id="geoTotal">0</strong>
+        </div>
+      </div>
+
+      <div id="geoMessage" class="message visible" role="status" aria-live="polite" data-i18n="loadingMap">Loading map...</div>
+      <div class="geo-layout">
+        <div id="geoChart" class="geo-chart" aria-label="Listener geography map" data-i18n-aria="mapAria"></div>
+        <aside id="countryDetail" class="country-detail" hidden>
+          <p id="countryDetailEyebrow" class="eyebrow" data-i18n="selectedCountry">Selected country</p>
+          <h2 id="countryName"></h2>
+          <p class="country-total"><span data-i18n="listeners">Listeners</span>: <strong id="countryListeners">0</strong></p>
+          <div id="cityList" class="city-list"></div>
+        </aside>
+      </div>
+    </section>
+  </main>
 </body>
 </html>

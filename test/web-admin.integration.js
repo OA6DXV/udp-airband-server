@@ -10,6 +10,7 @@ const os = require('os');
 const path = require('path');
 const { loadServerConfig, parseArgs, setServerConfigSetting } = require('../lib/config');
 const { createGeoService } = require('../lib/geo-service');
+const { aggregateGeoStats } = require('../lib/geo-stats');
 const { classifyAddress } = require('../lib/ip-privacy');
 const { detectRuntimeMode } = require('../lib/runtime');
 const { openSqliteDatabase } = require('../lib/sqlite-database');
@@ -28,6 +29,7 @@ async function run() {
   testRuntimeDetection();
   testServerConfigSettingUpdate();
   testUserHistoryWindow();
+  testGeoStatsAggregation();
   testStorageMigration();
   await testGeoPrivacyAndCache();
   const temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-admin-test-'));
@@ -40,6 +42,14 @@ async function run() {
   const configPath = path.join(temporaryDir, 'streams.json');
   const serverConfigPath = path.join(temporaryDir, 'server.conf');
   const dataDir = path.join(temporaryDir, 'data');
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'geo-cache.json'), JSON.stringify({
+    '203.0.113.0': geoRecord('203.0.113.0', 'PE', 'Peru', 'Cusco'),
+    '203.0.114.0': geoRecord('203.0.114.0', 'PE', 'Peru', 'Cusco'),
+    '203.0.115.0': geoRecord('203.0.115.0', 'PE', 'Peru', 'Lima'),
+    '198.51.100.0': geoRecord('198.51.100.0', 'US', 'United States', 'Miami'),
+    '127.0.0.1': geoRecord('127.0.0.1', '', 'Local IP', 'Local IP', 'local'),
+  }));
   fs.writeFileSync(serverConfigPath, [
     '[web]',
     'host = 127.0.0.1',
@@ -101,7 +111,24 @@ async function run() {
     const usersPage = await request(adminPort, '/users');
     assert.strictEqual(usersPage.statusCode, 200);
     assert.match(usersPage.body, /Web Admin/);
-    assert.match(usersPage.body, /<main><\/main>/);
+    assert.match(usersPage.body, /id="geoChart"/);
+    assert.match(usersPage.body, /\/users\.js/);
+    assert.match(usersPage.headers['content-security-policy'], /https:\/\/www\.gstatic\.com/);
+
+    const geoResponse = await request(adminPort, '/api/users/geo');
+    assert.strictEqual(geoResponse.statusCode, 200);
+    assert.doesNotMatch(geoResponse.body, /203\.0\.113\.0|127\.0\.0\.1/);
+    const geoPayload = JSON.parse(geoResponse.body);
+    assert.strictEqual(geoPayload.totalListeners, 4);
+    assert.deepStrictEqual(geoPayload.countries[0], {
+      code: 'PE',
+      country: 'Peru',
+      listeners: 3,
+      topCities: [
+        { city: 'Cusco', listeners: 2 },
+        { city: 'Lima', listeners: 1 },
+      ],
+    });
 
     const publicPage = await request(publicPort, '/');
     assert.strictEqual(publicPage.statusCode, 200);
@@ -241,6 +268,34 @@ function testUserHistoryWindow() {
   const points = history.snapshot(now - 12 * 60 * 60 * 1000);
   assert.deepStrictEqual(points, [{ at: now - 11 * 60 * 60 * 1000, count: 2 }]);
   fs.rmSync(temporaryDir, { recursive: true, force: true });
+}
+
+function testGeoStatsAggregation() {
+  const result = aggregateGeoStats([
+    geoRecord('203.0.113.0', 'PE', 'Peru', 'Lima'),
+    geoRecord('203.0.114.0', 'PE', 'Peru', 'Cusco'),
+    geoRecord('203.0.115.0', 'PE', 'Peru', 'Cusco'),
+    geoRecord('203.0.116.0', 'PE', 'Peru', 'Arequipa'),
+    geoRecord('203.0.117.0', 'PE', 'Peru', 'Tacna'),
+    geoRecord('127.0.0.1', '', 'Local IP', 'Local IP', 'local'),
+  ]);
+  assert.strictEqual(result.totalListeners, 5);
+  assert.deepStrictEqual(result.countries[0].topCities, [
+    { city: 'Cusco', listeners: 2 },
+    { city: 'Arequipa', listeners: 1 },
+    { city: 'Lima', listeners: 1 },
+  ]);
+}
+
+function geoRecord(anonymizedIp, countryCode, country, city, source = 'ipwhois') {
+  return {
+    anonymizedIp,
+    countryCode,
+    country,
+    city,
+    lookedUpAt: Date.now(),
+    source,
+  };
 }
 
 function testStorageMigration() {
