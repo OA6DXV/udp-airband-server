@@ -3,6 +3,7 @@
 const LANGUAGE_STORAGE_KEY = 'udp-airband-language';
 const translations = {
   en: {
+    webAdmin: 'Web Admin',
     backToAdmin: '< Back',
     listenerGeography: 'Listener Geography',
     listeners: 'Listeners',
@@ -18,8 +19,9 @@ const translations = {
     serverOffline: 'Server offline',
   },
   es: {
-    backToAdmin: '< Back',
-    listenerGeography: 'Listener Geography',
+    webAdmin: 'Administración web',
+    backToAdmin: '< Volver',
+    listenerGeography: 'Geografía de oyentes',
     listeners: 'Oyentes',
     loadingMap: 'Cargando mapa...',
     noGeoData: 'Todavía no se recopilaron ubicaciones públicas de oyentes.',
