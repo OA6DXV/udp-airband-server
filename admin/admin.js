@@ -56,6 +56,10 @@ const translations = {
     stereo: 'Stereo',
     noUnsavedChanges: 'No unsaved changes',
     unsavedChanges: 'Unsaved changes',
+    labelOnlyChanges: 'Only display names changed. No stream reload is needed.',
+    structuralChanges: 'Structural stream changes detected. Affected listeners will be notified.',
+    labelChangesApplied: 'Display name changes were saved and applied live. Reload is not needed.',
+    structuralChangesApplied: 'Structural changes were saved. Reload streams to confirm the runtime configuration; affected listeners were notified.',
     discardChanges: 'Discard changes',
     applyChanges: 'Apply changes',
     reloadStreams: 'Reload streams',
@@ -66,7 +70,7 @@ const translations = {
     removeStream: 'Remove stream',
     newStream: 'New stream',
     atLeastOneStream: 'At least one stream is required.',
-    streamsUpdated: 'Streams updated. Reload streams to confirm the saved configuration.',
+    streamsUpdated: 'Streams updated.',
     streamsReloaded: 'Streams reloaded from disk.',
     restartTitle: 'Restart server?',
     shutdownTitle: 'Shut down server?',
@@ -116,6 +120,10 @@ const translations = {
     stereo: 'Estéreo',
     noUnsavedChanges: 'No hay cambios sin guardar',
     unsavedChanges: 'Cambios sin guardar',
+    labelOnlyChanges: 'Solo cambiaron nombres visibles. No es necesario recargar los streams.',
+    structuralChanges: 'Se detectaron cambios estructurales. Los oyentes afectados serán notificados.',
+    labelChangesApplied: 'Los nombres visibles se guardaron y actualizaron en vivo. No es necesario recargar.',
+    structuralChangesApplied: 'Los cambios estructurales se guardaron. Recarga los streams para confirmar la configuración activa; los oyentes afectados fueron notificados.',
     discardChanges: 'Descartar cambios',
     applyChanges: 'Aplicar cambios',
     reloadStreams: 'Recargar streams',
@@ -126,7 +134,7 @@ const translations = {
     removeStream: 'Eliminar stream',
     newStream: 'Nuevo stream',
     atLeastOneStream: 'Se requiere al menos un stream.',
-    streamsUpdated: 'Streams actualizados. Recarga los streams para confirmar la configuración guardada.',
+    streamsUpdated: 'Streams actualizados.',
     streamsReloaded: 'Streams recargados desde el disco.',
     restartTitle: '¿Reiniciar servidor?',
     shutdownTitle: '¿Apagar servidor?',
@@ -158,6 +166,9 @@ let operationBusy = false;
 let lastUserHistory = [];
 let savedStreams = [];
 let softwareVersion = '';
+let changeScope = 'none';
+let postSaveNotice = null;
+let reloadPending = false;
 let language = localStorage.getItem(LANGUAGE_STORAGE_KEY);
 if (!translations[language]) language = 'en';
 
@@ -252,6 +263,7 @@ async function saveStreams(event) {
   if (!form.reportValidity()) return;
 
   const streams = collectFormStreams();
+  const appliedScope = classifyStreamChanges(streams, savedStreams);
 
   setBusy(true);
   try {
@@ -264,9 +276,16 @@ async function saveStreams(event) {
       body: JSON.stringify({ streams }),
     });
     dirty = false;
+    changeScope = 'none';
+    postSaveNotice = appliedScope === 'none'
+      ? 'streamsUpdated'
+      : appliedScope === 'label'
+        ? 'labelChangesApplied'
+        : 'structuralChangesApplied';
+    reloadPending = appliedScope === 'structural';
+    reloadButton.classList.toggle('reload-pending', reloadPending);
     updateDirtyState();
-    reloadButton.classList.add('reload-pending');
-    showMessage(translate('streamsUpdated'), 'success');
+    showMessage(translate(postSaveNotice || 'streamsUpdated'), 'success');
     await loadState(true);
   } catch (err) {
     showMessage(err.message, 'error');
@@ -284,6 +303,9 @@ async function reloadStreams() {
       headers: { 'x-admin-request': '1' },
     });
     dirty = false;
+    changeScope = 'none';
+    postSaveNotice = null;
+    reloadPending = false;
     updateDirtyState();
     reloadButton.classList.remove('reload-pending');
     showMessage(translate('streamsReloaded'), 'success');
@@ -400,13 +422,17 @@ async function request(url, options) {
 }
 
 function markDirty() {
-  dirty = !streamsEqual(collectFormStreams(), savedStreams);
+  changeScope = classifyStreamChanges(collectFormStreams(), savedStreams);
+  dirty = changeScope !== 'none';
+  if (dirty) postSaveNotice = null;
   updateDirtyState();
 }
 
 function discardChanges() {
   renderStreamsFrom(savedStreams);
   dirty = false;
+  changeScope = 'none';
+  postSaveNotice = null;
   updateDirtyState();
   clearMessage();
 }
@@ -414,12 +440,21 @@ function discardChanges() {
 function renderStreamsFrom(streams) {
   rowsEl.replaceChildren();
   streams.forEach(appendRow);
-  dirty = !streamsEqual(collectFormStreams(), savedStreams);
+  changeScope = classifyStreamChanges(collectFormStreams(), savedStreams);
+  dirty = changeScope !== 'none';
   updateDirtyState();
 }
 
 function updateDirtyState() {
-  dirtyStateEl.textContent = translate(dirty ? 'unsavedChanges' : 'noUnsavedChanges');
+  let key = 'noUnsavedChanges';
+  if (dirty) {
+    key = changeScope === 'label' ? 'labelOnlyChanges' : 'structuralChanges';
+  } else if (reloadPending) {
+    key = 'structuralChangesApplied';
+  } else if (postSaveNotice) {
+    key = postSaveNotice;
+  }
+  dirtyStateEl.textContent = translate(key);
   updateControls();
 }
 
@@ -452,6 +487,26 @@ function streamsEqual(left, right) {
   const a = left.map(normalizeStreamForCompare);
   const b = right.map(normalizeStreamForCompare);
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function classifyStreamChanges(currentStreams, savedStreamList) {
+  const current = currentStreams.map(normalizeStreamForCompare);
+  const saved = savedStreamList.map(normalizeStreamForCompare);
+  if (JSON.stringify(current) === JSON.stringify(saved)) return 'none';
+  if (JSON.stringify(current.map(withoutDisplayLabel)) === JSON.stringify(saved.map(withoutDisplayLabel))) {
+    return 'label';
+  }
+  return 'structural';
+}
+
+function withoutDisplayLabel(stream) {
+  return {
+    name: stream.name,
+    udpHost: stream.udpHost,
+    udpPort: stream.udpPort,
+    sampleRate: stream.sampleRate,
+    channels: stream.channels,
+  };
 }
 
 function normalizeStreamForCompare(stream) {
