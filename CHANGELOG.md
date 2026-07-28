@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.8-unstable - Unreleased
+## 1.8-preview - Unreleased
 
 ### English
 

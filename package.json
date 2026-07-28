@@ -1,6 +1,6 @@
 {
   "name": "udp-airband-server",
-  "version": "1.8-unstable",
+  "version": "1.8-preview",
   "private": false,
   "description": "UDP float PCM to browser audio bridge for RTLSDR-Airband.",
   "main": "server.js",
