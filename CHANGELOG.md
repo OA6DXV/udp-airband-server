@@ -16,8 +16,10 @@
 - Added `--help` / `-h` command-line documentation and refined Web Admin action buttons so Apply/Discard only enable when stream configuration really changed.
 - Added selectable JSON or SQLite runtime persistence for connected-user history and Last Heard values.
 - Added bidirectional, non-destructive `--migrate [json|sqlite]` storage migration with destination-data merging.
-- Added optional privacy-preserving ipwhois geolocation with `/24` IPv4 and `/48` IPv6 anonymization, a 30-day JSON/SQLite cache, local-address exclusion, request deduplication, and rate-limit backoff.
+- Changed the default runtime storage backend to SQLite at `data/localdb.sqlite`, with automatic JSON-to-SQLite import when legacy JSON files are found and SQLite is active.
+- Added privacy-preserving ipwhois geolocation enabled by default with `/24` IPv4 and `/48` IPv6 anonymization, a 30-day JSON/SQLite cache, local-address exclusion, request deduplication, and rate-limit backoff.
 - Extended storage migration to carry the geolocation cache bidirectionally without replacing newer destination records.
+- Changed the default Web Admin port to `8584` and changed `[api]` to keep a reserved `key =` setting for future external API integrations.
 - Documented Web Admin usage in both English and Spanish README files.
 
 ### Espanol
@@ -34,8 +36,10 @@
 - Se agrego documentacion de flags con `--help` / `-h` y se ajustaron los botones Apply/Discard para activarse solo cuando la configuracion de streams realmente cambio.
 - Se agrego persistencia seleccionable JSON o SQLite para el historial de usuarios conectados y los valores Last Heard.
 - Se agrego migracion bidireccional y no destructiva con `--migrate [json|sqlite]`, combinando los datos existentes en el destino.
-- Se agrego geolocalizacion ipwhois opcional con privacidad, anonimizacion IPv4 `/24` e IPv6 `/48`, cache JSON/SQLite de 30 dias, exclusion de direcciones locales, deduplicacion de consultas y pausa ante limites de la API.
+- Se cambio el backend de almacenamiento predeterminado a SQLite en `data/localdb.sqlite`, con importacion automatica desde JSON cuando se encuentran archivos JSON antiguos y SQLite esta activo.
+- Se agrego geolocalizacion ipwhois activada por defecto con privacidad, anonimizacion IPv4 `/24` e IPv6 `/48`, cache JSON/SQLite de 30 dias, exclusion de direcciones locales, deduplicacion de consultas y pausa ante limites de la API.
 - Se amplio la migracion para transferir el cache de geolocalizacion en ambas direcciones sin reemplazar registros mas recientes en el destino.
+- Se cambio el puerto predeterminado de Web Admin a `8584` y se cambio `[api]` para conservar un campo reservado `key =` para futuras integraciones de API externa.
 - Se documento el uso de Web Admin en los README en ingles y espanol.
 
 ## 1.6 - 2026-07-26

@@ -53,23 +53,26 @@ port = 8585
 
 [admin]
 host = 127.0.0.1
-port = 9090
+port = 8584
 enabled = false
 
 [streams]
 file = streams.json
 
 [storage]
-backend = json
-sqlite_file = udp-airband-server.sqlite
+backend = sqlite
+sqlite_file = localdb.sqlite
 
 [geo]
-enabled = false
+enabled = true
 provider = ipwhois
 cache_ttl_days = 30
 timeout_ms = 1500
 ipv4_anonymize = /24
 ipv6_anonymize = /48
+
+[api]
+key =
 
 [logging]
 level = info
@@ -98,12 +101,13 @@ Important fields:
 - `[admin].enabled`: enables the separate Web Admin server. It remains `false` by default.
 - `[admin].host` and `[admin].port`: bind address and port for Web Admin. Keep the default loopback host unless access is protected by an SSH tunnel or authenticated reverse proxy.
 - `[streams].file`: JSON file that defines the feeds.
-- `[storage].backend`: persistence backend for connected-user history, Last Heard values, and the optional geolocation cache. Supported values are `json` (default) and `sqlite`.
+- `[storage].backend`: persistence backend for connected-user history, Last Heard values, and the geolocation cache. Supported values are `sqlite` (default) and `json`.
 - `[storage].sqlite_file`: SQLite database path. Relative paths are resolved inside the runtime data directory (`data/` by default).
-- `[geo].enabled`: enables optional server-side IP geolocation through ipwhois. It is disabled by default.
+- `[geo].enabled`: enables server-side IP geolocation through ipwhois. It is enabled by default and keeps public IPs anonymized before storage.
 - `[geo].cache_ttl_days`: rechecks public network locations after 30 days by default.
 - `[geo].timeout_ms`: maximum time allowed for a geolocation request. Lookups never block a listener connection.
 - `[geo].ipv4_anonymize` and `[geo].ipv6_anonymize`: document the enforced `/24` and `/48` public-IP anonymization policies.
+- `[api].key`: reserved for future external API integrations. ipwhois does not require a key, so this can remain empty.
 - `[logging].level`: service-friendly logging level. Supported values are `off`, `error`, `warn`, `info`, and `debug`. The default is `info`.
 - `[logging].timestamps`: set to `true` to prepend ISO timestamps. With `systemd`, this can usually stay `false` because `journalctl` already adds timestamps.
 - `[logging].colors`: set to `true` to color terminal logs. Keep it `false` for normal `systemd` service logs.
@@ -111,7 +115,9 @@ Important fields:
 - `[compressed].enabled`: set to `false` to disable all compressed modes and their transcoding/framing logic.
 - `[compressed].codec`: compressed mode backend. `adpcm` is the default low-latency option and does not require `ffmpeg`.
 
-JSON storage uses `data/user-history.json`, `data/last-heard.json`, and, when geolocation is enabled, `data/geo-cache.json`. SQLite stores the same datasets in `data/udp-airband-server.sqlite` by default. On Node.js versions without the built-in SQLite module, run `npm install` so the optional `better-sqlite3` compatibility driver is available.
+SQLite stores runtime data in `data/localdb.sqlite` by default. JSON storage remains available through `[storage].backend = json` and uses `data/user-history.json`, `data/last-heard.json`, and `data/geo-cache.json`. On Node.js versions without the built-in SQLite module, run `npm install` so the optional `better-sqlite3` compatibility driver is available.
+
+When `[storage].backend = sqlite` and legacy JSON storage files are found, the server imports them automatically at startup, logs `storage_auto_migrated_json_to_sqlite` as a warning, and keeps the original JSON files untouched. Set `[storage].backend = json` if you prefer to keep the older JSON backend.
 
 To migrate existing data, first stop the running server and use one of these commands:
 
@@ -285,14 +291,14 @@ The administration page is disabled by default and is not served from the public
 ```conf
 [admin]
 host = 127.0.0.1
-port = 9090
+port = 8584
 enabled = true
 ```
 
 It can also be enabled for one run by passing a separate port:
 
 ```bash
-node server.js --webserver 9090
+node server.js --webserver 8584
 ```
 
 `--webserver PORT` takes priority over `[admin].enabled` and `[admin].port`. The startup log reports `webadmin_config_override` so it is clear that command-line values replaced the configuration file. The older `--webadmin PORT` spelling remains available as a compatible alias.
@@ -300,10 +306,10 @@ node server.js --webserver 9090
 The admin server uses `[admin].host`, which defaults to `127.0.0.1`. Open it securely from another computer with an SSH tunnel:
 
 ```bash
-ssh -L 9090:127.0.0.1:9090 user@SERVER_IP
+ssh -L 8584:127.0.0.1:8584 user@SERVER_IP
 ```
 
-Then open `http://127.0.0.1:9090/` in the local browser. Do not expose this port directly to the internet: the page can add, edit, and remove feeds, change UDP hosts, ports, sample rates, and channel counts, and request a server restart.
+Then open `http://127.0.0.1:8584/` in the local browser. Do not expose this port directly to the internet: the page can add, edit, and remove feeds, change UDP hosts, ports, sample rates, and channel counts, and request a server restart.
 
 Applying stream changes validates the complete configuration, updates `streams.json`, and rebinds UDP inputs without restarting Node. The yellow **Reload streams** button rereads changes made directly to `streams.json` and applies them through the same validation and rollback path. Display-name-only changes preserve current listeners. Changes to routes or audio inputs reconnect affected browser audio sessions. If a new UDP port cannot be bound, the previous runtime configuration and file are restored.
 
@@ -313,7 +319,7 @@ The restart button sends the process a graceful termination signal after confirm
 
 ```ini
 [Service]
-ExecStart=/usr/bin/node /opt/udp-airband-server/server.js --webserver 9090
+ExecStart=/usr/bin/node /opt/udp-airband-server/server.js --webserver 8584
 Restart=on-failure
 ```
 

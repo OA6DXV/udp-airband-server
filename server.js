@@ -49,24 +49,24 @@ const serverConfigExists = fs.existsSync(path.resolve(serverConfigPath));
 const serverConfigUpdated = ensureServerConfigDefaults(serverConfigPath, [
   {
     name: 'api',
-    comments: ['Public status API. Keep disabled unless you explicitly want /status endpoints.'],
-    keys: [{ key: 'enabled', value: 'false' }],
+    comments: ['Reserved API key setting for future external API integrations.'],
+    keys: [{ key: 'key', value: '' }],
   },
   {
     name: 'admin',
     comments: ['Separate Web Admin listener. Keep disabled unless administrative access is required.'],
     keys: [
       { key: 'host', value: '127.0.0.1' },
-      { key: 'port', value: '9090' },
+      { key: 'port', value: '8584' },
       { key: 'enabled', value: 'false' },
     ],
   },
   {
     name: 'storage',
-    comments: ['Runtime persistence backend. Supported values: json and sqlite.'],
+    comments: ['Runtime persistence backend. Supported values: sqlite and json.'],
     keys: [
-      { key: 'backend', value: 'json' },
-      { key: 'sqlite_file', value: 'udp-airband-server.sqlite' },
+      { key: 'backend', value: 'sqlite' },
+      { key: 'sqlite_file', value: 'localdb.sqlite' },
     ],
   },
   {
@@ -76,7 +76,7 @@ const serverConfigUpdated = ensureServerConfigDefaults(serverConfigPath, [
       'Private/local addresses never leave the server.',
     ],
     keys: [
-      { key: 'enabled', value: 'false' },
+      { key: 'enabled', value: 'true' },
       { key: 'provider', value: 'ipwhois' },
       { key: 'cache_ttl_days', value: '30' },
       { key: 'timeout_ms', value: '1500' },
@@ -91,7 +91,7 @@ const httpHost = args.httpHost || getSetting(serverConfig, 'web.host', '0.0.0.0'
 const httpPort = Number(args.httpPort || args.http || getSetting(serverConfig, 'web.port', 8585));
 const adminConfigEnabled = parseBoolean(getSetting(serverConfig, 'admin.enabled', false));
 const adminConfigHost = String(getSetting(serverConfig, 'admin.host', '127.0.0.1'));
-const adminConfigPort = Number(getSetting(serverConfig, 'admin.port', 9090));
+const adminConfigPort = Number(getSetting(serverConfig, 'admin.port', 8584));
 const webAdminCliFlag = args.webserver !== undefined
   ? '--webserver'
   : (args.webadmin !== undefined ? '--webadmin' : '');
@@ -104,21 +104,21 @@ const webAdminHost = String(args.webadminHost || adminConfigHost);
 const webAdminConfigOverridden = Boolean(webAdminCliFlag || args.webadminHost !== undefined);
 const configPath = args.config || getSetting(serverConfig, 'streams.file', 'streams.json');
 const dataDir = path.resolve(args.dataDir || path.join(__dirname, 'data'));
-const storageBackendSetting = args.storageBackend || getSetting(serverConfig, 'storage.backend', 'json');
+const storageBackendSetting = args.storageBackend || getSetting(serverConfig, 'storage.backend', 'sqlite');
 const sqliteFileSetting = String(
-  args.sqliteFile || getSetting(serverConfig, 'storage.sqliteFile', '') || 'udp-airband-server.sqlite',
+  args.sqliteFile || getSetting(serverConfig, 'storage.sqliteFile', '') || 'localdb.sqlite',
 ).trim();
 const sqliteFile = path.isAbsolute(sqliteFileSetting)
   ? path.normalize(sqliteFileSetting)
   : path.resolve(dataDir, sqliteFileSetting);
-const geoEnabled = parseBoolean(getSetting(serverConfig, 'geo.enabled', false));
+const geoEnabled = parseBoolean(getSetting(serverConfig, 'geo.enabled', true));
 const geoProvider = String(getSetting(serverConfig, 'geo.provider', 'ipwhois')).trim().toLowerCase();
 const geoCacheTtlDays = Number(getSetting(serverConfig, 'geo.cacheTtlDays', 30));
 const geoTimeoutMs = Number(getSetting(serverConfig, 'geo.timeoutMs', 1500));
 const geoIpv4Anonymize = String(getSetting(serverConfig, 'geo.ipv4Anonymize', '/24')).trim();
 const geoIpv6Anonymize = String(getSetting(serverConfig, 'geo.ipv6Anonymize', '/48')).trim();
-const apiEnabledSetting = args.api ? true : (args.apiEnabled !== undefined ? args.apiEnabled : getSetting(serverConfig, 'api.enabled', false));
-const apiEnabled = parseBoolean(apiEnabledSetting);
+const apiKey = String(args.apiKey || getSetting(serverConfig, 'api.key', '')).trim();
+const apiEnabled = args.api ? true : parseBoolean(args.apiEnabled !== undefined ? args.apiEnabled : false);
 const compressedEnabled = parseBoolean(args.compressedEnabled !== undefined ? args.compressedEnabled : getSetting(serverConfig, 'compressed.enabled', true));
 const compressedCodec = String(args.compressedCodec || args.codec || getSetting(serverConfig, 'compressed.codec', 'adpcm')).trim().toLowerCase();
 const adpcmFrameMs = Number(args.adpcmFrameMs || getSetting(serverConfig, 'compressed.adpcmFrameMs', 40));
@@ -156,6 +156,29 @@ if (args.migrate !== undefined) {
     process.exit(0);
   } catch (err) {
     fatal(`Storage migration failed: ${err.message}`);
+  }
+}
+if (storageBackend === 'sqlite' && hasJsonStorageFiles(dataDir)) {
+  try {
+    const result = migrateStorage({
+      dataDir,
+      fs,
+      logger,
+      path,
+      sqliteFile,
+      target: 'sqlite',
+    });
+    logger.warn('storage_auto_migrated_json_to_sqlite', {
+      reason: 'sqlite is the default storage backend',
+      userHistory: result.userHistory,
+      lastHeard: result.lastHeard,
+      geoCache: result.geoCache,
+      source: dataDir,
+      destination: sqliteFile,
+      keepJson: 'set [storage].backend = json to keep the legacy storage backend',
+    });
+  } catch (err) {
+    fatal(`Automatic JSON to SQLite migration failed: ${err.message}`);
   }
 }
 let storage;
@@ -204,7 +227,7 @@ if (geoIpv4Anonymize !== '/24' || geoIpv6Anonymize !== '/48') {
 }
 if (webAdminEnabled && (!Number.isInteger(webAdminPort) || webAdminPort < 1 || webAdminPort > 65535)) {
   fatal(webAdminCliFlag
-    ? `${webAdminCliFlag} requires a valid port, for example: ${webAdminCliFlag} 9090`
+    ? `${webAdminCliFlag} requires a valid port, for example: ${webAdminCliFlag} 8584`
     : '[admin].port must be a valid port when [admin].enabled is true');
 }
 if (webAdminEnabled && webAdminPort === httpPort && isOverlappingHost(webAdminHost, httpHost)) {
@@ -706,6 +729,7 @@ function startWebServers() {
       streamsConfig: configPath,
       streamsConfigLoaded: streamsConfigExists,
       apiEnabled,
+      apiKeyConfigured: Boolean(apiKey),
       webAdminEnabled,
       webAdminHost: webAdminEnabled ? webAdminHost : undefined,
       webAdminPort: webAdminEnabled ? webAdminPort : undefined,
@@ -1176,6 +1200,11 @@ function fatal(message) {
   process.exit(1);
 }
 
+function hasJsonStorageFiles(directory) {
+  return ['user-history.json', 'last-heard.json', 'geo-cache.json']
+    .some((file) => fs.existsSync(path.join(directory, file)));
+}
+
 function printHelp() {
   process.stdout.write(`UDP Airband Server ${SOFTWARE_VERSION}
 
@@ -1212,7 +1241,8 @@ UDP and streams:
 
 Public status API:
   -A                            Enable public /status endpoints.
-  --api-enabled true|false      Override [api].enabled.
+  --api-enabled true|false      Enable or disable /status endpoints for this run.
+  --api-key VALUE               Reserved API key setting for future integrations.
 
 TLS / HTTPS:
   --ssl-enabled true|false      Enable HTTPS when valid key and cert are configured.
@@ -1241,7 +1271,7 @@ Logging:
 Examples:
   node server.js
   node server.js -D
-  node server.js --webserver 9090
+  node server.js --webserver 8584
   node server.js --migrate sqlite
   node server.js --migrate
   node server.js --config streams.json --http-host 0.0.0.0 --http-port 8585

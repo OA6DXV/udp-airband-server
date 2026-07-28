@@ -53,23 +53,26 @@ port = 8585
 
 [admin]
 host = 127.0.0.1
-port = 9090
+port = 8584
 enabled = false
 
 [streams]
 file = streams.json
 
 [storage]
-backend = json
-sqlite_file = udp-airband-server.sqlite
+backend = sqlite
+sqlite_file = localdb.sqlite
 
 [geo]
-enabled = false
+enabled = true
 provider = ipwhois
 cache_ttl_days = 30
 timeout_ms = 1500
 ipv4_anonymize = /24
 ipv6_anonymize = /48
+
+[api]
+key =
 
 [logging]
 level = info
@@ -98,12 +101,13 @@ Campos importantes:
 - `[admin].enabled`: activa el servidor Web Admin separado. Se mantiene en `false` por defecto.
 - `[admin].host` y `[admin].port`: direccion y puerto de Web Admin. Conserva el host loopback predeterminado salvo que el acceso este protegido por un tunel SSH o reverse proxy autenticado.
 - `[streams].file`: archivo JSON que define los feeds.
-- `[storage].backend`: backend de persistencia para el historial de usuarios conectados, los valores Last Heard y el cache opcional de geolocalizacion. Los valores soportados son `json` (predeterminado) y `sqlite`.
+- `[storage].backend`: backend de persistencia para el historial de usuarios conectados, los valores Last Heard y el cache de geolocalizacion. Los valores soportados son `sqlite` (predeterminado) y `json`.
 - `[storage].sqlite_file`: ruta de la base SQLite. Las rutas relativas se resuelven dentro del directorio de datos de ejecucion (`data/` de forma predeterminada).
-- `[geo].enabled`: activa la geolocalizacion server-side opcional mediante ipwhois. Esta desactivada de forma predeterminada.
+- `[geo].enabled`: activa la geolocalizacion server-side mediante ipwhois. Esta activada por defecto y mantiene las IP publicas anonimizadas antes de guardarlas.
 - `[geo].cache_ttl_days`: vuelve a consultar la ubicacion de redes publicas despues de 30 dias de forma predeterminada.
 - `[geo].timeout_ms`: tiempo maximo permitido para una consulta. La consulta nunca bloquea la conexion de un listener.
 - `[geo].ipv4_anonymize` y `[geo].ipv6_anonymize`: documentan las politicas obligatorias de anonimizacion `/24` y `/48`.
+- `[api].key`: reservado para futuras integraciones de API externa. ipwhois no requiere key, asi que puede quedar vacio.
 - `[logging].level`: nivel de logging amigable para servicio. Valores soportados: `off`, `error`, `warn`, `info` y `debug`. El valor predeterminado es `info`.
 - `[logging].timestamps`: usa `true` para anteponer timestamps ISO. Con `systemd`, normalmente puede quedar en `false` porque `journalctl` ya agrega timestamps.
 - `[logging].colors`: usa `true` para colorear logs en terminal. Mantenlo en `false` para logs normales de servicio con `systemd`.
@@ -111,7 +115,9 @@ Campos importantes:
 - `[compressed].enabled`: usa `false` para desactivar todos los modos comprimidos y su logica de transcoding/framing.
 - `[compressed].codec`: backend del modo comprimido. `adpcm` es la opcion predeterminada de baja latencia y no requiere `ffmpeg`.
 
-El almacenamiento JSON utiliza `data/user-history.json`, `data/last-heard.json` y, cuando la geolocalizacion esta activa, `data/geo-cache.json`. SQLite guarda los mismos conjuntos de datos en `data/udp-airband-server.sqlite` de forma predeterminada. En versiones de Node.js sin el modulo SQLite integrado, ejecuta `npm install` para instalar el driver de compatibilidad opcional `better-sqlite3`.
+SQLite guarda los datos de ejecucion en `data/localdb.sqlite` de forma predeterminada. El almacenamiento JSON sigue disponible con `[storage].backend = json` y utiliza `data/user-history.json`, `data/last-heard.json` y `data/geo-cache.json`. En versiones de Node.js sin el modulo SQLite integrado, ejecuta `npm install` para instalar el driver de compatibilidad opcional `better-sqlite3`.
+
+Cuando `[storage].backend = sqlite` y se encuentran archivos JSON antiguos, el servidor los importa automaticamente al iniciar, muestra el warning `storage_auto_migrated_json_to_sqlite` y conserva los JSON originales sin borrarlos. Define `[storage].backend = json` si prefieres mantener el backend JSON anterior.
 
 Para migrar datos existentes, primero detiene el servidor en ejecucion y usa uno de estos comandos:
 
@@ -285,14 +291,14 @@ La pagina de administracion esta desactivada por defecto y no se publica desde e
 ```conf
 [admin]
 host = 127.0.0.1
-port = 9090
+port = 8584
 enabled = true
 ```
 
 Tambien puede habilitarse para una ejecucion indicando un puerto separado:
 
 ```bash
-node server.js --webserver 9090
+node server.js --webserver 8584
 ```
 
 `--webserver PUERTO` tiene prioridad sobre `[admin].enabled` y `[admin].port`. El log de inicio muestra `webadmin_config_override` para dejar claro que los valores de la linea de comandos reemplazaron al archivo de configuracion. La forma anterior `--webadmin PUERTO` se conserva como alias compatible.
@@ -300,10 +306,10 @@ node server.js --webserver 9090
 El servidor admin usa `[admin].host`, cuyo valor predeterminado es `127.0.0.1`. Para abrirlo de forma segura desde otra computadora, crea un tunel SSH:
 
 ```bash
-ssh -L 9090:127.0.0.1:9090 usuario@IP_DEL_SERVIDOR
+ssh -L 8584:127.0.0.1:8584 usuario@IP_DEL_SERVIDOR
 ```
 
-Luego abre `http://127.0.0.1:9090/` en el navegador local. No expongas este puerto directamente a internet: la pagina puede agregar, editar y eliminar feeds, cambiar hosts y puertos UDP, sample rates, canales y solicitar el reinicio del servidor.
+Luego abre `http://127.0.0.1:8584/` en el navegador local. No expongas este puerto directamente a internet: la pagina puede agregar, editar y eliminar feeds, cambiar hosts y puertos UDP, sample rates, canales y solicitar el reinicio del servidor.
 
 Al aplicar cambios se valida la configuracion completa, se actualiza `streams.json` y se vuelven a enlazar las entradas UDP sin reiniciar Node. El boton amarillo **Reload streams** vuelve a leer los cambios hechos directamente en `streams.json` y los aplica con la misma validacion y restauracion ante errores. Los cambios que solo modifican nombres visibles conservan los listeners actuales. Los cambios de rutas o entradas de audio reconectan las sesiones de audio del navegador. Si no se puede abrir un puerto UDP nuevo, se restauran tanto la configuracion anterior en ejecucion como el archivo.
 
@@ -313,7 +319,7 @@ El boton de reinicio envia una senal de cierre controlado despues de pedir confi
 
 ```ini
 [Service]
-ExecStart=/usr/bin/node /opt/udp-airband-server/server.js --webserver 9090
+ExecStart=/usr/bin/node /opt/udp-airband-server/server.js --webserver 8584
 Restart=on-failure
 ```
 
