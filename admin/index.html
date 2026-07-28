@@ -121,6 +121,17 @@
     </form>
   </dialog>
 
+  <dialog id="reloadDialog">
+    <form method="dialog">
+      <h2 data-i18n="reloadTitle">Reload streams?</h2>
+      <p id="reloadWarning" data-i18n="reloadNotRequiredWarning">Reload is not required right now. Reloading streams can interrupt active listeners if the disk configuration contains structural changes.</p>
+      <div class="dialog-actions">
+        <button class="button secondary" value="cancel" data-i18n="cancel">Cancel</button>
+        <button id="confirmReload" class="button warning" value="confirm" data-i18n="reloadStreams">Reload streams</button>
+      </div>
+    </form>
+  </dialog>
+
   <template id="streamRowTemplate">
     <tr>
       <td data-label="Route name" data-i18n-label="routeName"><input name="name" required pattern="[A-Za-z0-9][A-Za-z0-9_\-]*" autocomplete="off"></td>

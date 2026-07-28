@@ -14,6 +14,8 @@ const restartDialog = document.getElementById('restartDialog');
 const restartDialogTitle = document.getElementById('restartDialogTitle');
 const restartWarning = document.getElementById('restartWarning');
 const confirmRestartButton = document.getElementById('confirmRestart');
+const reloadDialog = document.getElementById('reloadDialog');
+const confirmReloadButton = document.getElementById('confirmReload');
 const serverStatusEl = document.getElementById('serverStatus');
 const versionEl = document.getElementById('version');
 const languageSelect = document.getElementById('languageSelect');
@@ -63,6 +65,8 @@ const translations = {
     discardChanges: 'Discard changes',
     applyChanges: 'Apply changes',
     reloadStreams: 'Reload streams',
+    reloadTitle: 'Reload streams?',
+    reloadNotRequiredWarning: 'Reload is not required right now. Reloading streams can interrupt active listeners if the disk configuration contains structural changes.',
     serverProcess: 'Server process',
     detectingRuntime: 'Detecting how the server was started...',
     restartServer: 'Restart server',
@@ -127,6 +131,8 @@ const translations = {
     discardChanges: 'Descartar cambios',
     applyChanges: 'Aplicar cambios',
     reloadStreams: 'Recargar streams',
+    reloadTitle: '¿Recargar streams?',
+    reloadNotRequiredWarning: 'No es necesario recargar ahora. Recargar streams puede interrumpir a los listeners activos si la configuración en disco contiene cambios estructurales.',
     serverProcess: 'Proceso del servidor',
     detectingRuntime: 'Detectando cómo se inició el servidor...',
     restartServer: 'Reiniciar servidor',
@@ -186,7 +192,8 @@ addButton.addEventListener('click', () => {
   });
   markDirty();
 });
-reloadButton.addEventListener('click', reloadStreams);
+reloadButton.addEventListener('click', requestReload);
+confirmReloadButton.addEventListener('click', reloadStreams);
 restartButton.addEventListener('click', openRestartDialog);
 confirmRestartButton.addEventListener('click', requestRestart);
 languageSelect.addEventListener('change', () => {
@@ -295,6 +302,7 @@ async function saveStreams(event) {
 }
 
 async function reloadStreams() {
+  if (reloadDialog.open) reloadDialog.close();
   clearMessage();
   setBusy(true);
   try {
@@ -315,6 +323,14 @@ async function reloadStreams() {
   } finally {
     setBusy(false);
   }
+}
+
+function requestReload() {
+  if (reloadPending) {
+    reloadStreams();
+    return;
+  }
+  reloadDialog.showModal();
 }
 
 function openRestartDialog() {
