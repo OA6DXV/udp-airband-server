@@ -679,9 +679,11 @@ async function startWebServers() {
       database: adminDatabase,
       logger,
     });
+    warnIfWebAdminNeedsSetup();
     webAdmin = createWebAdmin({
       assets: adminAssets,
       auth: adminAuth,
+      getAdminSetupRequired: () => !hasWebAdminUser(),
       getGeoStats: () => aggregateGeoStats(geoCache.entries()),
       getState: getWebAdminState,
       host: webAdminHost,
@@ -1241,6 +1243,28 @@ function fatal(message) {
   process.exit(1);
 }
 
+function hasWebAdminUser() {
+  if (!adminDatabase) return false;
+  try {
+    const row = adminDatabase.db.prepare('SELECT COUNT(*) AS count FROM admin_users WHERE id = 1 AND enabled = 1').get();
+    return Number(row && row.count) > 0;
+  } catch {
+    return false;
+  }
+}
+
+function warnIfWebAdminNeedsSetup() {
+  if (hasWebAdminUser()) return;
+  const separator = '############################################################';
+  logger.plain('warn', [
+    separator,
+    'Web Admin is enabled but no administrator account exists yet.',
+    '  Login will not work until you create the admin user.',
+    '  Run this command in the project directory: npm run admin:setup',
+    '  If custom secrets are desired, configure them before creating the admin user.',
+    separator,
+  ].join('\n'));
+}
 function logGeneratedAdminSecrets(filePath) {
   const separator = '############################################################';
   logger.plain('warn', [

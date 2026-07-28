@@ -24,6 +24,9 @@ async function initialize() {
       return;
     }
     loginCsrfToken = body.loginCsrfToken || '';
+    if (body.setupRequired) {
+      showMessage('No administrator account exists yet. Run npm run admin:setup on the server.');
+    }
   } catch {
     showMessage('The authentication service is unavailable.');
   }
