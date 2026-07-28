@@ -342,12 +342,6 @@ main {
   display: block;
 }
 
-.geo-tooltip-country {
-  margin-bottom: 7px;
-  color: var(--muted);
-  font-weight: 700;
-}
-
 .google-visualization-tooltip {
   border: 1px solid var(--border) !important;
   background: var(--surface-2) !important;

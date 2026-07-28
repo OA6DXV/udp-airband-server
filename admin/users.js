@@ -171,7 +171,6 @@ function renderSelectedCountry() {
 
 function buildTooltip(country) {
   const lines = [
-    `<div class="geo-tooltip-country">${escapeHtml(country.code)}</div>`,
     `<strong>${escapeHtml(translate('listeners'))}: ${country.listeners}</strong>`,
     ...country.topCities.map((city) => `${escapeHtml(city.city)}: ${city.listeners}`),
   ];
