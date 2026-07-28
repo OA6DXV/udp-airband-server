@@ -433,26 +433,12 @@ input:invalid {
 }
 
 .row-actions {
-  width: 150px;
-  text-align: center;
+  width: 48px;
+  text-align: right;
 }
 
-.text-action {
-  display: inline;
-  width: auto;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  font-weight: 700;
-}
-
-.text-action:hover,
-.text-action:focus-visible {
-  color: #ff9ea4;
-  outline: 0;
+.remove-label {
+  display: none;
 }
 
 .icon-button {
@@ -728,6 +714,25 @@ dialog::backdrop {
   td.row-actions .remove-stream {
     width: auto;
     min-width: 0;
+    height: auto;
+    background: transparent;
+    color: var(--muted);
+    font-size: inherit;
+    font-weight: 700;
+  }
+
+  td.row-actions .remove-stream:hover,
+  td.row-actions .remove-stream:focus-visible {
+    color: #ff9ea4;
+    outline: 0;
+  }
+
+  .remove-icon {
+    display: none;
+  }
+
+  .remove-label {
+    display: inline;
   }
 
   input,
