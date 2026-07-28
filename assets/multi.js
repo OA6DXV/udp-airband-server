@@ -38,6 +38,9 @@ const translations = {
     compatibleNoticeBody: 'This mode uses one mixed AAC stream. It can keep playing with the phone locked or in the background, but delay is variable and usually around 5 to 10 seconds.',
     serverDisconnected: 'Connection to the server was lost. Reconnecting...',
     serverRestarted: 'The server restarted. This page reconnected; refresh if audio does not resume.',
+    streamsUnavailableTitle: 'Streams updated',
+    streamsUnavailableBody: 'One or more selected streams are no longer available with their previous configuration. Return to the home page to choose from the updated stream list.',
+    returnToHome: 'Return to home',
     reload: 'Reload',
   },
   es: {
@@ -53,6 +56,9 @@ const translations = {
     compatibleNoticeBody: 'Este modo usa un stream AAC mezclado. Puede seguir sonando con el telefono bloqueado o en segundo plano, pero el delay es variable y suele rondar los 5 a 10 segundos.',
     serverDisconnected: 'Se perdio la conexion con el servidor. Reconectando...',
     serverRestarted: 'El servidor se reinicio. Esta pagina se reconecto; actualiza si el audio no vuelve.',
+    streamsUnavailableTitle: 'Streams actualizados',
+    streamsUnavailableBody: 'Uno o mas streams seleccionados ya no estan disponibles con su configuracion anterior. Regresa a la pagina principal para elegir desde la lista actualizada.',
+    returnToHome: 'Volver al inicio',
     reload: 'Actualizar',
   },
 };
@@ -76,6 +82,7 @@ let pendingNoticeMode = globalMode;
 let serverInstanceId = '';
 let serverNoticeEl;
 let serverNoticeKind = '';
+let streamsUnavailable = false;
 
 languageToggle.addEventListener('click', () => {
   const open = languageMenu.hidden;
@@ -123,6 +130,10 @@ statusEl.addEventListener('mouseleave', () => {
 
 if (multiStartButton) {
   multiStartButton.addEventListener('click', () => {
+    if (streamsUnavailable) {
+      location.href = '/';
+      return;
+    }
     if (pendingNoticeMode) rememberNoticeAccepted(modeNoticeKeyForMode(pendingNoticeMode));
     startMultiPlayback();
   });
@@ -543,6 +554,24 @@ function ensureServerNotice() {
   return serverNoticeEl;
 }
 
+function showStreamsUnavailable() {
+  if (!streamsUnavailable) {
+    streamsUnavailable = true;
+    globalPaused = true;
+    stopNativeMultiAudio();
+    players.forEach((player) => player.pause());
+    hideServerNotice();
+  }
+  if (!multiStartOverlay) {
+    location.href = '/';
+    return;
+  }
+  if (multiNoticeTitle) multiNoticeTitle.textContent = t('streamsUnavailableTitle');
+  if (multiNoticeBody) multiNoticeBody.textContent = t('streamsUnavailableBody');
+  if (multiStartButton) multiStartButton.textContent = t('returnToHome');
+  multiStartOverlay.hidden = false;
+}
+
 function updateMeters() {
   players.forEach((player) => player.updateMeter());
   updateHeader();
@@ -574,6 +603,7 @@ function applyLanguage() {
     if (textEl) textEl.textContent = t(serverNoticeKind === 'restarted' ? 'serverRestarted' : 'serverDisconnected');
     if (reloadButton) reloadButton.textContent = t('reload');
   }
+  if (streamsUnavailable) showStreamsUnavailable();
   updateHeader();
 }
 
@@ -685,8 +715,10 @@ class MultiStreamPlayer {
     });
     this.controlWs.addEventListener('close', () => {
       this.controlOpen = false;
-      showServerNotice('disconnected');
-      setTimeout(() => this.connectControl(), 1000);
+      if (!streamsUnavailable) {
+        showServerNotice('disconnected');
+        setTimeout(() => this.connectControl(), 1000);
+      }
       updateHeader();
     });
     this.controlWs.addEventListener('message', (event) => {
@@ -696,6 +728,10 @@ class MultiStreamPlayer {
         this.configReady = true;
         updateServerInstance(message.serverInstanceId);
         this.startIfReady();
+      } else if (message.type === 'streamUpdated') {
+        this.applyStreamUpdate(message.stream);
+      } else if (message.type === 'streamUnavailable') {
+        showStreamsUnavailable();
       } else if (message.type === 'stats') {
         this.activeListeners = message.activeListeners || 0;
         this.bandwidth = message.listenerBitsPerSecond || this.bandwidth || 0;
@@ -710,6 +746,15 @@ class MultiStreamPlayer {
       this.updateLabels();
       updateHeader();
     });
+  }
+
+  applyStreamUpdate(stream) {
+    if (!stream || stream.name !== this.stream.name) return;
+    this.stream = { ...this.stream, ...stream };
+    this.config = { ...this.config, ...stream };
+    if (this.nameEl) this.nameEl.textContent = this.stream.label;
+    this.updateLabels();
+    updateMediaSessionMetadata();
   }
 
   async startAudio() {

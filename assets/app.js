@@ -42,6 +42,9 @@ const translations = {
     mobileStartupNoticeBody: 'This stream starts in low-delay compressed realtime mode. To keep audio playing in the background or with the phone locked, select Compatible Mode; it may add some delay.',
     serverDisconnected: 'Connection to the server was lost. Reconnecting...',
     serverRestarted: 'The server restarted. This page reconnected; refresh if audio does not resume.',
+    streamUnavailableTitle: 'Stream updated',
+    streamUnavailableBody: 'This stream is no longer available with its previous configuration. Return to the home page to see the updated stream list.',
+    returnToHome: 'Return to home',
     reload: 'Reload',
     accept: 'Accept',
   },
@@ -58,6 +61,9 @@ const translations = {
     mobileStartupNoticeBody: 'Este stream inicia en modo comprimido sin delay. Si quieres escuchar el audio en background o con el telefono bloqueado, selecciona el Modo Compatible; puede agregar cierto delay.',
     serverDisconnected: 'Se perdio la conexion con el servidor. Reconectando...',
     serverRestarted: 'El servidor se reinicio. Esta pagina se reconecto; actualiza si el audio no vuelve.',
+    streamUnavailableTitle: 'Stream actualizado',
+    streamUnavailableBody: 'Este stream ya no esta disponible con su configuracion anterior. Regresa a la pagina principal para ver la lista actualizada.',
+    returnToHome: 'Volver al inicio',
     reload: 'Actualizar',
     accept: 'Aceptar',
   },
@@ -86,6 +92,7 @@ let controlWs;
 let serverInstanceId = '';
 let serverNoticeEl;
 let serverNoticeKind = '';
+let streamUnavailable = false;
 let rawWs;
 let suppressRawReconnect = false;
 let adpcmWs;
@@ -194,6 +201,10 @@ modeOptions.forEach((option) => {
 
 if (modeNoticeAccept) {
   modeNoticeAccept.addEventListener('click', () => {
+    if (modeNoticeOverlay?.dataset.notice === 'stream-unavailable') {
+      location.href = '/';
+      return;
+    }
     if (modeNoticeOverlay?.dataset.notice === 'mobile-startup') {
       rememberNoticeAccepted('mobile-startup');
       delete modeNoticeOverlay.dataset.notice;
@@ -301,8 +312,10 @@ function connectControlWebSocket() {
   controlWs.addEventListener('close', () => {
     if (generation === wsGeneration) {
       setStatus('', 'disconnected');
-      showServerNotice('disconnected');
-      setTimeout(connectControlWebSocket, 1000);
+      if (!streamUnavailable) {
+        showServerNotice('disconnected');
+        setTimeout(connectControlWebSocket, 1000);
+      }
     }
   });
   controlWs.addEventListener('message', (event) => {
@@ -324,6 +337,10 @@ function connectControlWebSocket() {
         updateModeButton();
         showStartupNoticeIfNeeded();
         updateConnectionState();
+      } else if (message.type === 'streamUpdated') {
+        applyStreamUpdate(message.stream);
+      } else if (message.type === 'streamUnavailable') {
+        showStreamUnavailable();
       } else if (message.type === 'stats') {
         if (!streamPaused) {
           updateServerMeasuredBandwidth(message.listenerBitsPerSecond || 0);
@@ -339,6 +356,36 @@ function connectControlWebSocket() {
       }
     }
   });
+}
+
+function applyStreamUpdate(stream) {
+  if (!stream || stream.name !== streamName) return;
+  config = { ...config, ...stream };
+  document.title = `${stream.label} - UDP Airband Monitor`;
+  titleLink.textContent = stream.label;
+  titleLink.title = t('returnHome');
+  updateMediaSessionMetadata();
+}
+
+function showStreamUnavailable() {
+  if (!streamUnavailable) {
+    streamUnavailable = true;
+    wsGeneration += 1;
+    stopRaw();
+    stopOpus();
+    stopCompatible();
+    hideServerNotice();
+  }
+  if (!modeNoticeOverlay) {
+    location.href = '/';
+    return;
+  }
+  delete modeNoticeOverlay.dataset.mode;
+  modeNoticeOverlay.dataset.notice = 'stream-unavailable';
+  if (modeNoticeTitle) modeNoticeTitle.textContent = t('streamUnavailableTitle');
+  if (modeNoticeBody) modeNoticeBody.textContent = t('streamUnavailableBody');
+  if (modeNoticeAccept) modeNoticeAccept.textContent = t('returnToHome');
+  modeNoticeOverlay.hidden = false;
 }
 
 function updateConnectionState() {
@@ -1132,6 +1179,8 @@ function applyLanguage() {
   updateModeButton();
   if (modeNoticeOverlay && !modeNoticeOverlay.hidden && modeNoticeOverlay.dataset.notice === 'startup-mode') {
     showStartupModeNotice(modeNoticeOverlay.dataset.mode || preferredMode);
+  } else if (modeNoticeOverlay && !modeNoticeOverlay.hidden && modeNoticeOverlay.dataset.notice === 'stream-unavailable') {
+    showStreamUnavailable();
   } else if (modeNoticeOverlay && !modeNoticeOverlay.hidden && modeNoticeOverlay.dataset.mode) {
     showModeNotice(modeNoticeOverlay.dataset.mode);
   } else if (modeNoticeOverlay && !modeNoticeOverlay.hidden && modeNoticeOverlay.dataset.notice === 'mobile-startup') {

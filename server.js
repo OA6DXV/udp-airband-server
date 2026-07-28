@@ -533,6 +533,7 @@ function attachUpgradeHandler(server) {
       const monitorOnly = requestUrl.searchParams.get('monitor') === '1';
       connectionLogMode = monitorOnly ? 'control-monitor' : 'control';
       stream.controlClients.set(socket, clientId);
+      if (monitorOnly) stream.monitorClients.add(socket);
       if (!monitorOnly) addListenerMode(stream, clientId, 'control');
       sendWsJson(socket, streamConfig(stream));
       recordClientActivity('connected', stream.name, connectionLogMode, clientId, remoteAddress);
@@ -789,6 +790,10 @@ async function applyStreamReplacement(payload) {
     }
     for (let index = 0; index < previousStreams.length; index += 1) {
       previousStreams[index].label = candidateStreams[index].label;
+      broadcastControlEvent(previousStreams[index], {
+        type: 'streamUpdated',
+        stream: publicStreamState(previousStreams[index]),
+      });
     }
     logger.info('streams_reloaded', {
       count: streams.length,
@@ -830,6 +835,7 @@ async function applyStreamReplacement(payload) {
     throw saveError;
   }
 
+  notifyStructuralStreamChanges(previousStreams, candidateStreams);
   lastHeardStore.apply(candidateStreams);
   streams = candidateStreams;
   streamsByName.clear();
@@ -853,11 +859,7 @@ function canUpdateStreamsInPlace(currentStreams, candidateStreams) {
   if (currentStreams.length !== candidateStreams.length) return false;
   return currentStreams.every((stream, index) => {
     const candidate = candidateStreams[index];
-    return stream.name === candidate.name
-      && stream.udpHost === candidate.udpHost
-      && stream.udpPort === candidate.udpPort
-      && stream.sampleRate === candidate.sampleRate
-      && stream.channels === candidate.channels;
+    return hasSameStreamTransport(stream, candidate);
   });
 }
 
@@ -878,12 +880,71 @@ function closeUdpServers(items) {
 }
 
 function closeStreamClients(stream) {
-  for (const socket of Array.from(stream.controlClients.keys())) socket.destroy();
+  for (const socket of Array.from(stream.controlClients.keys())) {
+    socket.end();
+    const destroyTimer = setTimeout(() => socket.destroy(), 250);
+    if (typeof destroyTimer.unref === 'function') destroyTimer.unref();
+  }
   for (const socket of Array.from(stream.rawClients.keys())) socket.destroy();
   for (const client of Array.from(stream.opusClients)) compressed.cleanupClient(stream, client);
   stream.controlClients.clear();
+  stream.monitorClients.clear();
   stream.rawClients.clear();
   stream.listenerStats.clear();
+}
+
+function notifyStructuralStreamChanges(previousStreams, candidateStreams) {
+  const candidateByName = new Map(candidateStreams.map((stream) => [stream.name, stream]));
+  const catalog = candidateStreams.map(publicStreamState);
+
+  for (const stream of previousStreams) {
+    const candidate = candidateByName.get(stream.name);
+    const unavailable = !candidate || !hasSameStreamTransport(stream, candidate);
+    for (const socket of stream.controlClients.keys()) {
+      if (socket.destroyed) continue;
+      if (stream.monitorClients.has(socket)) {
+        sendWsJson(socket, {
+          type: 'streamCatalogChanged',
+          streams: catalog,
+        });
+      } else if (unavailable) {
+        sendWsJson(socket, {
+          type: 'streamUnavailable',
+          reason: candidate ? 'configuration_changed' : 'removed',
+          stream: publicStreamState(stream),
+          redirectTo: '/',
+        });
+      } else if (candidate.label !== stream.label) {
+        sendWsJson(socket, {
+          type: 'streamUpdated',
+          stream: publicStreamState(candidate),
+        });
+      }
+    }
+  }
+}
+
+function broadcastControlEvent(stream, event) {
+  for (const socket of stream.controlClients.keys()) {
+    if (!socket.destroyed) sendWsJson(socket, event);
+  }
+}
+
+function publicStreamState(stream) {
+  return {
+    name: stream.name,
+    label: stream.label,
+    sampleRate: stream.sampleRate,
+    channels: stream.channels,
+  };
+}
+
+function hasSameStreamTransport(stream, candidate) {
+  return stream.name === candidate.name
+    && stream.udpHost === candidate.udpHost
+    && stream.udpPort === candidate.udpPort
+    && stream.sampleRate === candidate.sampleRate
+    && stream.channels === candidate.channels;
 }
 
 function streamFileEntry(stream) {

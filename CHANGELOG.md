@@ -20,6 +20,7 @@
 - Added privacy-preserving ipwhois geolocation enabled by default with `/24` IPv4 and `/48` IPv6 anonymization, a 30-day JSON/SQLite cache, local-address exclusion, request deduplication, and rate-limit backoff.
 - Extended storage migration to carry the geolocation cache bidirectionally without replacing newer destination records.
 - Changed the default Web Admin port to `8584`, removed the public `/status` API, and moved the reserved future API key setting to `[geo].key`.
+- Added live stream-configuration notifications: label changes update open hub, single-player, and Multi Stream pages without interrupting audio, while incompatible stream changes stop affected players and guide listeners back to the refreshed home page.
 - Documented Web Admin usage in both English and Spanish README files.
 
 ### Espanol
@@ -40,6 +41,7 @@
 - Se agrego geolocalizacion ipwhois activada por defecto con privacidad, anonimizacion IPv4 `/24` e IPv6 `/48`, cache JSON/SQLite de 30 dias, exclusion de direcciones locales, deduplicacion de consultas y pausa ante limites de la API.
 - Se amplio la migracion para transferir el cache de geolocalizacion en ambas direcciones sin reemplazar registros mas recientes en el destino.
 - Se cambio el puerto predeterminado de Web Admin a `8584`, se elimino la API publica `/status` y se movio el campo reservado de API key futura a `[geo].key`.
+- Se agregaron notificaciones en vivo de configuracion: los cambios de etiqueta actualizan el hub, reproductores individuales y Multi Stream sin interrumpir el audio, mientras que los cambios incompatibles detienen los reproductores afectados y guian al listener de vuelta a la pagina principal actualizada.
 - Se documento el uso de Web Admin en los README en ingles y espanol.
 
 ## 1.6 - 2026-07-26

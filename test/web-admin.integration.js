@@ -101,6 +101,11 @@ async function run() {
     assert.strictEqual(publicPage.statusCode, 200);
     assert.match(publicPage.body, /Initial test/);
 
+    const activePlayer = await openControlWebSocket(publicPort, '/test/control?clientId=integration-player');
+    const hubMonitor = await openControlWebSocket(publicPort, '/test/control?monitor=1&clientId=integration-hub');
+    await activePlayer.waitForMessage('config');
+    await hubMonitor.waitForMessage('config');
+
     const updated = {
       streams: [{
         name: 'test',
@@ -118,6 +123,11 @@ async function run() {
     });
     assert.strictEqual(updateResponse.ok, true);
     assert.strictEqual(JSON.parse(fs.readFileSync(configPath, 'utf8')).streams[0].label, 'Updated live');
+    const unavailableMessage = await activePlayer.waitForMessage('streamUnavailable');
+    assert.strictEqual(unavailableMessage.reason, 'configuration_changed');
+    assert.strictEqual(unavailableMessage.redirectTo, '/');
+    const catalogMessage = await hubMonitor.waitForMessage('streamCatalogChanged');
+    assert.strictEqual(catalogMessage.streams[0].label, 'Updated live');
 
     await sendUdpFloat(updatedUdpPort);
     const activeState = await waitFor(async () => {
@@ -133,12 +143,18 @@ async function run() {
         label: 'Reloaded from disk',
       }],
     }));
+    const updatedPlayer = await openControlWebSocket(publicPort, '/test/control?clientId=integration-updated-player');
+    await updatedPlayer.waitForMessage('config');
     const reloadResponse = await requestJson(adminPort, '/api/streams/reload', {
       method: 'POST',
       headers: { 'x-admin-request': '1' },
     });
     assert.match(reloadResponse.message, /reloaded from disk/);
     assert.strictEqual(reloadResponse.streams[0].label, 'Reloaded from disk');
+    const liveUpdateMessage = await updatedPlayer.waitForMessage('streamUpdated');
+    assert.strictEqual(liveUpdateMessage.stream.label, 'Reloaded from disk');
+    assert.strictEqual(updatedPlayer.socket.destroyed, false);
+    updatedPlayer.close();
 
     await bindUdp(occupiedSocket, occupiedUdpPort);
     const failedUpdate = await request(adminPort, '/api/streams', {
@@ -508,6 +524,100 @@ function request(port, pathname, options = {}) {
     req.on('error', reject);
     if (options.body) req.write(options.body);
     req.end();
+  });
+}
+
+function openControlWebSocket(port, pathname) {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection({ host: '127.0.0.1', port });
+    const messages = [];
+    const waiters = [];
+    let buffer = Buffer.alloc(0);
+    let handshakeComplete = false;
+
+    function dispatch(message) {
+      messages.push(message);
+      for (let index = waiters.length - 1; index >= 0; index -= 1) {
+        if (waiters[index].type !== message.type) continue;
+        const waiter = waiters.splice(index, 1)[0];
+        clearTimeout(waiter.timer);
+        waiter.resolve(message);
+      }
+    }
+
+    function parseFrames() {
+      while (buffer.length >= 2) {
+        let payloadLength = buffer[1] & 0x7f;
+        let headerLength = 2;
+        if (payloadLength === 126) {
+          if (buffer.length < 4) return;
+          payloadLength = buffer.readUInt16BE(2);
+          headerLength = 4;
+        } else if (payloadLength === 127) {
+          if (buffer.length < 10) return;
+          payloadLength = Number(buffer.readBigUInt64BE(2));
+          headerLength = 10;
+        }
+        if (buffer.length < headerLength + payloadLength) return;
+        const opcode = buffer[0] & 0x0f;
+        const payload = buffer.subarray(headerLength, headerLength + payloadLength);
+        buffer = buffer.subarray(headerLength + payloadLength);
+        if (opcode === 0x1) dispatch(JSON.parse(payload.toString('utf8')));
+      }
+    }
+
+    socket.once('error', reject);
+    socket.on('data', (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      if (!handshakeComplete) {
+        const headerEnd = buffer.indexOf('\r\n\r\n');
+        if (headerEnd < 0) return;
+        const responseHeaders = buffer.subarray(0, headerEnd).toString('utf8');
+        if (!responseHeaders.startsWith('HTTP/1.1 101')) {
+          reject(new Error(`WebSocket handshake failed: ${responseHeaders.split('\r\n')[0]}`));
+          socket.destroy();
+          return;
+        }
+        buffer = buffer.subarray(headerEnd + 4);
+        handshakeComplete = true;
+        socket.removeListener('error', reject);
+        socket.on('error', () => {});
+        resolve({
+          socket,
+          close: () => socket.destroy(),
+          waitForMessage(type, timeoutMs = 3000) {
+            const existing = messages.find((message) => message.type === type);
+            if (existing) return Promise.resolve(existing);
+            return new Promise((resolveMessage, rejectMessage) => {
+              const waiter = {
+                type,
+                resolve: resolveMessage,
+                timer: setTimeout(() => {
+                  const index = waiters.indexOf(waiter);
+                  if (index >= 0) waiters.splice(index, 1);
+                  rejectMessage(new Error(`Timed out waiting for WebSocket message "${type}"`));
+                }, timeoutMs),
+              };
+              waiters.push(waiter);
+            });
+          },
+        });
+      }
+      parseFrames();
+    });
+    socket.once('connect', () => {
+      const key = Buffer.from(`integration-${Date.now()}-${Math.random()}`).toString('base64');
+      socket.write([
+        `GET ${pathname} HTTP/1.1`,
+        `Host: 127.0.0.1:${port}`,
+        'Connection: Upgrade',
+        'Upgrade: websocket',
+        'Sec-WebSocket-Version: 13',
+        `Sec-WebSocket-Key: ${key}`,
+        '',
+        '',
+      ].join('\r\n'));
+    });
   });
 }
 
