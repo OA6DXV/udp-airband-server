@@ -1155,7 +1155,6 @@ function warnWhenJsonStorageIsActive() {
   logger.plain('warn', [
     separator,
     'Storage recommendation: SQLite is recommended for production.',
-    separator,
     `  Current storage: JSON files in ${dataDir}`,
     `  Recommended storage: SQLite database at ${sqliteFile}`,
     `  Node.js version: ${process.versions.node}`,
