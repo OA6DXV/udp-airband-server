@@ -272,12 +272,13 @@ main {
 
 .geo-chart-area {
   grid-column: 1 / -1;
+  grid-row: 1;
   min-width: 0;
   padding-bottom: 18px;
 }
 
 .geo-layout.detail-visible .geo-chart-area {
-  grid-column: auto;
+  grid-column: 1;
 }
 
 .geo-chart {
@@ -287,6 +288,8 @@ main {
 }
 
 .country-detail {
+  grid-column: 2;
+  grid-row: 1;
   padding: 24px;
   border-left: 1px solid var(--border);
   background: var(--surface-2);
@@ -641,12 +644,18 @@ dialog::backdrop {
     min-height: 400px;
   }
 
+  .geo-layout.detail-visible .geo-chart-area {
+    grid-column: 1;
+  }
+
   .geo-chart {
     height: 370px;
     min-height: 370px;
   }
 
   .country-detail {
+    grid-column: 1;
+    grid-row: auto;
     border-top: 1px solid var(--border);
     border-left: 0;
   }

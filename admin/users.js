@@ -48,6 +48,7 @@ let chart = null;
 let messageKey = 'loadingMap';
 let selectedCode = '';
 let resizeTimer = null;
+let layoutRedrawTimer = null;
 
 if (!translations[language]) language = 'en';
 languageSelect.value = language;
@@ -165,8 +166,17 @@ function renderSelectedCountry() {
       cityList.appendChild(row);
     });
   }
+  const layoutChanged = !geoLayout.classList.contains('detail-visible');
   countryDetail.hidden = false;
   geoLayout.classList.add('detail-visible');
+  if (layoutChanged) scheduleLayoutRedraw();
+}
+
+function scheduleLayoutRedraw() {
+  clearTimeout(layoutRedrawTimer);
+  layoutRedrawTimer = setTimeout(() => {
+    if (chart) drawChart();
+  }, 50);
 }
 
 function buildTooltip(country) {
