@@ -699,6 +699,7 @@ dialog::backdrop {
     display: block;
     width: 100%;
     padding-top: 12px;
+    text-align: center;
   }
 
   .row-actions::before {
@@ -706,7 +707,8 @@ dialog::backdrop {
   }
 
   .row-actions .remove-stream {
-    width: 100%;
+    width: auto;
+    min-width: 132px;
   }
 
   input,
