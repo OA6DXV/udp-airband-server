@@ -66,13 +66,11 @@ sqlite_file = localdb.sqlite
 [geo]
 enabled = true
 provider = ipwhois
+key =
 cache_ttl_days = 30
 timeout_ms = 1500
 ipv4_anonymize = /24
 ipv6_anonymize = /48
-
-[api]
-key =
 
 [logging]
 level = info
@@ -104,10 +102,10 @@ Important fields:
 - `[storage].backend`: persistence backend for connected-user history, Last Heard values, and the geolocation cache. Supported values are `sqlite` (default) and `json`.
 - `[storage].sqlite_file`: SQLite database path. Relative paths are resolved inside the runtime data directory (`data/` by default).
 - `[geo].enabled`: enables server-side IP geolocation through ipwhois. It is enabled by default and keeps public IPs anonymized before storage.
+- `[geo].key`: reserved for future geolocation providers that require an API key. ipwhois does not require one, so this can remain empty.
 - `[geo].cache_ttl_days`: rechecks public network locations after 30 days by default.
 - `[geo].timeout_ms`: maximum time allowed for a geolocation request. Lookups never block a listener connection.
 - `[geo].ipv4_anonymize` and `[geo].ipv6_anonymize`: document the enforced `/24` and `/48` public-IP anonymization policies.
-- `[api].key`: reserved for future external API integrations. ipwhois does not require a key, so this can remain empty.
 - `[logging].level`: service-friendly logging level. Supported values are `off`, `error`, `warn`, `info`, and `debug`. The default is `info`.
 - `[logging].timestamps`: set to `true` to prepend ISO timestamps. With `systemd`, this can usually stay `false` because `journalctl` already adds timestamps.
 - `[logging].colors`: set to `true` to color terminal logs. Keep it `false` for normal `systemd` service logs.

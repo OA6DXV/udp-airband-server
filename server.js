@@ -48,11 +48,6 @@ const serverConfigPath = args.serverConfig || args.serverConf || 'server.conf';
 const serverConfigExists = fs.existsSync(path.resolve(serverConfigPath));
 const serverConfigUpdated = ensureServerConfigDefaults(serverConfigPath, [
   {
-    name: 'api',
-    comments: ['Reserved API key setting for future external API integrations.'],
-    keys: [{ key: 'key', value: '' }],
-  },
-  {
     name: 'admin',
     comments: ['Separate Web Admin listener. Keep disabled unless administrative access is required.'],
     keys: [
@@ -78,6 +73,7 @@ const serverConfigUpdated = ensureServerConfigDefaults(serverConfigPath, [
     keys: [
       { key: 'enabled', value: 'true' },
       { key: 'provider', value: 'ipwhois' },
+      { key: 'key', value: '' },
       { key: 'cache_ttl_days', value: '30' },
       { key: 'timeout_ms', value: '1500' },
       { key: 'ipv4_anonymize', value: '/24' },
@@ -113,12 +109,11 @@ const sqliteFile = path.isAbsolute(sqliteFileSetting)
   : path.resolve(dataDir, sqliteFileSetting);
 const geoEnabled = parseBoolean(getSetting(serverConfig, 'geo.enabled', true));
 const geoProvider = String(getSetting(serverConfig, 'geo.provider', 'ipwhois')).trim().toLowerCase();
+const geoKey = String(args.geoKey || getSetting(serverConfig, 'geo.key', '')).trim();
 const geoCacheTtlDays = Number(getSetting(serverConfig, 'geo.cacheTtlDays', 30));
 const geoTimeoutMs = Number(getSetting(serverConfig, 'geo.timeoutMs', 1500));
 const geoIpv4Anonymize = String(getSetting(serverConfig, 'geo.ipv4Anonymize', '/24')).trim();
 const geoIpv6Anonymize = String(getSetting(serverConfig, 'geo.ipv6Anonymize', '/48')).trim();
-const apiKey = String(args.apiKey || getSetting(serverConfig, 'api.key', '')).trim();
-const apiEnabled = args.api ? true : parseBoolean(args.apiEnabled !== undefined ? args.apiEnabled : false);
 const compressedEnabled = parseBoolean(args.compressedEnabled !== undefined ? args.compressedEnabled : getSetting(serverConfig, 'compressed.enabled', true));
 const compressedCodec = String(args.compressedCodec || args.codec || getSetting(serverConfig, 'compressed.codec', 'adpcm')).trim().toLowerCase();
 const adpcmFrameMs = Number(args.adpcmFrameMs || getSetting(serverConfig, 'compressed.adpcmFrameMs', 40));
@@ -462,28 +457,6 @@ function handleHttpRequest(req, res) {
     sendAsset(res, multiJs, 'application/javascript; charset=utf-8');
     return;
   }
-  if (pathname === '/status') {
-    if (!apiEnabled) {
-      sendNotFound(res);
-      return;
-    }
-    sendJsonResponse(res, streams.map(publicStreamStatus));
-    return;
-  }
-  if (pathname.startsWith('/status/')) {
-    if (!apiEnabled) {
-      sendNotFound(res);
-      return;
-    }
-    const streamName = pathname.slice('/status/'.length);
-    const stream = streamsByName.get(streamName);
-    if (!stream) {
-      sendNotFound(res);
-      return;
-    }
-    sendJsonResponse(res, publicStreamStatus(stream));
-    return;
-  }
 
   const hlsMatch = pathname.match(/^\/([^/]+)\/hls\/([^/]+)\/([^/]+)$/);
   if (hlsMatch) {
@@ -728,8 +701,6 @@ function startWebServers() {
       serverConfigLoaded: serverConfigExists,
       streamsConfig: configPath,
       streamsConfigLoaded: streamsConfigExists,
-      apiEnabled,
-      apiKeyConfigured: Boolean(apiKey),
       webAdminEnabled,
       webAdminHost: webAdminEnabled ? webAdminHost : undefined,
       webAdminPort: webAdminEnabled ? webAdminPort : undefined,
@@ -738,6 +709,7 @@ function startWebServers() {
       storagePath: storageBackend === 'sqlite' ? sqliteFile : dataDir,
       geoEnabled,
       geoProvider: geoEnabled ? geoProvider : undefined,
+      geoKeyConfigured: Boolean(geoKey),
       logLevel: logger.level,
     });
   }).catch((err) => fatal(err.message));
@@ -947,34 +919,6 @@ function safeUnlink(filePath) {
   } catch (err) {
     logger.warn('temporary_file_cleanup_failed', { path: filePath, error: err.message });
   }
-}
-
-function publicStreamStatus(stream) {
-  const activeListeners = getActiveListeners(stream);
-  const lastHeard = getLastHeard(stream, Date.now());
-  return {
-    name: stream.name,
-    label: stream.label,
-    sampleRate: stream.sampleRate,
-    channels: stream.channels,
-    activeListeners: activeListeners.length,
-    lastHeardAt: lastHeard.at,
-    lastHeardLabel: lastHeard.label,
-    secondsSinceLastHeard: lastHeard.secondsSince,
-    hasUdp: stream.packetCount > 0,
-    url: `/${stream.name}`,
-    compressedEnabled,
-    compressedAvailable,
-    compressedCodec,
-    adpcmAvailable: compressedEnabled,
-    adpcmFrameMs,
-    opusAvailable,
-    aacAvailable: opusAvailable && compressedCodec === 'aac',
-    hlsAvailable: opusAvailable && compressedCodec === 'hls',
-    tlsEnabled,
-    softwareVersion: SOFTWARE_VERSION,
-    serverInstanceId,
-  };
 }
 
 function streamConfig(stream) {
@@ -1239,10 +1183,8 @@ Web Admin:
 UDP and streams:
   --udp-host HOST               Default UDP bind host for streams without udpHost.
 
-Public status API:
-  -A                            Enable public /status endpoints.
-  --api-enabled true|false      Enable or disable /status endpoints for this run.
-  --api-key VALUE               Reserved API key setting for future integrations.
+Geolocation:
+  --geo-key VALUE               Reserved geolocation API key setting. ipwhois does not require it.
 
 TLS / HTTPS:
   --ssl-enabled true|false      Enable HTTPS when valid key and cert are configured.
