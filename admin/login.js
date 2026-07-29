@@ -13,7 +13,6 @@ const submitButton = document.getElementById('loginButton');
 let loginCsrfToken = '';
 let challengeRequired = false;
 let challengeConfiguredFor = '';
-let challengeNoLongerRequired = false;
 let verifiedAltchaPayload = '';
 
 widget.addEventListener('verified', (event) => {
@@ -59,7 +58,7 @@ form.addEventListener('submit', async (event) => {
   try {
     if (challengeRequired) {
       altchaPayload = await resolveAltchaPayload();
-      if (!altchaPayload && challengeRequired) throw new Error('Verification could not be completed.');
+      if (!altchaPayload && challengeRequired) throw new Error('Complete the verification before signing in.');
     }
 
     const response = await fetch('/api/auth/login', {
@@ -121,17 +120,7 @@ async function resolveAltchaPayload() {
   const existingPayload = verifiedAltchaPayload || getWidgetPayload();
   if (existingPayload) return existingPayload;
 
-  challengeNoLongerRequired = false;
   await configureChallengeWidget();
-  const verification = await widget.verify();
-  const payload = verification && verification.payload || getWidgetPayload();
-  if (payload) return payload;
-
-  if (challengeNoLongerRequired) {
-    challengeRequired = false;
-    await updateChallengeVisibility();
-    return '';
-  }
   return '';
 }
 
@@ -162,12 +151,6 @@ async function challengeFetch(url, options = {}) {
       'x-csrf-token': loginCsrfToken,
     },
   });
-  if (response.status === 409) {
-    const body = await response.clone().json().catch(() => ({}));
-    if (body.code === 'challenge_not_required') {
-      challengeNoLongerRequired = true;
-    }
-  }
   return response;
 }
 
@@ -178,7 +161,6 @@ function getWidgetPayload() {
 
 function resetChallengePayload() {
   verifiedAltchaPayload = '';
-  challengeNoLongerRequired = false;
   widget.reset();
 }
 
