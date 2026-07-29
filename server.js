@@ -1224,7 +1224,9 @@ function generateSelfSignedCertificate({ adminTlsCertPath, adminTlsKeyPath, serv
 
   if (shouldAskInteractiveQuestion()) {
     const answer = askYesNo('Do you also want to enable SSL for the public stream server with this certificate? This is optional and usually unnecessary behind a reverse proxy. [y/N] ');
-    if (answer) {
+    if (answer === null) {
+      logger.plain('info', 'Public stream SSL was left unchanged because no terminal answer could be read.');
+    } else if (answer) {
       setServerConfigSetting(serverConfigPath, 'ssl', 'enabled', 'true', fs, path);
       if (!String(tlsKeyPath || '').trim()) setServerConfigSetting(serverConfigPath, 'ssl', 'key', path.relative(process.cwd(), keyPath), fs, path);
       if (!String(tlsCertPath || '').trim()) setServerConfigSetting(serverConfigPath, 'ssl', 'cert', path.relative(process.cwd(), certPath), fs, path);
@@ -1242,10 +1244,17 @@ function shouldAskInteractiveQuestion() {
 }
 
 function askYesNo(question) {
-  fs.writeSync(process.stdout.fd, question);
-  const buffer = Buffer.alloc(64);
-  const bytes = fs.readSync(process.stdin.fd, buffer, 0, buffer.length, null);
-  return /^y(es)?$/i.test(buffer.toString('utf8', 0, bytes).trim());
+  try {
+    fs.writeSync(process.stdout.fd, question);
+    const buffer = Buffer.alloc(64);
+    const bytes = fs.readSync(process.stdin.fd, buffer, 0, buffer.length, null);
+    return /^y(es)?$/i.test(buffer.toString('utf8', 0, bytes).trim());
+  } catch (err) {
+    if (err && ['EAGAIN', 'EWOULDBLOCK', 'EINTR'].includes(err.code)) {
+      return null;
+    }
+    throw err;
+  }
 }
 
 function loadTlsOptions() {
