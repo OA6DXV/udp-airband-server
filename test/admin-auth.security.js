@@ -81,7 +81,7 @@ async function testAuthenticationFlow() {
     const success = await fixture.login(
       'admin',
       'correct horse battery staple',
-      await solve(successChallenge.body),
+      await solve(successChallenge.body, { clientPayload: true }),
     );
     assert.strictEqual(success.statusCode, 200);
     assert.match(success.cookie, /HttpOnly/);
@@ -454,14 +454,17 @@ async function createFixture(options = {}) {
   };
 }
 
-async function solve(challenge) {
+async function solve(challenge, options = {}) {
   const solution = await solveChallenge({
     challenge,
     deriveKey,
     timeout: 5000,
   });
   assert.ok(solution);
-  return encodePayload({ challenge, solution });
+  const payloadChallenge = options.clientPayload
+    ? { parameters: challenge.parameters, signature: challenge.signature }
+    : challenge;
+  return encodePayload({ challenge: payloadChallenge, solution });
 }
 
 function decodePayload(payload) {
