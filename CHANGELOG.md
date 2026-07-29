@@ -4,83 +4,47 @@
 
 ### English
 
-- Added secure Web Admin authentication with hardened sessions, CSRF protection, login rate limiting, and challenge handling.
-- Added per-login Web Admin change tracking with the administrator username, full audit IP, session start/end timestamps, end reason, total changes, and a single pre-change stream snapshot for future session rollback.
-- Fixed Web Admin login submission when the ALTCHA challenge is hidden and reduced noisy browser warnings on non-HTTPS admin testing.
-- Added automatic first-run generation of private Web Admin secrets in `data/admin-secrets.env` when environment-provided secrets are absent, with startup/login notices explaining storage, backups, custom-secret timing, and missing administrator setup.
+- Added hardened Web Admin authentication with SQLite-backed sessions, CSRF protection, rate limiting, ALTCHA challenge support, secure/insecure admin modes, and HTTPS reverse-proxy support.
+- Added multi-administrator account management from the server CLI, including create, password change, enable/disable, soft delete, lifecycle timestamps, hidden password prompts, and weak-password warnings.
+- Added per-admin audit tracking for Web Admin changes, including administrator username, audit IP, session start/end timestamps, close reason, total changes, and a pre-change stream snapshot for future rollback.
+- Added automatic first-run generation of private Web Admin secrets in `data/admin-secrets.env`, with startup guidance for backups and custom secret timing.
 - Made SQLite the exclusive runtime database for listener metrics, Last Heard, geolocation, and Web Admin authentication.
-- Changed `--migrate` to a one-way legacy JSON-to-SQLite import that preserves the source files in a timestamped backup directory.
-- Added a startup warning when legacy JSON runtime data still needs migration, while Node.js 22.13+ uses built-in `node:sqlite` silently and older runtimes receive `better-sqlite3` installation guidance.
-- Added SQLite integrity checks and automatic archival of leftover legacy JSON files when an existing SQLite database is newer and valid.
-- Changed server configuration handling so `server.conf` stays local, startup can regenerate it from an internal template, and `server.conf.tmp` is used only temporarily to append missing settings before being deleted.
-- Added Web Admin HTTPS mode with `[admin].secure`, `[admin].key`, `[admin].cert`, ALTCHA disabling for intentional insecure admin mode, and `--generate-cert` for OpenSSL self-signed certificates.
+- Changed `--migrate` to a one-way legacy JSON-to-SQLite import with timestamped JSON backups, SQLite integrity checks, and safe archival of stale JSON leftovers.
+- Improved `server.conf` handling so local values survive updates, missing settings are appended through a temporary `server.conf.tmp`, and startup stops once configuration is upgraded for review.
+- Added Web Admin certificate tooling with `--generate-cert`, OpenSSL self-signed certificate generation, direct HTTPS support, and clear warnings when secure admin mode requires HTTPS through certificates or a reverse proxy.
 
 ### Espanol
 
-- Se agrego autenticacion segura para Web Admin con sesiones reforzadas, proteccion CSRF, limites de intentos de login y sistema de desafios.
-- Se agrego seguimiento de cambios por sesion de Web Admin con username, IP completa de auditoria, timestamps de inicio/fin, motivo de cierre, total de cambios y un unico snapshot previo para un futuro rollback por sesion.
-- Se corrigio el envio del login de Web Admin cuando el desafio ALTCHA esta oculto y se redujeron warnings del navegador durante pruebas admin sin HTTPS.
-- Se agrego generacion automatica de secretos privados de Web Admin en `data/admin-secrets.env` durante el primer arranque cuando no existen secretos por entorno, con avisos de inicio/login sobre almacenamiento, respaldos, cuando conviene definir secretos custom y configuracion pendiente del administrador.
+- Se agrego autenticacion reforzada para Web Admin con sesiones en SQLite, proteccion CSRF, limites de intentos, desafios ALTCHA, modos admin seguro/inseguro y soporte para HTTPS detras de reverse proxy.
+- Se agrego gestion de multiples administradores desde la CLI del servidor, incluyendo creacion, cambio de contrasena, enable/disable, baja logica, timestamps de ciclo de vida, entrada oculta de contrasena y warnings para contrasenas debiles.
+- Se agrego auditoria por administrador para cambios en Web Admin, incluyendo username, IP de auditoria, timestamps de inicio/fin de sesion, motivo de cierre, total de cambios y snapshot previo para rollback futuro.
+- Se agrego generacion automatica de secretos privados de Web Admin en `data/admin-secrets.env`, con guia de inicio para backups y momento adecuado para secretos personalizados.
 - SQLite paso a ser la unica base de datos de ejecucion para metricas de listeners, Last Heard, geolocalizacion y autenticacion de Web Admin.
-- `--migrate` ahora importa unicamente de JSON heredado a SQLite y conserva los archivos originales en una carpeta de respaldo con fecha.
-- Se agrego una alerta al detectar datos JSON pendientes de migracion; Node.js 22.13+ usa `node:sqlite` sin avisos y los runtimes antiguos reciben instrucciones para instalar `better-sqlite3`.
-- Se agrego verificacion de integridad SQLite y archivado automatico de JSON heredados sobrantes cuando una base SQLite existente es mas nueva y valida.
-- Se cambio el manejo de configuracion para mantener `server.conf` como archivo local, regenerarlo desde una plantilla interna si falta y usar `server.conf.tmp` solo temporalmente para agregar opciones faltantes antes de borrarlo.
-- Se agrego modo HTTPS para Web Admin con `[admin].secure`, `[admin].key`, `[admin].cert`, desactivacion de ALTCHA cuando el admin se configura intencionalmente como inseguro y `--generate-cert` para certificados self-signed con OpenSSL.
+- `--migrate` ahora importa solo de JSON heredado a SQLite, con backups JSON fechados, verificacion de integridad SQLite y archivado seguro de JSON sobrantes.
+- Se mejoro el manejo de `server.conf` para conservar valores locales, agregar opciones faltantes mediante `server.conf.tmp` temporal y detener el arranque cuando la configuracion fue actualizada para que el usuario la revise.
+- Se agrego tooling de certificados para Web Admin con `--generate-cert`, generacion self-signed con OpenSSL, HTTPS directo y warnings claros cuando el modo admin seguro requiere HTTPS por certificados o reverse proxy.
 
 ## 1.7-preview - Unreleased
 
 ### English
 
-- Started the 1.7 preview cycle.
-- Added a Web Admin server on a separate loopback-only port, configurable from `[admin]` in `server.conf` or overridden at startup with `--webserver PORT` / `--webadmin PORT`.
-- Added live `streams.json` editing from Web Admin, including validation, safe file writes, UDP socket rebinding, rollback on bind failure, and listener-preserving display-name updates.
-- Added a `Reload streams` action for applying disk changes without a full server restart, with a pending-change pulse after saved stream edits.
-- Added a `Discard changes` action to restore the latest loaded stream configuration before applying edits.
-- Added runtime-aware server controls: console runs are shown as shutdown actions, while `systemd` runs show restart warnings intended for auto-restarting services.
-- Added Web Admin online/restarting/offline status handling that recovers automatically when the server comes back.
-- Added EN/ES language switching to Web Admin.
-- Added persistent unique-user history with a 12-hour administration chart.
-- Added `--help` / `-h` command-line documentation and refined Web Admin action buttons so Apply/Discard only enable when stream configuration really changed.
-- Added selectable JSON or SQLite runtime persistence for connected-user history and Last Heard values.
-- Added bidirectional, non-destructive `--migrate [json|sqlite]` storage migration with destination-data merging, interactive `Y/N` confirmation, automatic opposite-backend selection when no target is provided, and automatic `[storage].backend` updates in `server.conf`.
-- Kept JSON as the default runtime storage backend for compatibility, while recommending SQLite at startup with a readable warning block and Node.js version-specific migration guidance.
-- Added privacy-preserving ipwhois geolocation enabled by default with `/24` IPv4 and `/48` IPv6 anonymization, a 30-day JSON/SQLite cache, local-address exclusion, request deduplication, and rate-limit backoff.
-- Added ISO country-code storage to the geolocation cache so Web Admin maps can use aggregated country/city data later.
-- Extended storage migration to carry the geolocation cache bidirectionally without replacing newer destination records.
-- Added a Web Admin stream-configuration revert button for restoring the state that existed before the last applied change.
-- Changed the default Web Admin port to `8584`, removed the public `/status` API, and moved the reserved future API key setting to `[geo].key`.
-- Added live stream-configuration notifications: label changes update open hub, single-player, and Multi Stream pages without interrupting audio, while incompatible stream changes stop affected players and guide listeners back to the refreshed home page.
-- Refined Web Admin change notices so display-name-only edits do not request reloads, while unnecessary reloads ask for confirmation before interrupting listeners.
-- Refined the Web Admin connected-user chart scale and added a placeholder connected-users detail page.
-- Added a privacy-preserving Google GeoChart to Web Admin with country totals, up to three leading cities in localized tooltips, and selectable country details.
-- Documented Web Admin usage in both English and Spanish README files.
+- Added the Web Admin server on a separate configurable port, with live `streams.json` editing, validation, safe writes, UDP rebinding, reload/revert/discard actions, and rollback on failed stream configuration changes.
+- Added runtime-aware server controls for console and `systemd` deployments, including restart/shutdown warnings and online/offline recovery status in Web Admin.
+- Added persistent administration metrics with a 12-hour unique-user chart and privacy-preserving listener geography based on anonymized ipwhois geolocation.
+- Added Google GeoChart listener geography with country totals, leading city breakdowns, localized tooltips, and selectable country details.
+- Added dynamic stream-configuration notifications so label-only changes update active pages without interrupting audio, while incompatible changes stop affected players and guide listeners back to the refreshed home page.
+- Added EN/ES Web Admin translations and documented Web Admin usage in the English and Spanish README files.
+- Changed the default Web Admin port to `8584` and removed the public `/status` API surface.
 
 ### Espanol
 
-- Se inicio el ciclo preview de 1.7.
-- Se agrego un servidor Web Admin en un puerto separado solo en loopback, configurable desde `[admin]` en `server.conf` o sobrescrito al iniciar con `--webserver PUERTO` / `--webadmin PUERTO`.
-- Se agrego edicion en vivo de `streams.json` desde Web Admin, con validacion, escritura segura del archivo, reapertura de sockets UDP, restauracion ante errores de bind y cambios de nombres visibles sin interrumpir listeners.
-- Se agrego la accion `Reload streams` para aplicar cambios desde disco sin reiniciar todo el servidor, con parpadeo pendiente despues de guardar ediciones.
-- Se agrego la accion `Discard changes` para restaurar la ultima configuracion cargada antes de aplicar cambios.
-- Se agregaron controles de servidor segun el entorno: en consola se muestran como apagado, mientras que bajo `systemd` se muestran advertencias de reinicio pensadas para servicios con auto-restart.
-- Se agrego estado online/restarting/offline en Web Admin con recuperacion automatica cuando el servidor vuelve.
-- Se agrego selector de idioma EN/ES en Web Admin.
-- Se agrego historial persistente de usuarios unicos con una grafica administrativa de 12 horas.
-- Se agrego documentacion de flags con `--help` / `-h` y se ajustaron los botones Apply/Discard para activarse solo cuando la configuracion de streams realmente cambio.
-- Se agrego persistencia seleccionable JSON o SQLite para el historial de usuarios conectados y los valores Last Heard.
-- Se agrego migracion bidireccional y no destructiva con `--migrate [json|sqlite]`, combinando los datos existentes en el destino, confirmacion interactiva `Y/N`, seleccion automatica del backend contrario cuando no se indica destino y actualizacion automatica de `[storage].backend` en `server.conf`.
-- Se mantuvo JSON como backend de almacenamiento predeterminado por compatibilidad, recomendando SQLite al iniciar con un bloque de warning legible segun la version de Node.js.
-- Se agrego geolocalizacion ipwhois activada por defecto con privacidad, anonimizacion IPv4 `/24` e IPv6 `/48`, cache JSON/SQLite de 30 dias, exclusion de direcciones locales, deduplicacion de consultas y pausa ante limites de la API.
-- Se agrego almacenamiento de codigo ISO de pais al cache de geolocalizacion para que luego Web Admin pueda usar datos agregados por pais/ciudad en mapas.
-- Se amplio la migracion para transferir el cache de geolocalizacion en ambas direcciones sin reemplazar registros mas recientes en el destino.
-- Se agrego un boton en Web Admin para revertir la configuracion de streams al estado anterior al ultimo cambio aplicado.
-- Se cambio el puerto predeterminado de Web Admin a `8584`, se elimino la API publica `/status` y se movio el campo reservado de API key futura a `[geo].key`.
-- Se agregaron notificaciones en vivo de configuracion: los cambios de etiqueta actualizan el hub, reproductores individuales y Multi Stream sin interrumpir el audio, mientras que los cambios incompatibles detienen los reproductores afectados y guian al listener de vuelta a la pagina principal actualizada.
-- Se ajustaron los avisos de Web Admin para que cambios solo de nombre visible no pidan recarga, mientras que recargas innecesarias pidan confirmacion antes de interrumpir listeners.
-- Se ajusto la escala del grafico de usuarios conectados en Web Admin y se agrego una pagina base para el detalle de usuarios conectados.
-- Se agrego un Google GeoChart con privacidad a Web Admin, con totales por pais, hasta tres ciudades principales en tooltips localizados y detalle seleccionable por pais.
-- Se documento el uso de Web Admin en los README en ingles y espanol.
+- Se agrego el servidor Web Admin en un puerto configurable separado, con edicion en vivo de `streams.json`, validacion, escritura segura, reapertura de UDP, acciones reload/revert/discard y rollback ante configuraciones de stream fallidas.
+- Se agregaron controles de servidor conscientes del entorno para ejecuciones en consola y `systemd`, con advertencias de reinicio/apagado y estado online/offline recuperable en Web Admin.
+- Se agregaron metricas administrativas persistentes con grafica de usuarios unicos de 12 horas y geografia de oyentes con privacidad basada en geolocalizacion ipwhois anonimizada.
+- Se agrego Google GeoChart para geografia de oyentes con totales por pais, desglose de ciudades principales, tooltips localizados y detalle seleccionable por pais.
+- Se agregaron notificaciones dinamicas de configuracion para que cambios solo de etiqueta actualicen paginas activas sin cortar audio, mientras que cambios incompatibles detienen reproductores afectados y guian al listener al home actualizado.
+- Se agregaron traducciones EN/ES para Web Admin y documentacion de uso en los README en ingles y espanol.
+- Se cambio el puerto predeterminado de Web Admin a `8584` y se elimino la superficie publica de API `/status`.
 
 ## 1.6 - 2026-07-26
 
@@ -101,169 +65,131 @@
 ### English
 
 - Improved Compatible AAC playback by seeking native browser audio closer to the live edge on startup for Multi Stream and individual players.
-- Refined Multi Stream Compatible Mode with the same compact per-stream layout on desktop and mobile, plus clearer Realtime/Compatible mode controls.
+- Improved Multi Stream Compatible Mode behavior across desktop and mobile, including clearer Realtime/Compatible mode switching.
 - Improved individual stream startup: playback can start from the informational notice, mute/unmute states are clearer, and Last Heard stays in seconds for up to 20 seconds.
 - Added per-tab acknowledgements for individual and Multi Stream mode notices while keeping playback defaults device-based on each new session.
-- Updated the main page title to `Real-Time Airband Audio`, improved Multi Stream selection requirements, and polished compatible-mode orange states.
+- Improved Multi Stream selection requirements and clarified mode defaults for individual and Multi Stream playback.
 
 ### Espanol
 
 - Se mejoro la reproduccion AAC Compatible acercando el audio nativo al borde en vivo al iniciar Multi Stream y reproductores individuales.
-- Se refino Multi Stream Compatible Mode con el mismo diseno compacto por stream en escritorio y movil, ademas de controles Realtime/Compatible mas claros.
+- Se mejoro el comportamiento de Multi Stream Compatible Mode en escritorio y movil, incluyendo cambio mas claro entre modos Realtime/Compatible.
 - Se mejoro el inicio de streams individuales: el audio puede arrancar desde el aviso informativo, mute/unmute es mas claro, y Last Heard se mantiene en segundos hasta 20 segundos.
 - Se agrego memoria por pestana para avisos de modo en streams individuales y Multi Stream, manteniendo los modos por defecto segun el dispositivo en cada nueva sesion.
-- Se actualizo el titulo principal a `Real-Time Airband Audio`, se mejoro el requisito de seleccion de Multi Stream y se pulieron los estados naranjas del modo Compatible.
+- Se mejoraron los requisitos de seleccion de Multi Stream y se aclararon los modos predeterminados para reproduccion individual y Multi Stream.
 
 ## 1.4 - 2026-06-11
 
-### Added
+### English
 
-- Added the first Multi Stream preview workflow for selecting two or more configured streams from the main page.
-- Added a dedicated `/multi` player page with per-stream cards, shared status controls, total playback bandwidth, users, language selection, and local/UTC time.
-- Added per-stream audio controls for mode selection, start/mute, last heard, and a combined level meter plus gain slider.
-- Added `[api] enabled = false` to `server.conf`, automatic config migration for missing default settings, and `-A` to manually enable public `/status` endpoints.
-- Added an unstable native AAC background-audio path for `/multi` that mixes selected streams server-side and plays them through a real `<audio>` element.
-- Added server-side per-stream gain updates for the native `/multi` AAC mixer as a first step toward independent background-mode volume control.
+- Added the first Multi Stream workflow for selecting two or more configured streams from the main page and playing them from a dedicated `/multi` page.
+- Added per-stream Multi Stream controls, total playback bandwidth, active users, language selection, local/UTC time, last heard, level metering, and gain control.
+- Added an experimental native AAC background-audio path for Multi Stream that mixes selected streams server-side through a browser-native `<audio>` element.
+- Added public API hardening by disabling `/status` by default and removing home-page status polling.
+- Fixed noisy production logs from expected client/proxy socket closes by moving them to debug-only events.
+- Fixed Multi Stream user counting so one browser session remains one user across selected streams.
 
-### Changed
+### Espanol
 
-- Updated the software version to `1.4`.
-- The main page now shows a Multi Stream card only when two or more streams are configured.
-- Expected client/proxy socket closes such as `EPIPE` and `ECONNRESET` are now logged as debug-only `client_socket_closed` events instead of production warnings.
-- Multi Stream selection now uses a slower border-only breathing animation on stream cards, and the `/multi` page now embeds stream configuration as valid JSON.
-- Once a stream is selected, the `Start Multi Stream` card pulses from its normal background to green every 2 seconds.
-- Public `/status` endpoints are disabled by default, and the home page no longer polls status over HTTP.
-- Multi Stream now counts the same browser session as one user across selected streams, shows dB on the level meter, and only reveals the gain percentage while hovering or interacting with the slider.
-- Pressing `Select streams` again exits Multi Stream selection when no streams have been selected.
-- Multi Stream cards now use a compact mobile portrait layout and show stream name plus last heard in one line.
-- Multi Stream now exposes global Uncompressed/Compressed mode buttons above the stream list.
+- Se agrego el primer flujo Multi Stream para seleccionar dos o mas streams configurados desde la pagina principal y reproducirlos desde una pagina dedicada `/multi`.
+- Se agregaron controles por stream en Multi Stream, ancho de banda total, usuarios activos, idioma, hora local/UTC, last heard, medidor de nivel y ganancia.
+- Se agrego una ruta experimental AAC nativa para audio en background en Multi Stream, mezclando streams seleccionados en el servidor mediante un `<audio>` nativo del navegador.
+- Se endurecio la API publica desactivando `/status` por defecto y eliminando el polling de status desde el home.
+- Se corrigio el ruido en logs de produccion por cierres esperados de sockets de clientes/proxies, moviendolos a eventos solo debug.
+- Se corrigio el conteo de usuarios en Multi Stream para que una sesion de navegador cuente como un solo usuario aunque escuche varios streams.
 
 ## 1.3 - 2026-06-04
 
 Release focused on documentation, operational readiness, safer public status output, and service-friendly configuration/logging.
 
-### Added
+### English
 
-- Added `tools/tone.py` for sending a continuous 1 kHz f32le UDP test tone to the example `test` stream.
-- Added `tools/file-to-udp.py` for converting audio files through `ffmpeg` and sending them as timed f32le UDP chunks.
-- Added English and Spanish tool documentation with descriptions, execution examples, and argument reference.
-- Added full English and Spanish README documentation covering RTLSDR-Airband, UDP audio, server configuration, RTLSDR-Airband `udp_stream` setup, HTTPS/TLS, self-signed certificates, logging, and test tools.
-- Added `server.conf` as the default editable server configuration file.
-- Added a built-in fallback `test` stream on UDP port `8690` when `streams.json` is missing.
-- Added favicon support for all pages.
-- Added project/version footer on the main page linked to the GitHub repository.
-- Added startup log lines showing each stream bind, route, label, channel count, and sample rate.
-- Added configurable service logging with levels, optional timestamps, optional colors, and a manual `-D` debug mode.
-- Added ffmpeg process logging for Opus/AAC/HLS debugging, including stderr capture in debug mode.
-- Added security headers for HTML, JSON, assets, and error responses.
-- Added `package-lock.json` so dependency auditing can run reproducibly.
+- Added test tools under `tools/` for generating UDP tones and sending audio files as timed float PCM UDP chunks.
+- Added full English and Spanish documentation for RTLSDR-Airband UDP audio, server configuration, HTTPS/TLS, logging, test tools, and deployment basics.
+- Added `server.conf` as the default editable server configuration file and a built-in fallback `test` stream on UDP port `8690`.
+- Added structured startup logging, configurable log levels, optional timestamps/colors, manual `-D` debug mode, and ffmpeg stderr capture for compressed-mode debugging.
+- Added security headers and hardened public status/control payloads so UDP bind addresses, ports, listener identifiers, client IDs, and raw counters are not exposed.
+- Added safe handling for malformed percent-encoded request paths.
+- Added `package-lock.json` and verified the release with syntax checks and `npm audit --omit=dev`.
 
-### Changed
+### Espanol
 
-- Updated the software version to `1.3`.
-- Updated the second example stream from `atis` to `test` with label `Testing UDP Input`, UDP port `8690`, 8000 Hz, mono.
-- Updated the main README with concise descriptions of the project files and moved test-tool instructions to `tools/README.md`.
-- Matched the main page user counter and language selector styling to the stream page.
-- Changed SSL behavior so enabling SSL switches the web player to HTTPS on the same `[web].port` instead of starting a second HTTPS listener. If certificates are missing or invalid, the server logs a warning and falls back to HTTP.
-- Changed startup summary logging so the final `INFO startup` line appears after the `Web player` line.
-- Changed `INFO` and `DEBUG` console logs to remain uncolored; `WARN` is yellow and `ERROR` is red when colors are enabled.
-- Changed missing `server.conf` handling to warn and continue with built-in defaults, while the repository now ships with `server.conf` by default.
-
-### Security
-
-- Removed UDP bind host, UDP port, raw client counts, packet counters, byte counters, listener lists, and client IDs from public `/status`, `/status/:stream`, and control WebSocket config/stats payloads.
-- Added safe handling for malformed percent-encoded request paths; invalid paths now return `400 Bad Request` instead of being decoded unsafely.
-- Added `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and a Content Security Policy header.
-
-### Verified
-
-- Ran syntax checks for server and browser JavaScript.
-- Ran `npm audit --omit=dev` with zero reported vulnerabilities.
-- Dynamically verified public status and control WebSocket payloads do not expose UDP IP/port or listener identifiers.
-- Verified malformed URL handling, security headers, HLS segment path rejection, and SSL fallback behavior.
+- Se agregaron herramientas en `tools/` para generar tonos UDP y enviar archivos de audio como bloques UDP float PCM temporizados.
+- Se agrego documentacion completa en ingles y espanol sobre audio UDP de RTLSDR-Airband, configuracion del servidor, HTTPS/TLS, logging, herramientas de prueba y despliegue basico.
+- Se agrego `server.conf` como archivo editable de configuracion por defecto y un stream fallback `test` en el puerto UDP `8690`.
+- Se agrego logging estructurado de arranque, niveles configurables, timestamps/colores opcionales, modo debug manual `-D` y captura de stderr de ffmpeg para depurar modos comprimidos.
+- Se agregaron headers de seguridad y se endurecieron los payloads publicos de status/control para no exponer direcciones UDP, puertos, identificadores de listeners, client IDs ni contadores raw.
+- Se agrego manejo seguro de rutas malformadas con porcentajes invalidados.
+- Se agrego `package-lock.json` y se verifico el release con checks de sintaxis y `npm audit --omit=dev`.
 
 ## 1.2 - 2026-06-04
 
 Production release focused on making compressed mobile playback usable without relying on the experimental HLS/AAC path.
 
-### Added
+### English
 
-- Added low-latency IMA ADPCM over WebSocket as the default `Compressed` codec.
-- Added ADPCM frames with decoder state so clients can resync after silence gaps or late joins.
+- Added low-latency IMA ADPCM over WebSocket as the default `Compressed` codec, including decoder state for resync after silence gaps or late joins.
 - Added `Idle` / `Reconnect` behavior to stop only the audio data stream without closing the page.
-- Added the `Realtime Airband Streams` main page with active users, language selection, route/channel/sample-rate details, and last transmission time per feed.
-- Added `CHANGELOG.md`.
+- Added the `Realtime Airband Streams` main page with active users, language selection, stream details, and last transmission time per feed.
+- Changed desktop browsers to default to `Uncompressed` and mobile browsers to default to `Compressed`.
+- Reduced compressed idle bandwidth by sending ADPCM frames only while UDP audio is present.
+- Improved ADPCM audio quality with adaptive state and light smoothing.
+- Established the release workflow where ongoing work stays in `development` and production releases are promoted to `main`.
+- Deferred HLS/AAC and WebRTC/Opus while ADPCM was evaluated as the lower-latency compressed path.
 
-### Changed
+### Espanol
 
-- Desktop browsers default to `Uncompressed`; mobile browsers default to `Compressed`.
-- ADPCM sends audio frames only while UDP audio is present, reducing bandwidth during closed-squelch idle periods.
-- ADPCM keeps adaptive state across active audio and uses light smoothing to reduce granular noise and harsh high-frequency artifacts.
-- Gain/start controls were moved below the statistics area and above the waveform.
-- The status box becomes a green `Connected` button after valid UDP is confirmed, then a yellow `Reconnect` button while idle.
-- `Reconnect` resumes the same mode that was active before entering `Idle`.
-- Production release workflow now keeps ongoing work in `development` and promotes release commits to `main`.
-
-### Deferred
-
-- HLS/AAC remains in the codebase as an experimental compressed backend, but production testing is paused while ADPCM is evaluated as the lower-latency mobile-friendly compressed path.
-- WebRTC/Opus remains a future candidate for a more complete real-time compressed transport.
+- Se agrego IMA ADPCM de baja latencia sobre WebSocket como codec `Compressed` por defecto, incluyendo estado de decoder para resincronizar tras silencios o ingresos tardios.
+- Se agrego comportamiento `Idle` / `Reconnect` para detener solo el flujo de datos de audio sin cerrar la pagina.
+- Se agrego la pagina principal `Realtime Airband Streams` con usuarios activos, idioma, detalles de streams y hora de ultima transmision por feed.
+- Se cambio el default de escritorio a `Uncompressed` y el de moviles a `Compressed`.
+- Se redujo el ancho de banda en reposo enviando frames ADPCM solo cuando hay audio UDP.
+- Se mejoro la calidad ADPCM con estado adaptativo y suavizado ligero.
+- Se establecio el flujo de releases donde el trabajo continuo queda en `development` y produccion se promueve a `main`.
+- Se dejaron HLS/AAC y WebRTC/Opus como candidatos futuros mientras ADPCM se evaluaba como ruta comprimida de menor latencia.
 
 ## 1.1 - 2026-06-03
 
 Feature preview release that introduced the larger UI/configuration refactor and the first iOS compressed-audio experiments.
 
-### Added
+### English
 
-- Added English/Spanish UI language selection.
-- Added local and UTC clock boxes.
-- Added server-level configuration through `server.conf`, including UDP/web bind settings, SSL certificate paths, and compressed audio controls.
-- Added optional HTTPS/TLS support directly in the Node server.
-- Added configurable compressed codec backends and ffmpeg settings.
+- Added English/Spanish UI language selection, local/UTC clocks, server-level configuration through `server.conf`, optional HTTPS/TLS, configurable compressed backends, and ffmpeg settings.
 - Added experimental iOS compressed playback paths using AAC and native HLS.
-- Added frontend asset separation with `assets/style.css` and `assets/app.js`.
-- Added modular server internals under `lib/`, including `lib/compressed/`.
+- Split frontend assets into `assets/style.css` and `assets/app.js`.
+- Modularized server internals under `lib/`, including compressed backends under `lib/compressed/`.
+- Changed mode labels from `RAW` / `OPUS` to `Uncompressed` / `Compressed`, raised maximum gain to 150%, and refined Last Heard behavior.
+- Improved compressed startup, live-buffer trimming, bandwidth reporting, buffered time display, waveform, and level meter behavior.
+- Fixed mode text updates, compressed reconnect behavior, frozen uncompressed waveform after UDP stopped, and a compressed-client writability crash.
 
-### Changed
+### Espanol
 
-- Changed visible audio mode labels from `RAW` / `OPUS` to `Uncompressed` / `Compressed`.
-- Raised maximum gain to 150%.
-- Refined last heard labels to show `Now`, then seconds ago, then the last transmission clock time.
-- Reduced compressed silence keepalive bandwidth for ffmpeg-backed compressed modes.
-- Improved compressed playback startup, live-buffer trimming, bandwidth reporting, buffered time display, waveform, and level meter behavior.
-
-### Fixed
-
-- Fixed mode button text not updating before audio start.
-- Fixed stale compressed reconnect behavior.
-- Fixed uncompressed waveform remaining frozen after UDP audio stopped.
-- Fixed server crash caused by compressed client writability checks when an expected socket was missing.
-- Improved HLS segment serving resilience while testing iOS compatibility.
-
-### Note
-
-- The 1.1 release line exposed important mobile compressed-audio issues, so the project continued on `development` until the 1.2 ADPCM production release.
+- Se agrego seleccion de idioma EN/ES, relojes local/UTC, configuracion global mediante `server.conf`, HTTPS/TLS opcional, backends comprimidos configurables y opciones ffmpeg.
+- Se agregaron rutas experimentales de reproduccion comprimida en iOS usando AAC y HLS nativo.
+- Se separaron assets frontend en `assets/style.css` y `assets/app.js`.
+- Se modularizaron internals del servidor bajo `lib/`, incluyendo backends comprimidos bajo `lib/compressed/`.
+- Se cambiaron las etiquetas `RAW` / `OPUS` a `Uncompressed` / `Compressed`, se aumento la ganancia maxima a 150% y se refino Last Heard.
+- Se mejoro el inicio comprimido, recorte de buffer en vivo, reporte de ancho de banda, tiempo buffered, waveform y medidor de nivel.
+- Se corrigieron actualizaciones del texto de modo, reconexion comprimida, waveform uncompressed congelado al parar UDP y un crash de writability en clientes comprimidos.
 
 ## 1.0.1 - 2026-06-03
 
 First production preview.
 
-### Added
+### English
 
 - Added the initial Node-managed web player for RTLSDR-Airband UDP float PCM streams.
 - Added multi-feed stream configuration through `streams.js` / stream JSON data.
 - Added uncompressed float32 PCM playback over WebSocket.
 - Added basic web UI with stream status, buffering, bandwidth, mode, gain, waveform, and level meter.
-- Added active listener counting and listener status tracking.
-- Added server-side last heard tracking so newly connected users can see recent frequency activity.
+- Added active listener counting and server-side Last Heard tracking.
 - Added TLS/HTTPS support and certificate configuration.
 
-### Changed
+### Espanol
 
-- Reported software version as `1.0.1` for the first preview release.
-- Began treating `main` as the production release branch.
-
-### Fixed
-
-- Fixed status reporting so `Connected` is only shown after UDP audio is actually received.
-- Added backpressure handling and active-listener cleanup to avoid stale clients.
+- Se agrego el primer reproductor web manejado por Node para streams UDP float PCM de RTLSDR-Airband.
+- Se agrego configuracion multi-feed mediante `streams.js` / datos JSON de streams.
+- Se agrego reproduccion PCM float32 sin comprimir sobre WebSocket.
+- Se agrego una UI basica con estado del stream, buffering, ancho de banda, modo, ganancia, waveform y medidor de nivel.
+- Se agrego conteo de listeners activos y seguimiento server-side de Last Heard.
+- Se agrego soporte TLS/HTTPS y configuracion de certificados.
