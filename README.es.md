@@ -320,8 +320,10 @@ printf 'ADMIN_TRUSTED_PROXIES=127.0.0.1,::1\n' | sudo tee -a /etc/udp-airband-ad
 Crea y administra cuentas desde la linea de comandos del servidor:
 
 ```bash
-node server.js --createuser USER --password 'LONG_PASSWORD'
-node server.js --modifyuser USER --password 'NEW_LONG_PASSWORD'
+node server.js --createuser USER
+node server.js --createuser USER --password 'PASSWORD'
+node server.js --modifyuser USER --password
+node server.js --modifyuser USER --password 'NEW_PASSWORD'
 node server.js --modifyuser USER disable
 node server.js --modifyuser USER enable
 node server.js --deleteuser USER
@@ -330,7 +332,7 @@ node server.js --listusers
 
 Cambiar la contrasena, deshabilitar o eliminar una cuenta cierra inmediatamente sus sesiones activas. La eliminacion pide confirmacion en la terminal y se conserva como baja logica auditable. SQLite almacena las fechas de creacion, modificacion y eliminacion. Un username eliminado puede recrearse despues con `--createuser`.
 
-Las contrasenas proporcionadas con `--password` pueden quedar en el historial del shell o aparecer brevemente en la lista de procesos. Para el primer administrador o cuenta principal, el comando compatible `npm run admin:setup` solicita la contrasena interactivamente sin mostrarla. Las rutas personalizadas pueden indicarse con `--server-config`, `--data-dir` y `--sqlite-file`.
+Si se omite `--password` o se pasa sin valor, el comando solicita la contrasena sin mostrarla, parecido a las herramientas de cuentas de Linux. Las contrasenas proporcionadas directamente con `--password VALUE` pueden quedar en el historial del shell o aparecer brevemente en la lista de procesos. Las contrasenas de administrador requieren al menos 5 caracteres; las que parezcan debiles se aceptan con una advertencia para no bloquear instalaciones privadas de laboratorio. Para el primer administrador o cuenta principal, el comando compatible `npm run admin:setup` tambien solicita la contrasena interactivamente sin mostrarla. Las rutas personalizadas pueden indicarse con `--server-config`, `--data-dir` y `--sqlite-file`.
 
 Si usas el archivo de entorno protegido, agregalo al servicio `systemd`:
 

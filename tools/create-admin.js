@@ -6,6 +6,7 @@ const path = require('path');
 const readline = require('readline');
 const { loadServerConfig, getSetting, parseArgs } = require('../lib/config');
 const { createPasswordHasher } = require('../lib/admin-password');
+const { MINIMUM_PASSWORD_LENGTH, assessPasswordStrength } = require('../lib/admin-users');
 const { upsertAdministrator } = require('../lib/admin-auth');
 const { openSqliteDatabase } = require('../lib/sqlite-database');
 
@@ -49,7 +50,8 @@ async function run() {
     const password = await askHidden('Password: ');
     const confirmation = await askHidden('Confirm password: ');
     if (password !== confirmation) throw new Error('Passwords do not match.');
-    if (password.length < 12) throw new Error('Use a password with at least 12 characters.');
+    if (password.length < MINIMUM_PASSWORD_LENGTH) throw new Error(`Use a password with at least ${MINIMUM_PASSWORD_LENGTH} characters.`);
+    warnIfPasswordLooksWeak(password, username);
 
     const result = await upsertAdministrator({
       database,
@@ -64,6 +66,12 @@ async function run() {
   } finally {
     database.close();
   }
+}
+
+function warnIfPasswordLooksWeak(password, username) {
+  const warnings = assessPasswordStrength(password, username);
+  if (!warnings.length) return;
+  process.stderr.write(`Warning: this administrator password looks weak because it ${warnings.join(', ')}. It was accepted, but a longer passphrase is recommended.\n`);
 }
 
 function askVisible(question) {

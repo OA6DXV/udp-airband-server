@@ -1455,7 +1455,7 @@ function warnIfWebAdminNeedsSetup() {
     separator,
     'Web Admin is enabled but no administrator account exists yet.',
     '  Login will not work until you create the admin user.',
-    '  Run: node server.js --createuser USER --password PASSWORD',
+    '  Run: node server.js --createuser USER',
     '  The interactive compatibility command npm run admin:setup is also available.',
     '  If custom secrets are desired, configure them before creating the admin user.',
     separator,
@@ -1580,10 +1580,10 @@ Web Admin:
                                 and optionally enable [ssl] for the public stream server.
 
 Administrator accounts:
-  --createuser USER --password PASSWORD
-                                Create an administrator account.
-  --modifyuser USER --password PASSWORD
-                                Change its password and close its active sessions.
+  --createuser USER [--password PASSWORD]
+                                Create an administrator account. Without --password, prompts hidden input.
+  --modifyuser USER --password [PASSWORD]
+                                Change its password and close its active sessions. Without a value, prompts hidden input.
   --modifyuser USER enable|disable
                                 Enable or disable an account. Disabling closes active sessions.
   --deleteuser USER             Delete an account after Y/N confirmation and close its sessions.
@@ -1623,7 +1623,7 @@ Examples:
   node server.js
   node server.js -D
   node server.js --webserver 8584
-  node server.js --createuser admin --password 'use-a-long-password'
+  node server.js --createuser admin
   node server.js --modifyuser admin disable
   node server.js --listusers
   node server.js --migrate

@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { createPasswordHasher } = require('../lib/admin-password');
-const { changeAdministratorPassword, createAdministrator, deleteAdministrator, listAdministrators, setAdministratorEnabled } = require('../lib/admin-users');
+const { assessPasswordStrength, changeAdministratorPassword, createAdministrator, deleteAdministrator, listAdministrators, setAdministratorEnabled } = require('../lib/admin-users');
 const { openSqliteDatabase } = require('../lib/sqlite-database');
 
 run().catch((err) => {
@@ -66,8 +66,24 @@ function testLegacySchemaMigration() {
   }
 }
 
+async function testPasswordPolicy() {
+  const temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-admin-password-test-'));
+  const database = openSqliteDatabase({ filePath: path.join(temporaryDir, 'test.sqlite'), fs, path });
+  const passwordHasher = createPasswordHasher({ N: 1024, maxmem: 16 * 1024 * 1024 });
+  try {
+    await assert.rejects(() => createAdministrator({ database, password: '1234', passwordHasher, username: 'short' }), /at least 5 characters/);
+    await createAdministrator({ database, password: '12345', passwordHasher, username: 'short-ok' });
+    assert.ok(assessPasswordStrength('12345', 'short-ok').length > 0);
+    assert.deepStrictEqual(assessPasswordStrength('correct horse battery staple', 'admin'), []);
+  } finally {
+    database.close();
+    fs.rmSync(temporaryDir, { force: true, recursive: true });
+  }
+}
+
 async function run() {
   testLegacySchemaMigration();
+  await testPasswordPolicy();
   const temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-admin-users-test-'));
   const database = openSqliteDatabase({ filePath: path.join(temporaryDir, 'test.sqlite'), fs, path });
   const passwordHasher = createPasswordHasher({ N: 1024, maxmem: 16 * 1024 * 1024 });

@@ -6,7 +6,7 @@ const path = require('path');
 const readline = require('readline');
 const { getSetting, loadServerConfig, parseArgs } = require('../lib/config');
 const { createPasswordHasher } = require('../lib/admin-password');
-const { changeAdministratorPassword, createAdministrator, deleteAdministrator, listAdministrators, setAdministratorEnabled } = require('../lib/admin-users');
+const { assessPasswordStrength, changeAdministratorPassword, createAdministrator, deleteAdministrator, listAdministrators, setAdministratorEnabled } = require('../lib/admin-users');
 const { openSqliteDatabase } = require('../lib/sqlite-database');
 
 run().catch((err) => {
@@ -27,12 +27,16 @@ async function run() {
   try {
     if (command.name === 'list') return printAdministrators(listAdministrators(database));
     if (command.name === 'create') {
-      const result = await createAdministrator({ database, password: requirePassword(args), passwordHasher: createPasswordHasher(), username: args.createuser });
+      const password = await getPasswordForCommand(args, args.createuser, 'Password: ');
+      warnIfPasswordLooksWeak(password, args.createuser);
+      const result = await createAdministrator({ database, password, passwordHasher: createPasswordHasher(), username: args.createuser });
       process.stdout.write(`Created administrator "${result.username}".\n`);
       return;
     }
     if (command.name === 'password') {
-      const result = await changeAdministratorPassword({ database, password: requirePassword(args), passwordHasher: createPasswordHasher(), username: args.modifyuser });
+      const password = await getPasswordForCommand(args, args.modifyuser, 'New password: ');
+      warnIfPasswordLooksWeak(password, args.modifyuser);
+      const result = await changeAdministratorPassword({ database, password, passwordHasher: createPasswordHasher(), username: args.modifyuser });
       process.stdout.write(`Updated password for administrator "${result.username}". Active sessions were closed.\n`);
       return;
     }
@@ -59,9 +63,9 @@ function resolveCommand(args) {
   const selected = [args.createuser !== undefined && 'create', args.modifyuser !== undefined && 'modify', args.deleteuser !== undefined && 'delete', args.listusers !== undefined && 'list'].filter(Boolean);
   if (selected.length !== 1) throw new Error('Specify exactly one user command. Run node server.js --help for examples.');
   if (selected[0] !== 'modify') return { name: selected[0] };
-  if (args.password !== undefined && args.password !== true) return { name: 'password' };
+  if (args.password !== undefined) return { name: 'password' };
   const action = positionalModifyAction(process.argv.slice(2));
-  if (!['enable', 'disable'].includes(action)) throw new Error('--modifyuser requires --password PASSWORD, enable, or disable.');
+  if (!['enable', 'disable'].includes(action)) throw new Error('--modifyuser requires --password [PASSWORD], enable, or disable.');
   return { name: 'enabled', enabled: action === 'enable' };
 }
 
@@ -73,9 +77,58 @@ function positionalModifyAction(argv) {
   return !candidate || candidate.startsWith('-') ? '' : candidate.trim().toLowerCase();
 }
 
-function requirePassword(args) {
-  if (args.password === undefined || args.password === true) throw new Error('--password PASSWORD is required.');
-  return String(args.password);
+async function getPasswordForCommand(args, username, question) {
+  if (args.password !== undefined && args.password !== true) return String(args.password);
+  return askPasswordPair(question, 'Confirm password: ', username);
+}
+
+async function askPasswordPair(question, confirmQuestion, username) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY || typeof process.stdin.setRawMode !== 'function') {
+    throw new Error('Run this command in an interactive terminal or pass --password PASSWORD.');
+  }
+  const password = await askHidden(question);
+  const confirmation = await askHidden(confirmQuestion);
+  if (password !== confirmation) throw new Error('Passwords do not match.');
+  return password;
+}
+
+function warnIfPasswordLooksWeak(password, username) {
+  const warnings = assessPasswordStrength(password, username);
+  if (!warnings.length) return;
+  process.stderr.write(`Warning: this administrator password looks weak because it ${warnings.join(', ')}. It was accepted, but a longer passphrase is recommended.\n`);
+}
+
+function askHidden(question) {
+  return new Promise((resolve, reject) => {
+    let value = '';
+    process.stdout.write(question);
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding('utf8');
+
+    function finish(err) {
+      process.stdin.removeListener('data', onData);
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      process.stdout.write('\n');
+      if (err) reject(err);
+      else resolve(value);
+    }
+
+    function onData(chunk) {
+      for (const character of chunk) {
+        if (character === '\u0003') return finish(new Error('Administrator command cancelled.'));
+        if (character === '\r' || character === '\n') return finish();
+        if (character === '\u007f' || character === '\b') {
+          value = value.slice(0, -1);
+        } else {
+          value += character;
+        }
+      }
+    }
+
+    process.stdin.on('data', onData);
+  });
 }
 
 function printAdministrators(administrators) {

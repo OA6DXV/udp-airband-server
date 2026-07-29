@@ -320,8 +320,10 @@ printf 'ADMIN_TRUSTED_PROXIES=127.0.0.1,::1\n' | sudo tee -a /etc/udp-airband-ad
 Create and manage administrator accounts from the server CLI:
 
 ```bash
-node server.js --createuser USER --password 'LONG_PASSWORD'
-node server.js --modifyuser USER --password 'NEW_LONG_PASSWORD'
+node server.js --createuser USER
+node server.js --createuser USER --password 'PASSWORD'
+node server.js --modifyuser USER --password
+node server.js --modifyuser USER --password 'NEW_PASSWORD'
 node server.js --modifyuser USER disable
 node server.js --modifyuser USER enable
 node server.js --deleteuser USER
@@ -330,7 +332,7 @@ node server.js --listusers
 
 Changing a password, disabling, or deleting an account immediately closes that account's active sessions. Deletion requires terminal confirmation and is retained as an auditable soft deletion. Creation, modification, and deletion timestamps are stored in SQLite. A deleted username can later be recreated with `--createuser`.
 
-Passwords supplied with `--password` may be retained in shell history or briefly visible in the process list. For the first or primary administrator, the compatibility command `npm run admin:setup` prompts interactively without echo. Custom paths can be passed with `--server-config`, `--data-dir`, and `--sqlite-file`.
+If `--password` is omitted or passed without a value, the command prompts for the password without echo, similar to Linux account tools. Passwords supplied directly with `--password VALUE` may be retained in shell history or briefly visible in the process list. Administrator passwords require at least 5 characters; weak-looking passwords are accepted with a warning so private lab installs are not blocked. For the first or primary administrator, the compatibility command `npm run admin:setup` also prompts interactively without echo. Custom paths can be passed with `--server-config`, `--data-dir`, and `--sqlite-file`.
 
 If you use the protected environment file, add it to the `systemd` service:
 
