@@ -54,6 +54,10 @@ if (args.help) {
   printHelp();
   process.exit(0);
 }
+if (hasAdministratorCommand(args)) {
+  const result = spawnSync(process.execPath, [path.join(__dirname, 'tools', 'manage-admin.js'), ...process.argv.slice(2)], { stdio: 'inherit' });
+  process.exit(result.status === null ? 1 : result.status);
+}
 const serverConfigPath = args.serverConfig || args.serverConf || 'server.conf';
 const serverConfigResolvedPath = path.resolve(serverConfigPath);
 const serverConfigExists = fs.existsSync(serverConfigResolvedPath);
@@ -1405,7 +1409,7 @@ function fatal(message) {
 function hasWebAdminUser() {
   if (!adminDatabase) return false;
   try {
-    const row = adminDatabase.db.prepare('SELECT COUNT(*) AS count FROM admin_users WHERE id = 1 AND enabled = 1').get();
+    const row = adminDatabase.db.prepare('SELECT COUNT(*) AS count FROM admin_users WHERE enabled = 1 AND deleted_at IS NULL').get();
     return Number(row && row.count) > 0;
   } catch {
     return false;
@@ -1451,7 +1455,8 @@ function warnIfWebAdminNeedsSetup() {
     separator,
     'Web Admin is enabled but no administrator account exists yet.',
     '  Login will not work until you create the admin user.',
-    '  Run this command in the project directory: npm run admin:setup',
+    '  Run: node server.js --createuser USER --password PASSWORD',
+    '  The interactive compatibility command npm run admin:setup is also available.',
     '  If custom secrets are desired, configure them before creating the admin user.',
     separator,
   ].join('\n'));
@@ -1574,6 +1579,16 @@ Web Admin:
   --generate-cert               Generate certs/admin.key and certs/admin.crt with openssl, update [admin],
                                 and optionally enable [ssl] for the public stream server.
 
+Administrator accounts:
+  --createuser USER --password PASSWORD
+                                Create an administrator account.
+  --modifyuser USER --password PASSWORD
+                                Change its password and close its active sessions.
+  --modifyuser USER enable|disable
+                                Enable or disable an account. Disabling closes active sessions.
+  --deleteuser USER             Delete an account after Y/N confirmation and close its sessions.
+  --listusers                   List accounts and their lifecycle timestamps.
+
 UDP and streams:
   --udp-host HOST               Default UDP bind host for streams without udpHost.
 
@@ -1608,7 +1623,14 @@ Examples:
   node server.js
   node server.js -D
   node server.js --webserver 8584
+  node server.js --createuser admin --password 'use-a-long-password'
+  node server.js --modifyuser admin disable
+  node server.js --listusers
   node server.js --migrate
   node server.js --config streams.json --http-host 0.0.0.0 --http-port 8585
 `);
+}
+
+function hasAdministratorCommand(parsedArgs) {
+  return ['createuser', 'modifyuser', 'deleteuser', 'listusers'].some((name) => parsedArgs[name] !== undefined);
 }

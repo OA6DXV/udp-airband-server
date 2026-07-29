@@ -298,7 +298,7 @@ key = certs/admin.key
 cert = certs/admin.crt
 ```
 
-Web Admin requires an administrator stored in the same SQLite runtime database. Authentication uses a singleton administrator, scrypt password hashing, server-side SQLite sessions, CSRF protection, account/IP rate limits, and self-hosted ALTCHA Proof-of-Work v2 after three failed logins. Session tokens and ALTCHA secrets are never stored in browser storage.
+Web Admin requires at least one enabled administrator stored in the same SQLite runtime database. Authentication supports multiple administrator accounts with scrypt password hashing, server-side SQLite sessions, CSRF protection, account/IP rate limits, and self-hosted ALTCHA Proof-of-Work v2 after three failed logins. Session tokens and ALTCHA secrets are never stored in browser storage.
 
 Install dependencies before enabling Web Admin:
 
@@ -317,17 +317,20 @@ printf 'ADMIN_ALTCHA_SECRET=%s\n' "$(openssl rand -base64 48)" | sudo tee -a /et
 printf 'ADMIN_TRUSTED_PROXIES=127.0.0.1,::1\n' | sudo tee -a /etc/udp-airband-admin.env >/dev/null
 ```
 
-Create or replace the only administrator interactively. The password is read without echo and is never accepted as a command-line argument:
+Create and manage administrator accounts from the server CLI:
 
 ```bash
-npm run admin:setup
+node server.js --createuser USER --password 'LONG_PASSWORD'
+node server.js --modifyuser USER --password 'NEW_LONG_PASSWORD'
+node server.js --modifyuser USER disable
+node server.js --modifyuser USER enable
+node server.js --deleteuser USER
+node server.js --listusers
 ```
 
-If custom paths are used:
+Changing a password, disabling, or deleting an account immediately closes that account's active sessions. Deletion requires terminal confirmation and is retained as an auditable soft deletion. Creation, modification, and deletion timestamps are stored in SQLite. A deleted username can later be recreated with `--createuser`.
 
-```bash
-npm run admin:setup -- --server-config /opt/udp-airband-server/server.conf --data-dir /opt/udp-airband-server/data
-```
+Passwords supplied with `--password` may be retained in shell history or briefly visible in the process list. For the first or primary administrator, the compatibility command `npm run admin:setup` prompts interactively without echo. Custom paths can be passed with `--server-config`, `--data-dir`, and `--sqlite-file`.
 
 If you use the protected environment file, add it to the `systemd` service:
 
@@ -362,7 +365,7 @@ Download the complete, current Cloudflare ranges from `https://www.cloudflare.co
 
 Node ignores `CF-Connecting-IP`, `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto` when the immediate peer is not trusted. The proxy must overwrite forwarded headers so a browser cannot choose its own rate-limit IP. A trusted `X-Forwarded-Proto: https` marks the session cookie `Secure` while preserving HTTP on the internal Apache-to-Node hop; Node does not redirect that internal request.
 
-The failed-login flow is persistent: attempts 1-3 check the password without ALTCHA; the third failure enables the challenge requirement; attempt 4 and every later attempt must consume a fresh, short-lived challenge before password hashing. Waiting or changing IP does not clear it. Only a successful login resets the account counter. A successful login also invalidates previous sessions for this single-administrator panel. Each login is retained in the local SQLite audit history with its administrator username, untruncated client IP, start/end timestamps, close reason, and successful stream-change count. The first change stores one pre-change stream snapshot for future session-level rollback; later changes do not replace that baseline.
+The failed-login flow is persistent: attempts 1-3 check the password without ALTCHA; the third failure enables the challenge requirement; attempt 4 and every later attempt must consume a fresh, short-lived challenge before password hashing. Waiting or changing IP does not clear it. Only a successful login resets the account counter. A successful login invalidates previous sessions for that same administrator account, without affecting other administrators. Each login is retained in the local SQLite audit history with its administrator username, untruncated client IP, start/end timestamps, close reason, and successful stream-change count. The first change stores one pre-change stream snapshot for future session-level rollback; later changes do not replace that baseline.
 
 It can also be moved to another port for one run:
 

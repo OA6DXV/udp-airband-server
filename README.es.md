@@ -298,7 +298,7 @@ key = certs/admin.key
 cert = certs/admin.crt
 ```
 
-Web Admin requiere un administrador guardado en la misma base SQLite de ejecucion. La autenticacion usa un unico administrador, contrasenas con scrypt, sesiones SQLite del lado del servidor, proteccion CSRF, limites por cuenta/IP y ALTCHA Proof-of-Work v2 autohospedado despues de tres logins fallidos. Los tokens de sesion y secretos ALTCHA nunca se guardan en el almacenamiento del navegador.
+Web Admin requiere al menos un administrador habilitado guardado en la misma base SQLite de ejecucion. La autenticacion permite multiples cuentas de administrador con contrasenas scrypt, sesiones SQLite del lado del servidor, proteccion CSRF, limites por cuenta/IP y ALTCHA Proof-of-Work v2 autohospedado despues de tres logins fallidos. Los tokens de sesion y secretos ALTCHA nunca se guardan en el almacenamiento del navegador.
 
 Instala las dependencias antes de activar Web Admin:
 
@@ -317,17 +317,20 @@ printf 'ADMIN_ALTCHA_SECRET=%s\n' "$(openssl rand -base64 48)" | sudo tee -a /et
 printf 'ADMIN_TRUSTED_PROXIES=127.0.0.1,::1\n' | sudo tee -a /etc/udp-airband-admin.env >/dev/null
 ```
 
-Crea o reemplaza el unico administrador de forma interactiva. La contrasena se lee sin eco y nunca se acepta como argumento de linea de comandos:
+Crea y administra cuentas desde la linea de comandos del servidor:
 
 ```bash
-npm run admin:setup
+node server.js --createuser USER --password 'LONG_PASSWORD'
+node server.js --modifyuser USER --password 'NEW_LONG_PASSWORD'
+node server.js --modifyuser USER disable
+node server.js --modifyuser USER enable
+node server.js --deleteuser USER
+node server.js --listusers
 ```
 
-Si usas rutas personalizadas:
+Cambiar la contrasena, deshabilitar o eliminar una cuenta cierra inmediatamente sus sesiones activas. La eliminacion pide confirmacion en la terminal y se conserva como baja logica auditable. SQLite almacena las fechas de creacion, modificacion y eliminacion. Un username eliminado puede recrearse despues con `--createuser`.
 
-```bash
-npm run admin:setup -- --server-config /opt/udp-airband-server/server.conf --data-dir /opt/udp-airband-server/data
-```
+Las contrasenas proporcionadas con `--password` pueden quedar en el historial del shell o aparecer brevemente en la lista de procesos. Para el primer administrador o cuenta principal, el comando compatible `npm run admin:setup` solicita la contrasena interactivamente sin mostrarla. Las rutas personalizadas pueden indicarse con `--server-config`, `--data-dir` y `--sqlite-file`.
 
 Si usas el archivo de entorno protegido, agregalo al servicio `systemd`:
 
@@ -362,7 +365,7 @@ Descarga todos los rangos actuales desde `https://www.cloudflare.com/ips/`; el u
 
 Node ignora `CF-Connecting-IP`, `X-Forwarded-For`, `X-Forwarded-Host` y `X-Forwarded-Proto` cuando el peer inmediato no es confiable. El proxy debe sobrescribir los encabezados reenviados para que un navegador no pueda elegir su IP de rate limit. Un `X-Forwarded-Proto: https` confiable marca la cookie como `Secure`, pero mantiene HTTP en el tramo interno Apache-Node; Node no redirige esa solicitud interna.
 
-El flujo persistente es: los intentos 1-3 comprueban la contrasena sin ALTCHA; el tercer fallo activa el desafio; el intento 4 y todos los posteriores deben consumir un desafio nuevo y de vida corta antes de calcular la contrasena. Esperar o cambiar de IP no desactiva el requisito. Solo un login correcto reinicia el contador. Un login correcto tambien invalida sesiones anteriores para este panel de administrador unico. Cada login queda en el historial local SQLite con username, IP del cliente sin truncar, timestamps de inicio/fin, motivo de cierre y total de cambios exitosos en streams. El primer cambio guarda un unico snapshot previo para un futuro rollback por sesion; los cambios posteriores no reemplazan esa base.
+El flujo persistente es: los intentos 1-3 comprueban la contrasena sin ALTCHA; el tercer fallo activa el desafio; el intento 4 y todos los posteriores deben consumir un desafio nuevo y de vida corta antes de calcular la contrasena. Esperar o cambiar de IP no desactiva el requisito. Solo un login correcto reinicia el contador. Un login correcto invalida las sesiones anteriores de esa misma cuenta, sin afectar a los demas administradores. Cada login queda en el historial local SQLite con username, IP del cliente sin truncar, timestamps de inicio/fin, motivo de cierre y total de cambios exitosos en streams. El primer cambio guarda un unico snapshot previo para un futuro rollback por sesion; los cambios posteriores no reemplazan esa base.
 
 Tambien puede moverse a otro puerto para una ejecucion:
 

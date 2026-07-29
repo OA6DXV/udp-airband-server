@@ -34,7 +34,7 @@ async function run() {
     const existing = database.db.prepare('SELECT username FROM admin_users WHERE id = 1').get();
     if (existing) {
       const confirmed = await askVisible(
-        `Administrator "${existing.username}" already exists. Replace its credentials? [y/N]: `,
+        `Primary administrator "${existing.username}" already exists. Replace its credentials? [y/N]: `,
       );
       if (!['y', 'yes'].includes(confirmed.trim().toLowerCase())) {
         process.stdout.write('Administrator setup cancelled.\n');
@@ -58,7 +58,7 @@ async function run() {
       username,
     });
     process.stdout.write(
-      `${result.created ? 'Created' : 'Updated'} the single administrator "${result.username}". Existing sessions were invalidated.\n`,
+      `${result.created ? 'Created' : 'Updated'} the primary administrator "${result.username}". Its existing sessions were invalidated.\n`,
     );
     process.stdout.write(`SQLite database: ${sqliteFile}\n`);
   } finally {
