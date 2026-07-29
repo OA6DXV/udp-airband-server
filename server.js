@@ -1244,16 +1244,21 @@ function shouldAskInteractiveQuestion() {
 }
 
 function askYesNo(question) {
+  const device = process.platform === 'win32' ? 'CON' : '/dev/tty';
+  let fd;
   try {
-    fs.writeSync(process.stdout.fd, question);
+    fd = fs.openSync(device, 'r+');
+    fs.writeSync(fd, question);
     const buffer = Buffer.alloc(64);
-    const bytes = fs.readSync(process.stdin.fd, buffer, 0, buffer.length, null);
+    const bytes = fs.readSync(fd, buffer, 0, buffer.length, null);
     return /^y(es)?$/i.test(buffer.toString('utf8', 0, bytes).trim());
   } catch (err) {
-    if (err && ['EAGAIN', 'EWOULDBLOCK', 'EINTR'].includes(err.code)) {
+    if (err && ['EAGAIN', 'EWOULDBLOCK', 'EINTR', 'ENXIO', 'ENOENT'].includes(err.code)) {
       return null;
     }
     throw err;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
   }
 }
 
