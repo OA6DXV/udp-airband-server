@@ -41,7 +41,7 @@ cp streams.example.json streams.json
 
 ## Configuracion Del Servidor
 
-`server.example.conf` es la plantilla versionada. En el primer arranque, el servidor crea un `server.conf` local a partir de ella. `server.conf` controla como escucha este servidor web y desde donde carga la lista de streams:
+`server.conf` controla como escucha este servidor web y desde donde carga la lista de streams. Si el archivo no existe, el servidor lo genera al iniciar desde una plantilla predeterminada interna:
 
 ```conf
 [udp]
@@ -248,7 +248,7 @@ El servidor escribe logs en stdout/stderr, asi que `systemd` guarda automaticame
 
 El nivel predeterminado `info` es intencionalmente suave para uso como servicio. Muestra lineas de arranque, streams cargados, URLs del player, conexiones/desconexiones, warnings y errores. No imprime todo el debug de los encoders ffmpeg.
 
-`server.example.conf` viene incluido en el repositorio con la configuracion predeterminada del servidor. `server.conf` es local y queda ignorado por Git, por lo que los cambios de produccion no se sobrescriben con `git pull`. Al iniciar, el servidor copia `server.example.conf` a `server.conf` cuando falta el archivo local. Cuando versiones nuevas agregan opciones, el servidor usa la plantilla temporal `server.conf.tmp`, agrega solo las claves faltantes al `server.conf` local y elimina el temporal al terminar. Los valores locales existentes se conservan. Si falta `streams.json`, el servidor muestra un warning e inicia un stream interno `test` en el puerto UDP `8690`, mono, `8000 Hz`.
+`server.conf` es local y queda ignorado por Git, por lo que los cambios de produccion no se sobrescriben con `git pull`. Si el archivo no existe, el arranque escribe un nuevo `server.conf` desde la plantilla predeterminada interna y muestra un bloque de warning visible. Cuando versiones nuevas agregan opciones, el servidor escribe esa plantilla interna en `server.conf.tmp`, agrega solo las claves faltantes al `server.conf` local y elimina el temporal al terminar. Los valores locales existentes se conservan. Si falta `streams.json`, el servidor muestra un warning e inicia un stream interno `test` en el puerto UDP `8690`, mono, `8000 Hz`.
 
 Configura el nivel normal del servicio en `server.conf`:
 

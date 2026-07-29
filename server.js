@@ -56,11 +56,9 @@ if (args.help) {
 const serverConfigPath = args.serverConfig || args.serverConf || 'server.conf';
 const serverConfigResolvedPath = path.resolve(serverConfigPath);
 const serverConfigExists = fs.existsSync(serverConfigResolvedPath);
-const serverConfigTemplatePath = path.resolve(path.dirname(serverConfigResolvedPath), 'server.example.conf');
 const serverConfigTemporaryPath = path.resolve(path.dirname(serverConfigResolvedPath), 'server.conf.tmp');
 const serverConfigUpdate = ensureServerConfigFromTemplateWithTemp(
   serverConfigPath,
-  serverConfigTemplatePath,
   serverConfigTemporaryPath,
   fs,
   path,
@@ -280,15 +278,13 @@ const compressed = createCompressedManager({
 });
 const compressedAvailable = compressedEnabled && compressed.isCodecAvailable(compressedCodec);
 const opusAvailable = compressedEnabled && compressed.ffmpegAvailable;
-if (serverConfigUpdate.templateMissing) {
-  logger.warn('server_config_template_missing', { path: serverConfigTemplatePath, fallback: 'built-in defaults' });
-} else if (serverConfigUpdate.created) {
-  logger.warn('server_config_created', { path: serverConfigPath, source: serverConfigTemplatePath });
+if (serverConfigUpdate.created) {
+  logGeneratedServerConfig(serverConfigPath);
 } else if (!serverConfigExists) {
   logger.warn('server_config_missing', { path: serverConfigPath, fallback: 'built-in defaults' });
 }
 if (serverConfigUpdate.updated) {
-  logger.info('server_config_updated', { path: serverConfigPath, added: serverConfigUpdate.added.join(',') });
+  logUpdatedServerConfig(serverConfigPath, serverConfigUpdate.added);
 }
 
 const streamsConfigExists = fs.existsSync(path.resolve(configPath));
@@ -1226,6 +1222,31 @@ function securityHeaders() {
     'referrer-policy': 'no-referrer',
     'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; media-src 'self' blob:; worker-src 'none'; frame-ancestors 'none'; base-uri 'none'",
   };
+}
+
+function logGeneratedServerConfig(filePath) {
+  const separator = '############################################################';
+  logger.plain('warn', [
+    separator,
+    'server.conf was missing and has been generated automatically.',
+    '  File: ' + filePath,
+    '  Source: built-in default configuration template.',
+    '  Review this file before exposing the service publicly.',
+    separator,
+  ].join('\n'));
+}
+
+function logUpdatedServerConfig(filePath, added) {
+  const separator = '############################################################';
+  logger.plain('warn', [
+    separator,
+    'server.conf was updated with missing default settings.',
+    '  File: ' + filePath,
+    '  Temporary file: server.conf.tmp was generated and removed automatically.',
+    '  Added settings: ' + (added && added.length ? added.join(', ') : 'none'),
+    '  Existing local values were preserved.',
+    separator,
+  ].join('\n'));
 }
 
 function fatal(message) {
