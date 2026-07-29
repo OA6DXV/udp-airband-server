@@ -1162,7 +1162,7 @@ function loadAdminTlsOptions() {
   const resolvedKey = path.resolve(adminTlsKeyPath);
   const resolvedCert = path.resolve(adminTlsCertPath);
   if (!fs.existsSync(resolvedKey) || !fs.existsSync(resolvedCert)) {
-    fatal(`[admin].secure is true but certificate files were not found. key=${resolvedKey} cert=${resolvedCert}`);
+    fatal(`[admin].secure is true but the configured certificate files do not exist. key=${resolvedKey} cert=${resolvedCert}. Run node server.js --generate-cert to create new self-signed certificates, or update [admin].key and [admin].cert in server.conf with valid paths.`);
   }
 
   try {
