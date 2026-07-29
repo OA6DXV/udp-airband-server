@@ -10,10 +10,62 @@ const challengeContainer = document.getElementById('challengeContainer');
 const widget = document.getElementById('altchaWidget');
 const message = document.getElementById('loginMessage');
 const submitButton = document.getElementById('loginButton');
+const languageSelect = document.getElementById('languageSelect');
+const LANGUAGE_STORAGE_KEY = 'udp-airband-language';
+const translations = {
+  en: {
+    language: 'Language',
+    pageTitle: 'UDP Airband Admin Login',
+    webAdmin: 'Web Admin',
+    username: 'Username',
+    password: 'Password',
+    signIn: 'Sign in',
+    signingIn: 'Signing in...',
+    setupRequired: 'No administrator account exists yet. Run npm run admin:setup on the server.',
+    serviceUnavailable: 'The authentication service is unavailable.',
+    reloadPage: 'Reload this page before trying again.',
+    enterCredentials: 'Enter username and password.',
+    completeVerification: 'Complete the verification before signing in.',
+    tooManyAttempts: 'Too many attempts. Try again in {seconds} seconds.',
+    newVerificationRequired: 'Complete a new verification before trying again.',
+    requestNotVerified: 'The request could not be verified. Reload the page.',
+    invalidLogin: 'Invalid username, password, or verification.',
+    requestFailed: 'The login request failed.',
+  },
+  es: {
+    language: 'Idioma',
+    pageTitle: 'Inicio de sesión - UDP Airband Admin',
+    webAdmin: 'Administración web',
+    username: 'Usuario',
+    password: 'Contraseña',
+    signIn: 'Iniciar sesión',
+    signingIn: 'Iniciando sesión...',
+    setupRequired: 'Todavía no existe una cuenta administradora. Ejecuta npm run admin:setup en el servidor.',
+    serviceUnavailable: 'El servicio de autenticación no está disponible.',
+    reloadPage: 'Recarga esta página antes de intentarlo nuevamente.',
+    enterCredentials: 'Ingresa usuario y contraseña.',
+    completeVerification: 'Completa la verificación antes de iniciar sesión.',
+    tooManyAttempts: 'Demasiados intentos. Intenta nuevamente en {seconds} segundos.',
+    newVerificationRequired: 'Completa una nueva verificación antes de intentarlo nuevamente.',
+    requestNotVerified: 'La solicitud no pudo ser verificada. Recarga la página.',
+    invalidLogin: 'Usuario, contraseña o verificación inválidos.',
+    requestFailed: 'La solicitud de inicio de sesión falló.',
+  },
+};
+let language = localStorage.getItem(LANGUAGE_STORAGE_KEY) || 'en';
+if (!translations[language]) language = 'en';
 let loginCsrfToken = '';
 let challengeRequired = false;
 let challengeConfiguredFor = '';
 let verifiedAltchaPayload = '';
+
+languageSelect.value = language;
+languageSelect.addEventListener('change', async () => {
+  language = languageSelect.value;
+  localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
+  applyTranslations();
+  if (challengeRequired) await configureChallengeWidget({ reset: true });
+});
 
 widget.addEventListener('verified', (event) => {
   verifiedAltchaPayload = event.detail && event.detail.payload || getWidgetPayload();
@@ -26,6 +78,7 @@ widget.addEventListener('statechange', (event) => {
 initialize();
 
 async function initialize() {
+  applyTranslations();
   try {
     const response = await fetch('/api/auth/status', { cache: 'no-store', credentials: 'same-origin' });
     const body = await response.json();
@@ -35,21 +88,21 @@ async function initialize() {
     }
     loginCsrfToken = body.loginCsrfToken || '';
     if (body.setupRequired) {
-      showMessage('No administrator account exists yet. Run npm run admin:setup on the server.');
+      showMessage('setupRequired');
     }
   } catch {
-    showMessage('The authentication service is unavailable.');
+    showMessage('serviceUnavailable');
   }
 }
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!loginCsrfToken) {
-    showMessage('Reload this page before trying again.');
+    showMessage('reloadPage');
     return;
   }
   if (!usernameInput.value.trim() || !passwordInput.value) {
-    showMessage('Enter username and password.');
+    showMessage('enterCredentials');
     return;
   }
   setBusy(true);
@@ -58,7 +111,7 @@ form.addEventListener('submit', async (event) => {
   try {
     if (challengeRequired) {
       altchaPayload = await resolveAltchaPayload();
-      if (!altchaPayload && challengeRequired) throw new Error('Complete the verification before signing in.');
+      if (!altchaPayload && challengeRequired) throw new Error(t('completeVerification'));
     }
 
     const response = await fetch('/api/auth/login', {
@@ -86,19 +139,19 @@ form.addEventListener('submit', async (event) => {
     await updateChallengeVisibility();
     if (response.status === 429) {
       const retryAfter = Number(response.headers.get('retry-after') || body.retryAfter || 1);
-      showMessage(`Too many attempts. Try again in ${retryAfter} seconds.`);
+      showMessage('tooManyAttempts', { seconds: retryAfter });
     } else if (response.status === 403 || response.status === 409) {
       showMessage(challengeRequired
-        ? 'Complete a new verification before trying again.'
-        : 'The request could not be verified. Reload the page.');
+        ? 'newVerificationRequired'
+        : 'requestNotVerified');
     } else {
-      showMessage('Invalid username, password, or verification.');
+      showMessage('invalidLogin');
     }
   } catch (err) {
     resetChallengePayload();
     challengeConfiguredFor = '';
     if (challengeRequired) await updateChallengeVisibility();
-    showMessage(err.message || 'The login request failed.');
+    showMessage(err.message || t('requestFailed'), {}, { literal: true });
   } finally {
     setBusy(false);
     passwordInput.focus();
@@ -168,9 +221,35 @@ function setBusy(busy) {
   submitButton.disabled = busy;
   usernameInput.disabled = busy;
   passwordInput.disabled = busy;
-  submitButton.textContent = busy ? 'Signing in...' : 'Sign in';
+  languageSelect.disabled = busy;
+  submitButton.textContent = busy ? t('signingIn') : t('signIn');
 }
 
-function showMessage(value) {
-  message.textContent = value;
+function showMessage(key, replacements = {}, options = {}) {
+  message.dataset.messageKey = options.literal ? '' : key;
+  message.dataset.messageReplacements = options.literal ? '' : JSON.stringify(replacements);
+  message.textContent = options.literal ? key : t(key, replacements);
+}
+
+function applyTranslations() {
+  document.documentElement.lang = language;
+  document.title = t('pageTitle');
+  languageSelect.value = language;
+  languageSelect.setAttribute('aria-label', t('language'));
+  document.querySelectorAll('[data-i18n]').forEach((element) => {
+    element.textContent = t(element.dataset.i18n);
+  });
+  if (message.dataset.messageKey) {
+    const replacements = JSON.parse(message.dataset.messageReplacements || '{}');
+    message.textContent = t(message.dataset.messageKey, replacements);
+  }
+  if (submitButton.disabled) submitButton.textContent = t('signingIn');
+}
+
+function t(key, replacements = {}) {
+  let value = translations[language][key] || translations.en[key] || key;
+  Object.entries(replacements).forEach(([name, replacement]) => {
+    value = value.replaceAll(`{${name}}`, String(replacement));
+  });
+  return value;
 }

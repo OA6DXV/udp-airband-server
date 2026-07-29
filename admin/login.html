@@ -14,18 +14,22 @@
 <body class="login-page">
   <main class="login-shell">
     <section class="login-panel" aria-labelledby="loginTitle">
+      <select id="languageSelect" class="language-select login-language-select" aria-label="Language">
+        <option value="en">EN</option>
+        <option value="es">ES</option>
+      </select>
       <p class="eyebrow">UDP Airband Server</p>
-      <h1 id="loginTitle">Web Admin</h1>
+      <h1 id="loginTitle" data-i18n="webAdmin">Web Admin</h1>
       <form id="loginForm" autocomplete="on" novalidate>
-        <label for="username">Username</label>
+        <label for="username" data-i18n="username">Username</label>
         <input id="username" name="username" maxlength="128" autocomplete="username" required>
-        <label for="password">Password</label>
+        <label for="password" data-i18n="password">Password</label>
         <input id="password" name="password" type="password" maxlength="1024" autocomplete="current-password" required>
         <div id="challengeContainer" class="login-challenge" hidden>
           <altcha-widget id="altchaWidget" auto="off" name="altcha" type="checkbox" workers="2"></altcha-widget>
         </div>
         <p id="loginMessage" class="login-message" role="alert" aria-live="polite"></p>
-        <button id="loginButton" class="button primary login-submit" type="submit">Sign in</button>
+        <button id="loginButton" class="button primary login-submit" type="submit" data-i18n="signIn">Sign in</button>
       </form>
     </section>
   </main>

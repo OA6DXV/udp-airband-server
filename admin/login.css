@@ -11,13 +11,20 @@
 }
 
 .login-panel {
+  position: relative;
   padding: 28px;
   border: 1px solid var(--border);
   background: var(--surface);
 }
 
+.login-language-select {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+}
+
 .login-panel h1 {
-  margin: 4px 0 26px;
+  margin: 4px 78px 26px 0;
 }
 
 .login-panel form {
