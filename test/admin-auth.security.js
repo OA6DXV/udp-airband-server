@@ -19,6 +19,7 @@ run().catch((err) => {
 async function run() {
   testConfigurationValidation();
   await testAuthenticationFlow();
+  await testAltchaDisabledFlow();
   await testChallengeFailuresAndReplay();
   await testRateLimitsAndCleanup();
   await testAccountRateLimits();
@@ -146,6 +147,23 @@ async function testAuthenticationFlow() {
     assert.strictEqual(postSuccess.failed_attempts, 0);
     assert.strictEqual(postSuccess.challenge_required, 0);
     assert.ok(postSuccess.last_login_at > 0);
+  } finally {
+    fixture.close();
+  }
+}
+
+async function testAltchaDisabledFlow() {
+  const fixture = await createFixture({ config: { altchaEnabled: false } });
+  try {
+    await fixture.login('admin', 'wrong');
+    await fixture.login('admin', 'wrong');
+    const third = await fixture.login('admin', 'wrong');
+    assert.strictEqual(third.statusCode, 401);
+    assert.strictEqual(third.body.challengeRequired, false);
+
+    const success = await fixture.login('admin', 'correct horse battery staple');
+    assert.strictEqual(success.statusCode, 200);
+    assert.strictEqual(success.body.authenticated, true);
   } finally {
     fixture.close();
   }
@@ -388,6 +406,7 @@ async function createFixture(options = {}) {
   const config = {
     authSecret: 'auth-secret-that-is-longer-than-thirty-two-bytes',
     altchaSecret: 'altcha-secret-that-is-longer-than-thirty-two-bytes',
+    altchaEnabled: true,
     sessionTtlMs: 8 * 60 * 60 * 1000,
     sessionIdleMs: 30 * 60 * 1000,
     altchaTtlMs: 120000,

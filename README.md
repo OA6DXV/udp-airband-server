@@ -55,6 +55,9 @@ port = 8585
 host = 127.0.0.1
 port = 8584
 enabled = true
+secure = false
+key =
+cert =
 
 [streams]
 file = streams.json
@@ -96,6 +99,7 @@ Important fields:
 - `[udp].host`: default UDP bind address used by streams that do not define their own `udpHost`.
 - `[web].host` and `[web].port`: bind address and port for the browser interface. The same port is used for HTTP or HTTPS depending on `[ssl]`.
 - `[admin].enabled`: enables the separate Web Admin server. It is `true` by default and binds to loopback unless you change `[admin].host`.
+- `[admin].secure`: when `true`, Web Admin runs over HTTPS using `[admin].key` and `[admin].cert`, and ALTCHA challenges remain enabled. When `false`, Web Admin runs over HTTP and ALTCHA is disabled because browsers require HTTPS or localhost for that challenge. Rate limits remain active, but brute-force protection is reduced.
 - `[admin].host` and `[admin].port`: bind address and port for Web Admin. Keep the default loopback host unless access is protected by an SSH tunnel or authenticated reverse proxy.
 - `[streams].file`: JSON file that defines the feeds.
 - `[storage].sqlite_file`: SQLite database path. Relative paths are resolved inside the runtime data directory (`data/` by default).
@@ -276,13 +280,22 @@ When `-D` is active, ffmpeg-backed encoders such as Opus, AAC, and HLS are start
 
 ## Web Admin
 
-The administration page runs on a separate loopback-only port by default and is not served from the public player port. It can be configured in `server.conf`:
+The administration page runs on a separate loopback-only port by default and is not served from the public player port. It can be configured in `server.conf`. For private IP access such as ZeroTier, generate a self-signed certificate so browsers treat the page as a secure context:
+
+```bash
+node server.js --generate-cert
+```
+
+Then start the server and open Web Admin with `https://HOST:8584/`. The generator uses `openssl`, creates `certs/admin.key` and `certs/admin.crt`, updates `[admin]`, and asks whether the public stream server should use the same certificate too. Enabling SSL for the public player is optional and usually unnecessary behind a reverse proxy.
 
 ```conf
 [admin]
+enabled = true
 host = 127.0.0.1
 port = 8584
-enabled = true
+secure = true
+key = certs/admin.key
+cert = certs/admin.crt
 ```
 
 Web Admin requires an administrator stored in the same SQLite runtime database. Authentication uses a singleton administrator, scrypt password hashing, server-side SQLite sessions, CSRF protection, account/IP rate limits, and self-hosted ALTCHA Proof-of-Work v2 after three failed logins. Session tokens and ALTCHA secrets are never stored in browser storage.

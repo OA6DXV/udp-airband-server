@@ -13,6 +13,7 @@
 - Added a startup warning when legacy JSON runtime data still needs migration, while Node.js 22.13+ uses built-in `node:sqlite` silently and older runtimes receive `better-sqlite3` installation guidance.
 - Added SQLite integrity checks and automatic archival of leftover legacy JSON files when an existing SQLite database is newer and valid.
 - Changed server configuration handling so `server.conf` stays local, startup can regenerate it from an internal template, and `server.conf.tmp` is used only temporarily to append missing settings before being deleted.
+- Added Web Admin HTTPS mode with `[admin].secure`, `[admin].key`, `[admin].cert`, ALTCHA disabling for intentional insecure admin mode, and `--generate-cert` for OpenSSL self-signed certificates.
 
 ### Espanol
 
@@ -25,6 +26,7 @@
 - Se agrego una alerta al detectar datos JSON pendientes de migracion; Node.js 22.13+ usa `node:sqlite` sin avisos y los runtimes antiguos reciben instrucciones para instalar `better-sqlite3`.
 - Se agrego verificacion de integridad SQLite y archivado automatico de JSON heredados sobrantes cuando una base SQLite existente es mas nueva y valida.
 - Se cambio el manejo de configuracion para mantener `server.conf` como archivo local, regenerarlo desde una plantilla interna si falta y usar `server.conf.tmp` solo temporalmente para agregar opciones faltantes antes de borrarlo.
+- Se agrego modo HTTPS para Web Admin con `[admin].secure`, `[admin].key`, `[admin].cert`, desactivacion de ALTCHA cuando el admin se configura intencionalmente como inseguro y `--generate-cert` para certificados self-signed con OpenSSL.
 
 ## 1.7-preview - Unreleased
 

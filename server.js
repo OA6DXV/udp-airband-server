@@ -19,6 +19,7 @@ const {
   loadServerConfig,
   parseArgs,
   parseBoolean,
+  setServerConfigSetting,
 } = require('./lib/config');
 const {
   addListenerBytes,
@@ -82,6 +83,9 @@ const webAdminHost = String(args.webadminHost || adminConfigHost);
 const webAdminConfigOverridden = Boolean(webAdminCliFlag || args.webadminHost !== undefined);
 const adminSessionTtlSeconds = getSetting(serverConfig, 'admin.sessionTtlSeconds', 8 * 60 * 60);
 const adminSessionIdleSeconds = getSetting(serverConfig, 'admin.sessionIdleSeconds', 30 * 60);
+const adminSecure = parseBoolean(args.webadminSecure !== undefined ? args.webadminSecure : getSetting(serverConfig, 'admin.secure', false));
+const adminTlsKeyPath = args.webadminKey || getSetting(serverConfig, 'admin.key', '');
+const adminTlsCertPath = args.webadminCert || getSetting(serverConfig, 'admin.cert', '');
 const configPath = args.config || getSetting(serverConfig, 'streams.file', 'streams.json');
 const dataDir = path.resolve(args.dataDir || path.join(__dirname, 'data'));
 const sqliteFileSetting = String(
@@ -114,6 +118,20 @@ const logTimestamps = parseBoolean(args.logTimestamps !== undefined ? args.logTi
 const logColors = parseBoolean(args.logColors !== undefined ? args.logColors : (debugEnabled ? true : getSetting(serverConfig, 'logging.colors', false)));
 const logger = createLogger({ debug: debugEnabled, level: logLevel, timestamps: logTimestamps, colors: logColors });
 const runtimeMode = detectRuntimeMode();
+if (args.generateCert) {
+  try {
+    generateSelfSignedCertificate({
+      adminTlsCertPath,
+      adminTlsKeyPath,
+      serverConfigPath,
+      tlsCertPath,
+      tlsKeyPath,
+    });
+    process.exit(0);
+  } catch (err) {
+    fatal(`Certificate generation failed: ${err.message}`);
+  }
+}
 if (args.storageBackend !== undefined) {
   fatal('--storage-backend was removed in 1.8 because runtime persistence now uses SQLite exclusively.');
 }
@@ -174,6 +192,7 @@ if (webAdminEnabled) {
       ...adminSecrets.env,
       ADMIN_SESSION_TTL_SECONDS: process.env.ADMIN_SESSION_TTL_SECONDS || String(adminSessionTtlSeconds),
       ADMIN_SESSION_IDLE_SECONDS: process.env.ADMIN_SESSION_IDLE_SECONDS || String(adminSessionIdleSeconds),
+      ADMIN_ALTCHA_ENABLED: adminSecure ? 'true' : 'false',
     });
     adminProxyTrust = createProxyTrust(adminSecrets.env.ADMIN_TRUSTED_PROXIES || '127.0.0.1,::1');
   } catch (err) {
@@ -254,6 +273,7 @@ const adminAssets = webAdminEnabled ? {
 } : null;
 const tlsOptions = sslRequested ? loadTlsOptions() : null;
 const tlsEnabled = Boolean(tlsOptions);
+const adminTlsOptions = webAdminEnabled && adminSecure ? loadAdminTlsOptions() : null;
 const hlsRoot = compressedEnabled ? fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-hls-')) : '';
 const compressed = createCompressedManager({
   aacBitrate,
@@ -670,7 +690,8 @@ async function startWebServers() {
       getState: getWebAdminState,
       getStreamConfigSnapshot: () => ({ streams: streams.map(streamFileEntry) }),
       host: webAdminHost,
-      http,
+      serverModule: adminTlsOptions ? https : http,
+      tlsOptions: adminTlsOptions,
       logger,
       onReloadStreams: reloadStreamsFromDisk,
       onReplaceStreams: replaceStreamsFromAdmin,
@@ -711,7 +732,10 @@ async function startWebServers() {
           port: webAdminPort,
         });
       }
-      logger.plain('info', `Web admin: ${formatUrl('http', webAdminHost, webAdminPort)}/`);
+      logger.plain('info', `Web admin: ${formatUrl(adminTlsOptions ? 'https' : 'http', webAdminHost, webAdminPort)}/`);
+      if (!adminSecure) {
+        warnWebAdminInsecure();
+      }
       if (!isLoopbackHost(webAdminHost)) {
         logger.warn('webadmin_exposed', { host: webAdminHost, port: webAdminPort, recommendation: 'bind to 127.0.0.1 and use an authenticated proxy or SSH tunnel' });
       }
@@ -1127,6 +1151,100 @@ function sendBadRequest(res) {
   res.end('bad request\n');
 }
 
+function loadAdminTlsOptions() {
+  if (!adminTlsKeyPath || !adminTlsCertPath) {
+    fatal('[admin].secure is true but [admin].key and [admin].cert are not configured. Run node server.js --generate-cert or set valid certificate paths.');
+  }
+
+  const resolvedKey = path.resolve(adminTlsKeyPath);
+  const resolvedCert = path.resolve(adminTlsCertPath);
+  if (!fs.existsSync(resolvedKey) || !fs.existsSync(resolvedCert)) {
+    fatal(`[admin].secure is true but certificate files were not found. key=${resolvedKey} cert=${resolvedCert}`);
+  }
+
+  try {
+    return {
+      key: fs.readFileSync(resolvedKey),
+      cert: fs.readFileSync(resolvedCert),
+    };
+  } catch (err) {
+    fatal(`[admin].secure is true but certificate files could not be read: ${err.message}`);
+  }
+}
+
+function generateSelfSignedCertificate({ adminTlsCertPath, adminTlsKeyPath, serverConfigPath, tlsCertPath, tlsKeyPath }) {
+  const openssl = spawnSync('openssl', ['version'], { encoding: 'utf8' });
+  if (openssl.error || openssl.status !== 0) {
+    throw new Error('openssl is required. Install it first, for example: sudo apt install openssl');
+  }
+
+  const certDir = path.resolve('certs');
+  const keyPath = path.resolve(certDir, 'admin.key');
+  const certPath = path.resolve(certDir, 'admin.crt');
+  fs.mkdirSync(certDir, { recursive: true });
+
+  if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
+    const result = spawnSync('openssl', [
+      'req',
+      '-x509',
+      '-newkey',
+      'rsa:4096',
+      '-nodes',
+      '-keyout',
+      keyPath,
+      '-out',
+      certPath,
+      '-days',
+      '365',
+      '-subj',
+      '/CN=udp-airband-admin',
+    ], { encoding: 'utf8' });
+    if (result.error || result.status !== 0) {
+      throw new Error((result.stderr || result.error && result.error.message || 'openssl failed').trim());
+    }
+  }
+
+  if (!String(adminTlsKeyPath || '').trim()) {
+    setServerConfigSetting(serverConfigPath, 'admin', 'key', path.relative(process.cwd(), keyPath), fs, path);
+  }
+  if (!String(adminTlsCertPath || '').trim()) {
+    setServerConfigSetting(serverConfigPath, 'admin', 'cert', path.relative(process.cwd(), certPath), fs, path);
+  }
+  setServerConfigSetting(serverConfigPath, 'admin', 'secure', 'true', fs, path);
+
+  logger.plain('info', [
+    'Generated Web Admin self-signed certificate:',
+    `  Key:  ${keyPath}`,
+    `  Cert: ${certPath}`,
+    '  Updated [admin].secure, [admin].key, and [admin].cert in server.conf when needed.',
+  ].join('\n'));
+
+  if (shouldAskInteractiveQuestion()) {
+    const answer = askYesNo('Do you also want to enable SSL for the public stream server with this certificate? This is optional and usually unnecessary behind a reverse proxy. [y/N] ');
+    if (answer) {
+      setServerConfigSetting(serverConfigPath, 'ssl', 'enabled', 'true', fs, path);
+      if (!String(tlsKeyPath || '').trim()) setServerConfigSetting(serverConfigPath, 'ssl', 'key', path.relative(process.cwd(), keyPath), fs, path);
+      if (!String(tlsCertPath || '').trim()) setServerConfigSetting(serverConfigPath, 'ssl', 'cert', path.relative(process.cwd(), certPath), fs, path);
+      logger.plain('info', 'Public stream SSL was enabled in [ssl].');
+    } else {
+      logger.plain('info', 'Public stream SSL was left unchanged. This is fine when the stream server is behind a reverse proxy.');
+    }
+  } else {
+    logger.plain('info', 'Public stream SSL was left unchanged because this terminal is not interactive.');
+  }
+}
+
+function shouldAskInteractiveQuestion() {
+  return Boolean(process.stdin && process.stdin.isTTY && process.stdout && process.stdout.isTTY);
+}
+
+function askYesNo(question) {
+  fs.writeSync(process.stdout.fd, question);
+  const buffer = Buffer.alloc(64);
+  const bytes = fs.readSync(process.stdin.fd, buffer, 0, buffer.length, null);
+  return /^y(es)?$/i.test(buffer.toString('utf8', 0, bytes).trim());
+}
+
 function loadTlsOptions() {
   if (!tlsKeyPath || !tlsCertPath) {
     logger.warn('ssl_fallback_http', { reason: 'missing certificate path', key: tlsKeyPath || 'missing', cert: tlsCertPath || 'missing' });
@@ -1264,6 +1382,18 @@ function hasWebAdminUser() {
   }
 }
 
+function warnWebAdminInsecure() {
+  const separator = '############################################################';
+  logger.plain('warn', [
+    separator,
+    'Web Admin secure mode is disabled.',
+    '  [admin].secure = false keeps Web Admin on HTTP and disables ALTCHA challenges.',
+    '  Login rate limits remain active, but brute-force protection is reduced.',
+    '  Use node server.js --generate-cert and set [admin].secure = true for HTTPS and ALTCHA.',
+    separator,
+  ].join('\n'));
+}
+
 function warnIfWebAdminNeedsSetup() {
   if (hasWebAdminUser()) return;
   const separator = '############################################################';
@@ -1388,6 +1518,11 @@ Web Admin:
   --webserver PORT              Enable Web Admin on PORT. Overrides [admin].enabled and [admin].port.
   --webadmin PORT               Alias for --webserver.
   --webadmin-host HOST          Web Admin bind host. Overrides [admin].host.
+  --webadmin-secure true|false  Serve Web Admin over HTTPS when true. Overrides [admin].secure.
+  --webadmin-key PATH           Web Admin TLS private key path. Overrides [admin].key.
+  --webadmin-cert PATH          Web Admin TLS certificate path. Overrides [admin].cert.
+  --generate-cert               Generate certs/admin.key and certs/admin.crt with openssl, update [admin],
+                                and optionally enable [ssl] for the public stream server.
 
 UDP and streams:
   --udp-host HOST               Default UDP bind host for streams without udpHost.

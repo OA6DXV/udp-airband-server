@@ -55,6 +55,9 @@ port = 8585
 host = 127.0.0.1
 port = 8584
 enabled = true
+secure = false
+key =
+cert =
 
 [streams]
 file = streams.json
@@ -96,6 +99,7 @@ Campos importantes:
 - `[udp].host`: direccion UDP predeterminada para streams que no definan su propio `udpHost`.
 - `[web].host` y `[web].port`: direccion y puerto para la interfaz web. El mismo puerto se usa para HTTP o HTTPS segun `[ssl]`.
 - `[admin].enabled`: activa el servidor Web Admin separado. Esta en `true` por defecto y queda enlazado a loopback salvo que cambies `[admin].host`.
+- `[admin].secure`: cuando esta en `true`, Web Admin corre sobre HTTPS usando `[admin].key` y `[admin].cert`, y los desafios ALTCHA permanecen activos. Cuando esta en `false`, Web Admin corre por HTTP y ALTCHA se desactiva porque los navegadores requieren HTTPS o localhost para ese desafio. Los rate limits siguen activos, pero la proteccion contra fuerza bruta se reduce.
 - `[admin].host` y `[admin].port`: direccion y puerto de Web Admin. Conserva el host loopback predeterminado salvo que el acceso este protegido por un tunel SSH o reverse proxy autenticado.
 - `[streams].file`: archivo JSON que define los feeds.
 - `[storage].sqlite_file`: ruta de la base SQLite. Las rutas relativas se resuelven dentro del directorio de datos de ejecucion (`data/` de forma predeterminada).
@@ -276,13 +280,22 @@ Cuando `-D` esta activo, los encoders basados en ffmpeg como Opus, AAC y HLS se 
 
 ## Administracion Web
 
-La pagina de administracion corre por defecto en un puerto separado solo en loopback y no se publica desde el puerto del reproductor. Puede configurarse en `server.conf`:
+La pagina de administracion corre por defecto en un puerto separado solo en loopback y no se publica desde el puerto del reproductor. Puede configurarse en `server.conf`. Para acceso por IP privada como ZeroTier, genera un certificado self-signed para que el navegador trate la pagina como contexto seguro:
+
+```bash
+node server.js --generate-cert
+```
+
+Luego inicia el servidor y abre Web Admin con `https://HOST:8584/`. El generador usa `openssl`, crea `certs/admin.key` y `certs/admin.crt`, actualiza `[admin]` y pregunta si tambien quieres usar el mismo certificado en el servidor publico de streams. Activar SSL para el reproductor publico es opcional y normalmente innecesario detras de un reverse proxy.
 
 ```conf
 [admin]
+enabled = true
 host = 127.0.0.1
 port = 8584
-enabled = true
+secure = true
+key = certs/admin.key
+cert = certs/admin.crt
 ```
 
 Web Admin requiere un administrador guardado en la misma base SQLite de ejecucion. La autenticacion usa un unico administrador, contrasenas con scrypt, sesiones SQLite del lado del servidor, proteccion CSRF, limites por cuenta/IP y ALTCHA Proof-of-Work v2 autohospedado despues de tres logins fallidos. Los tokens de sesion y secretos ALTCHA nunca se guardan en el almacenamiento del navegador.
@@ -304,7 +317,7 @@ printf 'ADMIN_ALTCHA_SECRET=%s\n' "$(openssl rand -base64 48)" | sudo tee -a /et
 printf 'ADMIN_TRUSTED_PROXIES=127.0.0.1,::1\n' | sudo tee -a /etc/udp-airband-admin.env >/dev/null
 ```
 
-Crea o reemplaza el unico administrador de forma interactiva.Crea o reemplaza el unico administrador de forma interactiva. La contrasena se lee sin eco y nunca se acepta como argumento de linea de comandos:
+Crea o reemplaza el unico administrador de forma interactiva. La contrasena se lee sin eco y nunca se acepta como argumento de linea de comandos:
 
 ```bash
 npm run admin:setup
