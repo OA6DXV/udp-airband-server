@@ -75,6 +75,7 @@ async function run() {
     'enabled = false',
     '',
   ].join('\n'));
+  ensureServerConfigFromTemplateWithTemp(serverConfigPath, path.join(temporaryDir, 'server.conf.tmp'), fs, path);
   fs.writeFileSync(configPath, JSON.stringify({
     streams: [{
       name: 'test',
@@ -314,6 +315,7 @@ function testServerConfigTemplateUpdate() {
     assert.strictEqual(config['admin.host'], '127.0.0.1');
     assert.strictEqual(config['admin.port'], '8584');
     assert.match(fs.readFileSync(configPath, 'utf8'), /# Keep admin on loopback./);
+    assert.strictEqual((fs.readFileSync(configPath, 'utf8').match(/^\[admin\]$/gm) || []).length, 1);
     assert.strictEqual(fs.existsSync(temporaryPath), false);
     assert.match(DEFAULT_SERVER_CONFIG_TEMPLATE, /\[storage\]/);
   } finally {
@@ -563,6 +565,7 @@ async function testConfigEnabledStartup() {
     'sqlite_file = runtime.sqlite',
     '',
   ].join('\n'));
+  ensureServerConfigFromTemplateWithTemp(serverConfigPath, path.join(temporaryDir, 'server.conf.tmp'), fs, path);
 
   fs.mkdirSync(dataDir, { recursive: true });
   await createTestAdministrator(path.join(dataDir, 'runtime.sqlite'));

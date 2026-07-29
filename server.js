@@ -306,6 +306,10 @@ if (serverConfigUpdate.created) {
 if (serverConfigUpdate.updated) {
   logUpdatedServerConfig(serverConfigPath, serverConfigUpdate.added);
 }
+if (serverConfigUpdate.created || serverConfigUpdate.updated) {
+  logServerConfigReviewRequired(serverConfigPath);
+  process.exit(0);
+}
 
 const streamsConfigExists = fs.existsSync(path.resolve(configPath));
 if (!streamsConfigExists) {
@@ -1363,6 +1367,17 @@ function logUpdatedServerConfig(filePath, added) {
     '  Temporary file: server.conf.tmp was generated and removed automatically.',
     '  Added settings: ' + (added && added.length ? added.join(', ') : 'none'),
     '  Existing local values were preserved.',
+    separator,
+  ].join('\n'));
+}
+
+function logServerConfigReviewRequired(filePath) {
+  const separator = '############################################################';
+  logger.plain('warn', [
+    separator,
+    'Startup stopped because server.conf changed.',
+    '  Review the updated configuration before starting the server again.',
+    '  File: ' + filePath,
     separator,
   ].join('\n'));
 }
