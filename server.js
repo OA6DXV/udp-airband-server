@@ -1156,13 +1156,21 @@ function sendBadRequest(res) {
 
 function loadAdminTlsOptions() {
   if (!adminTlsKeyPath || !adminTlsCertPath) {
-    fatal('[admin].secure is true but [admin].key and [admin].cert are not configured. Run node server.js --generate-cert or set valid certificate paths.');
+    warnWebAdminSecureWithoutTls('certificate paths are not configured', {
+      key: adminTlsKeyPath || 'missing',
+      cert: adminTlsCertPath || 'missing',
+    });
+    return null;
   }
 
   const resolvedKey = path.resolve(adminTlsKeyPath);
   const resolvedCert = path.resolve(adminTlsCertPath);
   if (!fs.existsSync(resolvedKey) || !fs.existsSync(resolvedCert)) {
-    fatal(`[admin].secure is true but the configured certificate files do not exist. key=${resolvedKey} cert=${resolvedCert}. Run node server.js --generate-cert to create new self-signed certificates, or update [admin].key and [admin].cert in server.conf with valid paths.`);
+    warnWebAdminSecureWithoutTls('certificate files were not found', {
+      key: resolvedKey,
+      cert: resolvedCert,
+    });
+    return null;
   }
 
   try {
@@ -1171,7 +1179,11 @@ function loadAdminTlsOptions() {
       cert: fs.readFileSync(resolvedCert),
     };
   } catch (err) {
-    fatal(`[admin].secure is true but certificate files could not be read: ${err.message}`);
+    warnWebAdminSecureWithoutTls(`certificate files could not be read: ${err.message}`, {
+      key: resolvedKey,
+      cert: resolvedCert,
+    });
+    return null;
   }
 }
 
@@ -1407,9 +1419,29 @@ function warnWebAdminInsecure() {
     'Web Admin secure mode is disabled.',
     '  [admin].secure = false keeps Web Admin on HTTP and disables ALTCHA challenges.',
     '  Login rate limits remain active, but brute-force protection is reduced.',
-    '  Use node server.js --generate-cert and set [admin].secure = true for HTTPS and ALTCHA.',
+    '  Set [admin].secure = true to enable captcha protection.',
+    '  If [admin].key and [admin].cert are empty, Web Admin will still run on HTTP and must be placed behind an HTTPS reverse proxy for captcha to work in browsers.',
+    '  Or run node server.js --generate-cert to create self-signed certificates for direct HTTPS access.',
     separator,
   ].join('\n'));
+}
+
+function warnWebAdminSecureWithoutTls(reason, details = {}) {
+  const separator = '############################################################';
+  const lines = [
+    separator,
+    'Web Admin secure mode is enabled, but no usable TLS certificate was loaded.',
+    `  Reason: ${reason}.`,
+  ];
+  if (details.key) lines.push(`  Key: ${details.key}`);
+  if (details.cert) lines.push(`  Cert: ${details.cert}`);
+  lines.push(
+    '  The Web Admin server will continue on HTTP with ALTCHA captcha enabled.',
+    '  A reverse proxy must provide HTTPS to browsers for captcha verification to work.',
+    '  Or run node server.js --generate-cert and restart to use self-signed HTTPS directly.',
+    separator,
+  );
+  logger.plain('warn', lines.join('\n'));
 }
 
 function warnIfWebAdminNeedsSetup() {
@@ -1536,7 +1568,7 @@ Web Admin:
   --webserver PORT              Enable Web Admin on PORT. Overrides [admin].enabled and [admin].port.
   --webadmin PORT               Alias for --webserver.
   --webadmin-host HOST          Web Admin bind host. Overrides [admin].host.
-  --webadmin-secure true|false  Serve Web Admin over HTTPS when true. Overrides [admin].secure.
+  --webadmin-secure true|false  Enable Web Admin secure mode/captcha. Uses HTTPS only when key/cert exist.
   --webadmin-key PATH           Web Admin TLS private key path. Overrides [admin].key.
   --webadmin-cert PATH          Web Admin TLS certificate path. Overrides [admin].cert.
   --generate-cert               Generate certs/admin.key and certs/admin.crt with openssl, update [admin],
