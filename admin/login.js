@@ -13,6 +13,16 @@ const submitButton = document.getElementById('loginButton');
 let loginCsrfToken = '';
 let challengeRequired = false;
 let challengeConfiguredFor = '';
+let challengeNoLongerRequired = false;
+let verifiedAltchaPayload = '';
+
+widget.addEventListener('verified', (event) => {
+  verifiedAltchaPayload = event.detail && event.detail.payload || getWidgetPayload();
+});
+widget.addEventListener('statechange', (event) => {
+  const state = event.detail && event.detail.state;
+  if (state !== 'verified') verifiedAltchaPayload = '';
+});
 
 initialize();
 
@@ -48,10 +58,8 @@ form.addEventListener('submit', async (event) => {
   let altchaPayload = '';
   try {
     if (challengeRequired) {
-      await configureChallengeWidget({ reset: true });
-      const verification = await widget.verify();
-      altchaPayload = verification && verification.payload;
-      if (!altchaPayload) throw new Error('Verification could not be completed.');
+      altchaPayload = await resolveAltchaPayload();
+      if (!altchaPayload && challengeRequired) throw new Error('Verification could not be completed.');
     }
 
     const response = await fetch('/api/auth/login', {
@@ -69,7 +77,7 @@ form.addEventListener('submit', async (event) => {
       }),
     });
     const body = await response.json().catch(() => ({}));
-    widget.reset();
+    resetChallengePayload();
     passwordInput.value = '';
     if (response.ok) {
       window.location.replace('/');
@@ -88,7 +96,7 @@ form.addEventListener('submit', async (event) => {
       showMessage('Invalid username, password, or verification.');
     }
   } catch (err) {
-    widget.reset();
+    resetChallengePayload();
     challengeConfiguredFor = '';
     if (challengeRequired) await updateChallengeVisibility();
     showMessage(err.message || 'The login request failed.');
@@ -103,17 +111,35 @@ async function updateChallengeVisibility() {
   if (challengeRequired) {
     await configureChallengeWidget({ reset: true });
   } else {
-    widget.reset();
+    resetChallengePayload();
     widget.removeAttribute('challenge');
     challengeConfiguredFor = '';
   }
+}
+
+async function resolveAltchaPayload() {
+  const existingPayload = verifiedAltchaPayload || getWidgetPayload();
+  if (existingPayload) return existingPayload;
+
+  challengeNoLongerRequired = false;
+  await configureChallengeWidget();
+  const verification = await widget.verify();
+  const payload = verification && verification.payload || getWidgetPayload();
+  if (payload) return payload;
+
+  if (challengeNoLongerRequired) {
+    challengeRequired = false;
+    await updateChallengeVisibility();
+    return '';
+  }
+  return '';
 }
 
 async function configureChallengeWidget(options = {}) {
   const username = usernameInput.value.trim();
   const challengeUrl = `/api/auth/challenge?username=${encodeURIComponent(username)}&t=${Date.now()}`;
   if (options.reset || challengeConfiguredFor !== username) {
-    widget.reset();
+    resetChallengePayload();
     challengeConfiguredFor = username;
   }
   widget.setAttribute('challenge', challengeUrl);
@@ -126,8 +152,8 @@ async function configureChallengeWidget(options = {}) {
   });
 }
 
-function challengeFetch(url, options = {}) {
-  return fetch(url, {
+async function challengeFetch(url, options = {}) {
+  const response = await fetch(url, {
     ...options,
     cache: 'no-store',
     credentials: 'same-origin',
@@ -136,6 +162,24 @@ function challengeFetch(url, options = {}) {
       'x-csrf-token': loginCsrfToken,
     },
   });
+  if (response.status === 409) {
+    const body = await response.clone().json().catch(() => ({}));
+    if (body.code === 'challenge_not_required') {
+      challengeNoLongerRequired = true;
+    }
+  }
+  return response;
+}
+
+function getWidgetPayload() {
+  const input = widget.querySelector('input[name="altcha"]');
+  return input && input.value || '';
+}
+
+function resetChallengePayload() {
+  verifiedAltchaPayload = '';
+  challengeNoLongerRequired = false;
+  widget.reset();
 }
 
 function setBusy(busy) {
