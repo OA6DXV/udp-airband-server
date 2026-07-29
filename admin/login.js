@@ -12,6 +12,7 @@ const message = document.getElementById('loginMessage');
 const submitButton = document.getElementById('loginButton');
 let loginCsrfToken = '';
 let challengeRequired = false;
+let challengeConfiguredFor = '';
 
 initialize();
 
@@ -47,14 +48,7 @@ form.addEventListener('submit', async (event) => {
   let altchaPayload = '';
   try {
     if (challengeRequired) {
-      widget.reset();
-      await widget.configure({
-        challenge: `/api/auth/challenge?username=${encodeURIComponent(usernameInput.value)}&t=${Date.now()}`,
-        credentials: 'same-origin',
-        fetch: challengeFetch,
-        humanInteractionSignature: false,
-        language: document.documentElement.lang || 'en',
-      });
+      await configureChallengeWidget({ reset: true });
       const verification = await widget.verify();
       altchaPayload = verification && verification.payload;
       if (!altchaPayload) throw new Error('Verification could not be completed.');
@@ -82,7 +76,7 @@ form.addEventListener('submit', async (event) => {
       return;
     }
     challengeRequired = Boolean(body.challengeRequired);
-    challengeContainer.hidden = !challengeRequired;
+    await updateChallengeVisibility();
     if (response.status === 429) {
       const retryAfter = Number(response.headers.get('retry-after') || body.retryAfter || 1);
       showMessage(`Too many attempts. Try again in ${retryAfter} seconds.`);
@@ -95,13 +89,42 @@ form.addEventListener('submit', async (event) => {
     }
   } catch (err) {
     widget.reset();
-    if (challengeRequired) challengeContainer.hidden = false;
+    challengeConfiguredFor = '';
+    if (challengeRequired) await updateChallengeVisibility();
     showMessage(err.message || 'The login request failed.');
   } finally {
     setBusy(false);
     passwordInput.focus();
   }
 });
+
+async function updateChallengeVisibility() {
+  challengeContainer.hidden = !challengeRequired;
+  if (challengeRequired) {
+    await configureChallengeWidget({ reset: true });
+  } else {
+    widget.reset();
+    widget.removeAttribute('challenge');
+    challengeConfiguredFor = '';
+  }
+}
+
+async function configureChallengeWidget(options = {}) {
+  const username = usernameInput.value.trim();
+  const challengeUrl = `/api/auth/challenge?username=${encodeURIComponent(username)}&t=${Date.now()}`;
+  if (options.reset || challengeConfiguredFor !== username) {
+    widget.reset();
+    challengeConfiguredFor = username;
+  }
+  widget.setAttribute('challenge', challengeUrl);
+  await widget.configure({
+    challenge: challengeUrl,
+    credentials: 'same-origin',
+    fetch: challengeFetch,
+    humanInteractionSignature: false,
+    language: document.documentElement.lang || 'en',
+  });
+}
 
 function challengeFetch(url, options = {}) {
   return fetch(url, {
