@@ -8,7 +8,7 @@ const http = require('http');
 const net = require('net');
 const os = require('os');
 const path = require('path');
-const { loadServerConfig, parseArgs, setServerConfigSetting } = require('../lib/config');
+const { ensureServerConfigFromTemplateWithTemp, loadServerConfig, parseArgs, setServerConfigSetting } = require('../lib/config');
 const { upsertAdministrator } = require('../lib/admin-auth');
 const { createPasswordHasher } = require('../lib/admin-password');
 const { createGeoService } = require('../lib/geo-service');
@@ -36,6 +36,7 @@ run().catch((err) => {
 async function run() {
   testRuntimeDetection();
   testServerConfigSettingUpdate();
+  testServerConfigTemplateUpdate();
   testUserHistoryWindow();
   testGeoStatsAggregation();
   testStorageMigration();
@@ -269,6 +270,53 @@ function testServerConfigSettingUpdate() {
     const config = loadServerConfig(filePath, fs, path);
     assert.strictEqual(config['storage.sqliteFile'], 'runtime.sqlite');
     assert.match(fs.readFileSync(filePath, 'utf8'), /# keep this comment/);
+  } finally {
+    fs.rmSync(temporaryDir, { recursive: true, force: true });
+  }
+}
+
+function testServerConfigTemplateUpdate() {
+  const temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-config-template-test-'));
+  const configPath = path.join(temporaryDir, 'server.conf');
+  const templatePath = path.join(temporaryDir, 'server.example.conf');
+  const temporaryPath = path.join(temporaryDir, 'server.conf.tmp');
+  try {
+    fs.writeFileSync(templatePath, [
+      '[web]',
+      'host = 0.0.0.0',
+      'port = 8585',
+      '',
+      '[admin]',
+      '# Keep admin on loopback.',
+      'host = 127.0.0.1',
+      'port = 8584',
+      'enabled = true',
+      '',
+    ].join('\n'));
+
+    let result = ensureServerConfigFromTemplateWithTemp(configPath, templatePath, temporaryPath, fs, path);
+    assert.strictEqual(result.created, true);
+    assert.strictEqual(fs.existsSync(temporaryPath), false);
+    assert.strictEqual(loadServerConfig(configPath, fs, path)['admin.port'], '8584');
+
+    fs.writeFileSync(configPath, [
+      '[web]',
+      'port = 9000',
+      '',
+      '[admin]',
+      'enabled = false',
+      '',
+    ].join('\n'));
+    result = ensureServerConfigFromTemplateWithTemp(configPath, templatePath, temporaryPath, fs, path);
+    const config = loadServerConfig(configPath, fs, path);
+    assert.strictEqual(result.updated, true);
+    assert.deepStrictEqual(result.added, ['web.host', 'admin.host', 'admin.port']);
+    assert.strictEqual(config['web.port'], '9000');
+    assert.strictEqual(config['admin.enabled'], 'false');
+    assert.strictEqual(config['admin.host'], '127.0.0.1');
+    assert.strictEqual(config['admin.port'], '8584');
+    assert.match(fs.readFileSync(configPath, 'utf8'), /# Keep admin on loopback./);
+    assert.strictEqual(fs.existsSync(temporaryPath), false);
   } finally {
     fs.rmSync(temporaryDir, { recursive: true, force: true });
   }

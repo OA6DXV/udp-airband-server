@@ -14,7 +14,7 @@ const { ensureAdminSecrets } = require('./lib/admin-secrets');
 const { createProxyTrust, resolveRequestContext } = require('./lib/proxy-trust');
 const { normalizeClientId } = require('./lib/clients');
 const {
-  ensureServerConfigDefaults,
+  ensureServerConfigFromTemplateWithTemp,
   getSetting,
   loadServerConfig,
   parseArgs,
@@ -54,51 +54,17 @@ if (args.help) {
   process.exit(0);
 }
 const serverConfigPath = args.serverConfig || args.serverConf || 'server.conf';
-const serverConfigExists = fs.existsSync(path.resolve(serverConfigPath));
-const serverConfigUpdated = ensureServerConfigDefaults(serverConfigPath, [
-  {
-    name: 'admin',
-    comments: ['Separate Web Admin listener. Keep disabled unless administrative access is required.'],
-    keys: [
-      { key: 'host', value: '127.0.0.1' },
-      { key: 'port', value: '8584' },
-      { key: 'enabled', value: 'true' },
-      {
-        key: 'session_ttl_seconds',
-        value: '28800',
-        comment: 'Maximum lifetime of an authenticated Web Admin session, in seconds.',
-      },
-      {
-        key: 'session_idle_seconds',
-        value: '1800',
-        comment: 'Maximum inactivity time before a Web Admin session expires, in seconds.',
-      },
-    ],
-  },
-  {
-    name: 'storage',
-    comments: ['Runtime metrics, Last Heard, geolocation, and Web Admin authentication use SQLite.'],
-    keys: [
-      { key: 'sqlite_file', value: 'localdb.sqlite' },
-    ],
-  },
-  {
-    name: 'geo',
-    comments: [
-      'Optional server-side IP geolocation. Public addresses are anonymized before storage.',
-      'Private/local addresses never leave the server.',
-    ],
-    keys: [
-      { key: 'enabled', value: 'true' },
-      { key: 'provider', value: 'ipwhois' },
-      { key: 'key', value: '' },
-      { key: 'cache_ttl_days', value: '30' },
-      { key: 'timeout_ms', value: '1500' },
-      { key: 'ipv4_anonymize', value: '/24' },
-      { key: 'ipv6_anonymize', value: '/48' },
-    ],
-  },
-], fs, path);
+const serverConfigResolvedPath = path.resolve(serverConfigPath);
+const serverConfigExists = fs.existsSync(serverConfigResolvedPath);
+const serverConfigTemplatePath = path.resolve(path.dirname(serverConfigResolvedPath), 'server.example.conf');
+const serverConfigTemporaryPath = path.resolve(path.dirname(serverConfigResolvedPath), 'server.conf.tmp');
+const serverConfigUpdate = ensureServerConfigFromTemplateWithTemp(
+  serverConfigPath,
+  serverConfigTemplatePath,
+  serverConfigTemporaryPath,
+  fs,
+  path,
+);
 const serverConfig = loadServerConfig(serverConfigPath, fs, path);
 const defaultUdpHost = args.udpHost || getSetting(serverConfig, 'udp.host', '0.0.0.0');
 const httpHost = args.httpHost || getSetting(serverConfig, 'web.host', '0.0.0.0');
@@ -314,11 +280,15 @@ const compressed = createCompressedManager({
 });
 const compressedAvailable = compressedEnabled && compressed.isCodecAvailable(compressedCodec);
 const opusAvailable = compressedEnabled && compressed.ffmpegAvailable;
-if (!serverConfigExists) {
+if (serverConfigUpdate.templateMissing) {
+  logger.warn('server_config_template_missing', { path: serverConfigTemplatePath, fallback: 'built-in defaults' });
+} else if (serverConfigUpdate.created) {
+  logger.warn('server_config_created', { path: serverConfigPath, source: serverConfigTemplatePath });
+} else if (!serverConfigExists) {
   logger.warn('server_config_missing', { path: serverConfigPath, fallback: 'built-in defaults' });
 }
-if (serverConfigUpdated) {
-  logger.info('server_config_updated', { path: serverConfigPath, added: 'missing defaults' });
+if (serverConfigUpdate.updated) {
+  logger.info('server_config_updated', { path: serverConfigPath, added: serverConfigUpdate.added.join(',') });
 }
 
 const streamsConfigExists = fs.existsSync(path.resolve(configPath));

@@ -41,7 +41,7 @@ cp streams.example.json streams.json
 
 ## Server Configuration
 
-`server.conf` controls how this web server listens and where it loads the stream list from:
+`server.example.conf` is the versioned template. On first startup, the server creates a local `server.conf` from it. `server.conf` controls how this web server listens and where it loads the stream list from:
 
 ```conf
 [udp]
@@ -248,7 +248,7 @@ The server logs to stdout/stderr, so `systemd` automatically stores the output i
 
 The default `info` level is intentionally soft enough for service use. It shows startup lines, stream binds, player URLs, connection/disconnection events, warnings, and errors. It does not print full ffmpeg encoder debug output.
 
-`server.conf` is included in the repository with the default server settings, so users can see and edit it directly. If it is removed, the server starts with built-in defaults and logs a warning. If `streams.json` is missing, the server logs a warning and starts a built-in `test` stream on UDP port `8690`, mono, `8000 Hz`.
+`server.example.conf` is included in the repository with the default server settings. `server.conf` is local and ignored by Git, so production edits are not overwritten by `git pull`. At startup, the server copies `server.example.conf` into `server.conf` when the local file is missing. When new settings are added in later versions, the server stages the template as `server.conf.tmp`, appends only missing keys to the local `server.conf`, and removes the temporary file afterwards. Existing local values are preserved. If `streams.json` is missing, the server logs a warning and starts a built-in `test` stream on UDP port `8690`, mono, `8000 Hz`.
 
 Configure the normal service log level in `server.conf`:
 

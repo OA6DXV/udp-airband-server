@@ -12,6 +12,7 @@
 - Changed `--migrate` to a one-way legacy JSON-to-SQLite import that preserves the source files in a timestamped backup directory.
 - Added a startup warning when legacy JSON runtime data still needs migration, while Node.js 22.13+ uses built-in `node:sqlite` silently and older runtimes receive `better-sqlite3` installation guidance.
 - Added SQLite integrity checks and automatic archival of leftover legacy JSON files when an existing SQLite database is newer and valid.
+- Changed server configuration handling so `server.example.conf` is versioned, `server.conf` stays local, and startup uses `server.conf.tmp` to append only missing settings before deleting the temporary file.
 
 ### Espanol
 
@@ -23,6 +24,7 @@
 - `--migrate` ahora importa unicamente de JSON heredado a SQLite y conserva los archivos originales en una carpeta de respaldo con fecha.
 - Se agrego una alerta al detectar datos JSON pendientes de migracion; Node.js 22.13+ usa `node:sqlite` sin avisos y los runtimes antiguos reciben instrucciones para instalar `better-sqlite3`.
 - Se agrego verificacion de integridad SQLite y archivado automatico de JSON heredados sobrantes cuando una base SQLite existente es mas nueva y valida.
+- Se cambio el manejo de configuracion para versionar `server.example.conf`, mantener `server.conf` como archivo local y usar `server.conf.tmp` al iniciar para agregar solo opciones faltantes antes de borrar el temporal.
 
 ## 1.7-preview - Unreleased
 
