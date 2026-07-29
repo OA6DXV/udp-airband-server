@@ -94,6 +94,34 @@ async function testAuthenticationFlow() {
     const request = { headers: { cookie: sessionCookie } };
     const session = fixture.auth.authenticateRequest(request);
     assert.strictEqual(session.username, 'admin');
+    const initialAudit = fixture.database.db.prepare(
+      'SELECT * FROM admin_change_sessions WHERE token_hash = ?',
+    ).get(session.tokenHash);
+    assert.strictEqual(initialAudit.username, 'admin');
+    assert.strictEqual(initialAudit.client_ip, '198.51.100.20');
+    assert.strictEqual(initialAudit.started_at, fixture.now());
+    assert.strictEqual(initialAudit.ended_at, null);
+    assert.strictEqual(initialAudit.change_count, 0);
+
+    const firstBase = { streams: [{ name: 'before-first-change' }] };
+    assert.deepStrictEqual(fixture.auth.recordChange(session, {
+      action: 'streams_updated',
+      baseConfig: firstBase,
+      details: { changeScope: 'label' },
+    }), { changeCount: 1, sessionId: initialAudit.id });
+    assert.strictEqual(fixture.auth.recordChange(session, {
+      action: 'streams_updated',
+      baseConfig: { streams: [{ name: 'before-second-change' }] },
+      details: { changeScope: 'structural' },
+    }).changeCount, 2);
+    const changedAudit = fixture.database.db.prepare(
+      'SELECT * FROM admin_change_sessions WHERE token_hash = ?',
+    ).get(session.tokenHash);
+    assert.strictEqual(changedAudit.change_count, 2);
+    assert.deepStrictEqual(JSON.parse(changedAudit.base_config_json), firstBase);
+    assert.strictEqual(fixture.database.db.prepare(
+      'SELECT COUNT(*) AS count FROM admin_change_events WHERE change_session_id = ?',
+    ).get(initialAudit.id).count, 2);
     assert.strictEqual(fixture.auth.verifySessionCsrf(session, success.body.csrfToken), true);
     assert.strictEqual(fixture.auth.verifySessionCsrf(session, 'wrong'), false);
 
@@ -105,6 +133,12 @@ async function testAuthenticationFlow() {
     const logoutCookie = fixture.auth.logout(session, false);
     assert.match(logoutCookie, /Max-Age=0/);
     assert.strictEqual(fixture.auth.authenticateRequest(request), null);
+    const closedAudit = fixture.database.db.prepare(
+      'SELECT ended_at, end_reason, change_count FROM admin_change_sessions WHERE token_hash = ?',
+    ).get(session.tokenHash);
+    assert.strictEqual(closedAudit.ended_at, fixture.now());
+    assert.strictEqual(closedAudit.end_reason, 'logout');
+    assert.strictEqual(closedAudit.change_count, 2);
 
     const postSuccess = fixture.database.db.prepare(
       'SELECT failed_attempts, challenge_required, last_login_at FROM admin_users WHERE id = 1',
@@ -281,6 +315,9 @@ async function testSessionExpiry() {
     const idleCookie = idleLogin.cookie.split(';')[0];
     fixture.advance(fixture.config.sessionIdleMs + 1);
     assert.strictEqual(fixture.auth.authenticateRequest({ headers: { cookie: idleCookie } }), null);
+    assert.strictEqual(fixture.database.db.prepare(
+      "SELECT end_reason FROM admin_change_sessions WHERE client_ip = '198.51.100.20' ORDER BY id DESC LIMIT 1",
+    ).get().end_reason, 'idle_timeout');
 
     const absoluteLogin = await fixture.login(
       'admin', 'correct horse battery staple', undefined, '198.51.100.20', true,
@@ -289,6 +326,9 @@ async function testSessionExpiry() {
     const absoluteCookie = absoluteLogin.cookie.split(';')[0];
     fixture.database.db.prepare('UPDATE admin_sessions SET expires_at = ?').run(fixture.now() - 1);
     assert.strictEqual(fixture.auth.authenticateRequest({ headers: { cookie: absoluteCookie } }), null);
+    assert.strictEqual(fixture.database.db.prepare(
+      "SELECT end_reason FROM admin_change_sessions WHERE client_ip = '198.51.100.20' ORDER BY id DESC LIMIT 1",
+    ).get().end_reason, 'absolute_timeout');
   } finally {
     fixture.close();
   }

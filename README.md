@@ -323,7 +323,7 @@ If you use the protected environment file, add it to the `systemd` service:
 EnvironmentFile=/etc/udp-airband-admin.env
 ```
 
-The complete list of supported authentication settings and safe defaults is in [`.env.example`](.env.example). Both secrets must contain at least 32 bytes and must be different. Startup fails while Web Admin is enabled if secrets, rate limits, ALTCHA parameters, or trusted-proxy ranges are unsafe. The default session lasts 8 hours with a 30-minute inactivity timeout. Login limits are 20 attempts per IP and 15 per account in 15 minutes. Challenge generation is limited to 10 per IP and 10 per account per minute. Responses over those limits use HTTP `429` and `Retry-After`.
+The complete list of supported authentication settings and safe defaults is in [`.env.example`](.env.example). Both secrets must contain at least 32 bytes and must be different. Startup fails while Web Admin is enabled if secrets, rate limits, ALTCHA parameters, or trusted-proxy ranges are unsafe. The default session lasts 8 hours with a 30-minute inactivity timeout. These limits can be set with `session_ttl_seconds` and `session_idle_seconds` under `[admin]` in `server.conf`; the matching environment variables override the file when present. Login limits are 20 attempts per IP and 15 per account in 15 minutes. Challenge generation is limited to 10 per IP and 10 per account per minute. Responses over those limits use HTTP `429` and `Retry-After`.
 
 ### Reverse proxy and Cloudflare
 
@@ -349,7 +349,7 @@ Download the complete, current Cloudflare ranges from `https://www.cloudflare.co
 
 Node ignores `CF-Connecting-IP`, `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto` when the immediate peer is not trusted. The proxy must overwrite forwarded headers so a browser cannot choose its own rate-limit IP. A trusted `X-Forwarded-Proto: https` marks the session cookie `Secure` while preserving HTTP on the internal Apache-to-Node hop; Node does not redirect that internal request.
 
-The failed-login flow is persistent: attempts 1-3 check the password without ALTCHA; the third failure enables the challenge requirement; attempt 4 and every later attempt must consume a fresh, short-lived challenge before password hashing. Waiting or changing IP does not clear it. Only a successful login resets the account counter. A successful login also invalidates previous sessions for this single-administrator panel.
+The failed-login flow is persistent: attempts 1-3 check the password without ALTCHA; the third failure enables the challenge requirement; attempt 4 and every later attempt must consume a fresh, short-lived challenge before password hashing. Waiting or changing IP does not clear it. Only a successful login resets the account counter. A successful login also invalidates previous sessions for this single-administrator panel. Each login is retained in the local SQLite audit history with its administrator username, untruncated client IP, start/end timestamps, close reason, and successful stream-change count. The first change stores one pre-change stream snapshot for future session-level rollback; later changes do not replace that baseline.
 
 It can also be moved to another port for one run:
 

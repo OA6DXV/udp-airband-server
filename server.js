@@ -63,6 +63,16 @@ const serverConfigUpdated = ensureServerConfigDefaults(serverConfigPath, [
       { key: 'host', value: '127.0.0.1' },
       { key: 'port', value: '8584' },
       { key: 'enabled', value: 'true' },
+      {
+        key: 'session_ttl_seconds',
+        value: '28800',
+        comment: 'Maximum lifetime of an authenticated Web Admin session, in seconds.',
+      },
+      {
+        key: 'session_idle_seconds',
+        value: '1800',
+        comment: 'Maximum inactivity time before a Web Admin session expires, in seconds.',
+      },
     ],
   },
   {
@@ -106,6 +116,8 @@ const webAdminPort = Number(webAdminCliFlag
   : adminConfigPort);
 const webAdminHost = String(args.webadminHost || adminConfigHost);
 const webAdminConfigOverridden = Boolean(webAdminCliFlag || args.webadminHost !== undefined);
+const adminSessionTtlSeconds = getSetting(serverConfig, 'admin.sessionTtlSeconds', 8 * 60 * 60);
+const adminSessionIdleSeconds = getSetting(serverConfig, 'admin.sessionIdleSeconds', 30 * 60);
 const configPath = args.config || getSetting(serverConfig, 'streams.file', 'streams.json');
 const dataDir = path.resolve(args.dataDir || path.join(__dirname, 'data'));
 const sqliteFileSetting = String(
@@ -194,7 +206,11 @@ if (webAdminEnabled) {
     if (adminSecrets.generated) {
       logGeneratedAdminSecrets(adminSecrets.filePath);
     }
-    adminAuthConfig = loadAdminAuthConfig(adminSecrets.env);
+    adminAuthConfig = loadAdminAuthConfig({
+      ...adminSecrets.env,
+      ADMIN_SESSION_TTL_SECONDS: process.env.ADMIN_SESSION_TTL_SECONDS || String(adminSessionTtlSeconds),
+      ADMIN_SESSION_IDLE_SECONDS: process.env.ADMIN_SESSION_IDLE_SECONDS || String(adminSessionIdleSeconds),
+    });
     adminProxyTrust = createProxyTrust(adminSecrets.env.ADMIN_TRUSTED_PROXIES || '127.0.0.1,::1');
   } catch (err) {
     if (err && err.code === 'MODULE_NOT_FOUND' && String(err.message || '').includes('altcha-lib')) {
@@ -686,6 +702,7 @@ async function startWebServers() {
       getAdminSetupRequired: () => !hasWebAdminUser(),
       getGeoStats: () => aggregateGeoStats(geoCache.entries()),
       getState: getWebAdminState,
+      getStreamConfigSnapshot: () => ({ streams: streams.map(streamFileEntry) }),
       host: webAdminHost,
       http,
       logger,
@@ -799,6 +816,7 @@ async function applyStreamReplacement(payload) {
     throw validationError;
   }
 
+  const changeScope = canUpdateStreamsInPlace(streams, candidateStreams) ? 'label' : 'structural';
   const resolvedConfigPath = path.resolve(configPath);
   const temporaryConfigPath = `${resolvedConfigPath}.${process.pid}.tmp`;
   const serializedConfig = `${JSON.stringify({ streams: candidateStreams.map(streamFileEntry) }, null, 2)}\n`;
@@ -835,6 +853,7 @@ async function applyStreamReplacement(payload) {
     });
     return {
       ok: true,
+      changeScope,
       message: `${streams.length} stream${streams.length === 1 ? '' : 's'} updated without interrupting listeners.`,
       streams: streams.map(adminStreamState),
     };
@@ -883,6 +902,7 @@ async function applyStreamReplacement(payload) {
   });
   return {
     ok: true,
+    changeScope,
     message: `${streams.length} stream${streams.length === 1 ? '' : 's'} applied without restarting the server.`,
     streams: streams.map(adminStreamState),
   };

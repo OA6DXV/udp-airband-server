@@ -5,6 +5,7 @@
 ### English
 
 - Added secure Web Admin authentication with hardened sessions, CSRF protection, login rate limiting, and challenge handling.
+- Added per-login Web Admin change tracking with the administrator username, full audit IP, session start/end timestamps, end reason, total changes, and a single pre-change stream snapshot for future session rollback.
 - Fixed Web Admin login submission when the ALTCHA challenge is hidden and reduced noisy browser warnings on non-HTTPS admin testing.
 - Added automatic first-run generation of private Web Admin secrets in `data/admin-secrets.env` when environment-provided secrets are absent, with startup/login notices explaining storage, backups, custom-secret timing, and missing administrator setup.
 - Made SQLite the exclusive runtime database for listener metrics, Last Heard, geolocation, and Web Admin authentication.
@@ -15,6 +16,7 @@
 ### Espanol
 
 - Se agrego autenticacion segura para Web Admin con sesiones reforzadas, proteccion CSRF, limites de intentos de login y sistema de desafios.
+- Se agrego seguimiento de cambios por sesion de Web Admin con username, IP completa de auditoria, timestamps de inicio/fin, motivo de cierre, total de cambios y un unico snapshot previo para un futuro rollback por sesion.
 - Se corrigio el envio del login de Web Admin cuando el desafio ALTCHA esta oculto y se redujeron warnings del navegador durante pruebas admin sin HTTPS.
 - Se agrego generacion automatica de secretos privados de Web Admin en `data/admin-secrets.env` durante el primer arranque cuando no existen secretos por entorno, con avisos de inicio/login sobre almacenamiento, respaldos, cuando conviene definir secretos custom y configuracion pendiente del administrador.
 - SQLite paso a ser la unica base de datos de ejecucion para metricas de listeners, Last Heard, geolocalizacion y autenticacion de Web Admin.

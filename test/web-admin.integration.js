@@ -182,6 +182,7 @@ async function run() {
       body: JSON.stringify(updated),
     });
     assert.strictEqual(updateResponse.ok, true);
+    assert.strictEqual(updateResponse.audit.changeCount, 1);
     assert.strictEqual(JSON.parse(fs.readFileSync(configPath, 'utf8')).streams[0].label, 'Updated live');
     const unavailableMessage = await activePlayer.waitForMessage('streamUnavailable');
     assert.strictEqual(unavailableMessage.reason, 'configuration_changed');

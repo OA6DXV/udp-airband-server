@@ -323,7 +323,7 @@ Si usas el archivo de entorno protegido, agregalo al servicio `systemd`:
 EnvironmentFile=/etc/udp-airband-admin.env
 ```
 
-La lista completa de variables y valores seguros esta en [`.env.example`](.env.example). Ambos secretos deben contener al menos 32 bytes y ser diferentes. Si Web Admin esta activo, el inicio falla cuando los secretos, limites, parametros ALTCHA o proxies confiables son inseguros. La sesion predeterminada dura 8 horas y vence tras 30 minutos de inactividad. Los limites de login son 20 intentos por IP y 15 por cuenta cada 15 minutos. La generacion de desafios permite 10 por IP y 10 por cuenta cada minuto. Al excederlos se responde HTTP `429` con `Retry-After`.
+La lista completa de variables y valores seguros esta en [`.env.example`](.env.example). Ambos secretos deben contener al menos 32 bytes y ser diferentes. Si Web Admin esta activo, el inicio falla cuando los secretos, limites, parametros ALTCHA o proxies confiables son inseguros. La sesion predeterminada dura 8 horas y vence tras 30 minutos de inactividad. Estos limites se configuran con `session_ttl_seconds` y `session_idle_seconds` dentro de `[admin]` en `server.conf`; las variables de entorno equivalentes tienen prioridad cuando existen. Los limites de login son 20 intentos por IP y 15 por cuenta cada 15 minutos. La generacion de desafios permite 10 por IP y 10 por cuenta cada minuto. Al excederlos se responde HTTP `429` con `Retry-After`.
 
 ### Reverse proxy y Cloudflare
 
@@ -349,7 +349,7 @@ Descarga todos los rangos actuales desde `https://www.cloudflare.com/ips/`; el u
 
 Node ignora `CF-Connecting-IP`, `X-Forwarded-For`, `X-Forwarded-Host` y `X-Forwarded-Proto` cuando el peer inmediato no es confiable. El proxy debe sobrescribir los encabezados reenviados para que un navegador no pueda elegir su IP de rate limit. Un `X-Forwarded-Proto: https` confiable marca la cookie como `Secure`, pero mantiene HTTP en el tramo interno Apache-Node; Node no redirige esa solicitud interna.
 
-El flujo persistente es: los intentos 1-3 comprueban la contrasena sin ALTCHA; el tercer fallo activa el desafio; el intento 4 y todos los posteriores deben consumir un desafio nuevo y de vida corta antes de calcular la contrasena. Esperar o cambiar de IP no desactiva el requisito. Solo un login correcto reinicia el contador. Un login correcto tambien invalida sesiones anteriores para este panel de administrador unico.
+El flujo persistente es: los intentos 1-3 comprueban la contrasena sin ALTCHA; el tercer fallo activa el desafio; el intento 4 y todos los posteriores deben consumir un desafio nuevo y de vida corta antes de calcular la contrasena. Esperar o cambiar de IP no desactiva el requisito. Solo un login correcto reinicia el contador. Un login correcto tambien invalida sesiones anteriores para este panel de administrador unico. Cada login queda en el historial local SQLite con username, IP del cliente sin truncar, timestamps de inicio/fin, motivo de cierre y total de cambios exitosos en streams. El primer cambio guarda un unico snapshot previo para un futuro rollback por sesion; los cambios posteriores no reemplazan esa base.
 
 Tambien puede moverse a otro puerto para una ejecucion:
 
