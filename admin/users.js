@@ -17,6 +17,7 @@ const translations = {
     language: 'Language',
     serverOnline: 'Server online',
     serverOffline: 'Server offline',
+    logout: 'Logout',
   },
   es: {
     webAdmin: 'Administración web',
@@ -33,6 +34,7 @@ const translations = {
     language: 'Idioma',
     serverOnline: 'Servidor en línea',
     serverOffline: 'Servidor fuera de línea',
+    logout: 'Cerrar sesión',
   },
 };
 
@@ -42,6 +44,7 @@ const geoChartElement = document.getElementById('geoChart');
 const geoLayout = document.getElementById('geoLayout');
 const statusDot = document.querySelector('.status-dot');
 const countryDetail = document.getElementById('countryDetail');
+const logoutButton = document.getElementById('logoutButton');
 let language = localStorage.getItem(LANGUAGE_STORAGE_KEY);
 let geoStats = { countries: [], totalListeners: 0 };
 let chart = null;
@@ -49,6 +52,7 @@ let messageKey = 'loadingMap';
 let selectedCode = '';
 let resizeTimer = null;
 let layoutRedrawTimer = null;
+let csrfToken = '';
 
 if (!translations[language]) language = 'en';
 languageSelect.value = language;
@@ -66,11 +70,39 @@ window.addEventListener('resize', () => {
   resizeTimer = setTimeout(drawChart, 120);
 });
 
-loadGeoStats();
+logoutButton.addEventListener('click', logout);
+bootstrap();
+
+async function bootstrap() {
+  try {
+    const response = await fetch("/api/auth/status", { cache: "no-store", credentials: "same-origin" });
+    const status = await response.json();
+    if (!response.ok || !status.authenticated) {
+      window.location.replace("/");
+      return;
+    }
+    csrfToken = status.csrfToken || "";
+    loadGeoStats();
+  } catch {
+    window.location.replace("/");
+  }
+}
+
+async function logout() {
+  try {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "x-csrf-token": csrfToken },
+    });
+  } finally {
+    window.location.replace("/");
+  }
+}
 
 async function loadGeoStats() {
   try {
-    const response = await fetch('/api/users/geo', { cache: 'no-store' });
+    const response = await fetch('/api/users/geo', { cache: 'no-store', credentials: 'same-origin' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     geoStats = await response.json();
     setServerOnline(true);

@@ -2,4 +2,8 @@ node_modules/
 npm-debug.log*
 .DS_Store
 server.conf
+server.conf.tmp
 data/
+.env
+.env.*
+!.env.example

@@ -41,7 +41,7 @@ cp streams.example.json streams.json
 
 ## Configuracion Del Servidor
 
-`server.conf` controla como escucha este servidor web y desde donde carga la lista de streams:
+`server.conf` controla como escucha este servidor web y desde donde carga la lista de streams. Si el archivo no existe, el servidor lo genera al iniciar desde una plantilla predeterminada interna:
 
 ```conf
 [udp]
@@ -55,12 +55,14 @@ port = 8585
 host = 127.0.0.1
 port = 8584
 enabled = true
+secure = false
+key =
+cert =
 
 [streams]
 file = streams.json
 
 [storage]
-backend = json
 sqlite_file = localdb.sqlite
 
 [geo]
@@ -97,9 +99,9 @@ Campos importantes:
 - `[udp].host`: direccion UDP predeterminada para streams que no definan su propio `udpHost`.
 - `[web].host` y `[web].port`: direccion y puerto para la interfaz web. El mismo puerto se usa para HTTP o HTTPS segun `[ssl]`.
 - `[admin].enabled`: activa el servidor Web Admin separado. Esta en `true` por defecto y queda enlazado a loopback salvo que cambies `[admin].host`.
+- `[admin].secure`: cuando esta en `true`, Web Admin corre sobre HTTPS usando `[admin].key` y `[admin].cert`, y los desafios ALTCHA permanecen activos. Cuando esta en `false`, Web Admin corre por HTTP y ALTCHA se desactiva porque los navegadores requieren HTTPS o localhost para ese desafio. Los rate limits siguen activos, pero la proteccion contra fuerza bruta se reduce.
 - `[admin].host` y `[admin].port`: direccion y puerto de Web Admin. Conserva el host loopback predeterminado salvo que el acceso este protegido por un tunel SSH o reverse proxy autenticado.
 - `[streams].file`: archivo JSON que define los feeds.
-- `[storage].backend`: backend de persistencia para el historial de usuarios conectados, los valores Last Heard y el cache de geolocalizacion. Los valores soportados son `json` (predeterminado) y `sqlite`. SQLite se recomienda para produccion.
 - `[storage].sqlite_file`: ruta de la base SQLite. Las rutas relativas se resuelven dentro del directorio de datos de ejecucion (`data/` de forma predeterminada).
 - `[geo].enabled`: activa la geolocalizacion server-side mediante ipwhois. Esta activada por defecto y mantiene las IP publicas anonimizadas antes de guardarlas.
 - `[geo].key`: reservado para futuros proveedores de geolocalizacion que requieran API key. ipwhois no requiere una, asi que puede quedar vacio.
@@ -113,23 +115,15 @@ Campos importantes:
 - `[compressed].enabled`: usa `false` para desactivar todos los modos comprimidos y su logica de transcoding/framing.
 - `[compressed].codec`: backend del modo comprimido. `adpcm` es la opcion predeterminada de baja latencia y no requiere `ffmpeg`.
 
-El almacenamiento JSON es el valor predeterminado de compatibilidad y utiliza `data/user-history.json`, `data/last-heard.json` y `data/geo-cache.json`. SQLite se recomienda para produccion y guarda los datos de ejecucion en `data/localdb.sqlite` de forma predeterminada.
+Las metricas de ejecucion, los valores Last Heard, la geolocalizacion y la autenticacion de Web Admin se guardan exclusivamente en SQLite, de forma predeterminada en `data/localdb.sqlite`. En Node.js 22.13+ (incluido Node 24), el modulo integrado `node:sqlite` se usa automaticamente sin warnings ni paquetes adicionales. Las instalaciones antiguas de Node.js deben instalar el driver de compatibilidad con `npm install better-sqlite3`.
 
-La version 1.7 esta planeada como la ultima version con soporte de JSON como base general de ejecucion. Las instalaciones nuevas en produccion deberian migrar a SQLite instalando `better-sqlite3` en versiones antiguas de Node.js, o usando Node.js 22.13+ / Node.js actual con `node:sqlite` integrado.
-
-Cuando el almacenamiento JSON esta activo, el servidor muestra un warning legible al iniciar con la version actual de Node.js y la guia de migracion. En Node 18, instala el driver opcional de compatibilidad con `npm install better-sqlite3` antes de usar SQLite. En Node 22.13+ el modulo integrado `node:sqlite` esta disponible, asi que no se requiere ningun paquete SQLite adicional.
-
-Para migrar datos existentes, primero detiene el servidor en ejecucion y usa uno de estos comandos:
+Si una actualizacion detecta los archivos heredados `data/user-history.json`, `data/last-heard.json` o `data/geo-cache.json`, el inicio muestra una advertencia de migracion. Detiene el servidor y ejecuta:
 
 ```bash
-# JSON a SQLite
-node server.js --migrate sqlite
-
-# SQLite a JSON
-node server.js --migrate json
+node server.js --migrate
 ```
 
-`--migrate` sin valor migra al backend contrario: instalaciones JSON migran a SQLite, e instalaciones SQLite vuelven a JSON. La migracion muestra el origen y destino, pide confirmacion `Y/N`, combina los datos que ya existan en el destino, conserva los valores Last Heard y de geolocalizacion mas recientes, mantiene los puntos del historial y no borra el origen. Despues de una migracion exitosa, el servidor actualiza automaticamente `[storage].backend` en `server.conf`.
+La migracion es unidireccional de JSON a SQLite. Pide confirmacion `Y/N`, combina los registros heredados con la base SQLite y mueve los JSON originales a una carpeta con fecha dentro de `data/legacy-json-backups/`. Ya no se admite migrar de SQLite a JSON.
 
 ### Geolocalizacion Opcional Y Privacidad
 
@@ -258,7 +252,7 @@ El servidor escribe logs en stdout/stderr, asi que `systemd` guarda automaticame
 
 El nivel predeterminado `info` es intencionalmente suave para uso como servicio. Muestra lineas de arranque, streams cargados, URLs del player, conexiones/desconexiones, warnings y errores. No imprime todo el debug de los encoders ffmpeg.
 
-`server.conf` viene incluido en el repositorio con la configuracion predeterminada del servidor, para que el usuario pueda verlo y editarlo directamente. Si se elimina, el servidor inicia con valores predeterminados internos y muestra un warning. Si falta `streams.json`, el servidor muestra un warning e inicia un stream interno `test` en el puerto UDP `8690`, mono, `8000 Hz`.
+`server.conf` es local y queda ignorado por Git, por lo que los cambios de produccion no se sobrescriben con `git pull`. Si el archivo no existe, el arranque escribe un nuevo `server.conf` desde la plantilla predeterminada interna y muestra un bloque de warning visible. Cuando versiones nuevas agregan opciones, el servidor escribe esa plantilla interna en `server.conf.tmp`, agrega solo las claves faltantes al `server.conf` local y elimina el temporal al terminar. Los valores locales existentes se conservan. Si falta `streams.json`, el servidor muestra un warning e inicia un stream interno `test` en el puerto UDP `8690`, mono, `8000 Hz`.
 
 Configura el nivel normal del servicio en `server.conf`:
 
@@ -286,14 +280,94 @@ Cuando `-D` esta activo, los encoders basados en ffmpeg como Opus, AAC y HLS se 
 
 ## Administracion Web
 
-La pagina de administracion corre por defecto en un puerto separado solo en loopback y no se publica desde el puerto del reproductor. Puede configurarse en `server.conf`:
+La pagina de administracion corre por defecto en un puerto separado solo en loopback y no se publica desde el puerto del reproductor. Puede configurarse en `server.conf`. Para acceso por IP privada como ZeroTier, genera un certificado self-signed para que el navegador trate la pagina como contexto seguro:
+
+```bash
+node server.js --generate-cert
+```
+
+Luego inicia el servidor y abre Web Admin con `https://HOST:8584/`. El generador usa `openssl`, crea `certs/admin.key` y `certs/admin.crt`, actualiza `[admin]` y pregunta si tambien quieres usar el mismo certificado en el servidor publico de streams. Activar SSL para el reproductor publico es opcional y normalmente innecesario detras de un reverse proxy.
 
 ```conf
 [admin]
+enabled = true
 host = 127.0.0.1
 port = 8584
-enabled = true
+secure = true
+key = certs/admin.key
+cert = certs/admin.crt
 ```
+
+Web Admin requiere al menos un administrador habilitado guardado en la misma base SQLite de ejecucion. La autenticacion permite multiples cuentas de administrador con contrasenas scrypt, sesiones SQLite del lado del servidor, proteccion CSRF, limites por cuenta/IP y ALTCHA Proof-of-Work v2 autohospedado despues de tres logins fallidos. Los tokens de sesion y secretos ALTCHA nunca se guardan en el almacenamiento del navegador.
+
+Instala las dependencias antes de activar Web Admin:
+
+```bash
+npm install
+```
+
+Si `ADMIN_AUTH_SECRET` y `ADMIN_ALTCHA_SECRET` no existen, el primer arranque de Web Admin crea `data/admin-secrets.env` con valores privados aleatorios y reutiliza ese archivo en los siguientes inicios. Manten este archivo privado e incluyelo en tus respaldos.
+
+Para despliegues de produccion administrados, tambien puedes proporcionar los secretos manualmente en un archivo de entorno protegido:
+
+```bash
+sudo install -m 600 -o airband -g airband /dev/null /etc/udp-airband-admin.env
+printf 'ADMIN_AUTH_SECRET=%s\n' "$(openssl rand -base64 48)" | sudo tee -a /etc/udp-airband-admin.env >/dev/null
+printf 'ADMIN_ALTCHA_SECRET=%s\n' "$(openssl rand -base64 48)" | sudo tee -a /etc/udp-airband-admin.env >/dev/null
+printf 'ADMIN_TRUSTED_PROXIES=127.0.0.1,::1\n' | sudo tee -a /etc/udp-airband-admin.env >/dev/null
+```
+
+Usa `node server.js --help` para mostrar la referencia completa de comandos, incluyendo Web Admin, TLS, migracion, logging y flags de cuentas administradoras. La gestion basica de administradores se hace desde la linea de comandos del servidor:
+
+```bash
+node server.js --createuser USER
+node server.js --createuser USER --password 'PASSWORD'
+node server.js --modifyuser USER --password
+node server.js --modifyuser USER --password 'NEW_PASSWORD'
+node server.js --modifyuser USER disable
+node server.js --modifyuser USER enable
+node server.js --deleteuser USER
+node server.js --listusers
+```
+
+Cambiar la contrasena, deshabilitar o eliminar una cuenta cierra inmediatamente sus sesiones activas. La eliminacion pide confirmacion en la terminal y se conserva como baja logica auditable. SQLite almacena las fechas de creacion, modificacion y eliminacion. Un username eliminado puede recrearse despues con `--createuser`.
+
+Si se omite `--password` o se pasa sin valor, el comando solicita la contrasena sin mostrarla, parecido a las herramientas de cuentas de Linux. Las contrasenas proporcionadas directamente con `--password VALUE` pueden quedar en el historial del shell o aparecer brevemente en la lista de procesos. Las contrasenas de administrador requieren al menos 5 caracteres; las que parezcan debiles se aceptan con una advertencia para no bloquear instalaciones privadas de laboratorio. Para el primer administrador o cuenta principal, el comando compatible `npm run admin:setup` tambien solicita la contrasena interactivamente sin mostrarla. Las rutas personalizadas pueden indicarse con `--server-config`, `--data-dir` y `--sqlite-file`.
+
+Si usas el archivo de entorno protegido, agregalo al servicio `systemd`:
+
+```ini
+[Service]
+EnvironmentFile=/etc/udp-airband-admin.env
+```
+
+La lista completa de variables y valores seguros esta en [`.env.example`](.env.example). Ambos secretos deben contener al menos 32 bytes y ser diferentes. Si Web Admin esta activo, el inicio falla cuando los secretos, limites, parametros ALTCHA o proxies confiables son inseguros. La sesion predeterminada dura 8 horas y vence tras 30 minutos de inactividad. Estos limites se configuran con `session_ttl_seconds` y `session_idle_seconds` dentro de `[admin]` en `server.conf`; las variables de entorno equivalentes tienen prioridad cuando existen. Los limites de login son 20 intentos por IP y 15 por cuenta cada 15 minutos. La generacion de desafios permite 10 por IP y 10 por cuenta cada minuto. Al excederlos se responde HTTP `429` con `Retry-After`.
+
+### Reverse proxy y Cloudflare
+
+Manten Node enlazado a `127.0.0.1:8584`; no publiques ese puerto en el firewall. Cloudflare debe usar **Full (strict)** hacia un certificado valido en Apache. Apache puede recibir HTTPS publico y comunicarse con Node por HTTP sobre loopback. Activa `proxy`, `proxy_http`, `headers` y `remoteip`, y configura el virtual host de esta forma:
+
+```apache
+RemoteIPHeader CF-Connecting-IP
+# Agrega cada rango IPv4 e IPv6 actual de Cloudflare como RemoteIPTrustedProxy.
+RemoteIPTrustedProxy 173.245.48.0/20
+# ...los demas rangos actuales de Cloudflare...
+
+ProxyPreserveHost On
+ProxyPass        / http://127.0.0.1:8584/
+ProxyPassReverse / http://127.0.0.1:8584/
+
+# Sobrescribe; nunca agregues valores enviados por el cliente.
+RequestHeader set X-Forwarded-For "expr=%{REMOTE_ADDR}"
+RequestHeader set X-Forwarded-Host "expr=%{HTTP_HOST}"
+RequestHeader set X-Forwarded-Proto "https"
+```
+
+Descarga todos los rangos actuales desde `https://www.cloudflare.com/ips/`; el unico rango mostrado arriba es solo un ejemplo de sintaxis. Ejecuta `apache2ctl configtest` antes de recargar Apache. `ADMIN_TRUSTED_PROXIES` debe contener unicamente la direccion o CIDR del proxy que se conecta directamente a Node. Si Apache esta en el mismo servidor, conserva `127.0.0.1,::1`. No pongas los rangos de Cloudflare ahi salvo que Cloudflare se conecte directamente a Node.
+
+Node ignora `CF-Connecting-IP`, `X-Forwarded-For`, `X-Forwarded-Host` y `X-Forwarded-Proto` cuando el peer inmediato no es confiable. El proxy debe sobrescribir los encabezados reenviados para que un navegador no pueda elegir su IP de rate limit. Un `X-Forwarded-Proto: https` confiable marca la cookie como `Secure`, pero mantiene HTTP en el tramo interno Apache-Node; Node no redirige esa solicitud interna.
+
+El flujo persistente es: los intentos 1-3 comprueban la contrasena sin ALTCHA; el tercer fallo activa el desafio; el intento 4 y todos los posteriores deben consumir un desafio nuevo y de vida corta antes de calcular la contrasena. Esperar o cambiar de IP no desactiva el requisito. Solo un login correcto reinicia el contador. Un login correcto invalida las sesiones anteriores de esa misma cuenta, sin afectar a los demas administradores. Cada login queda en el historial local SQLite con username, IP del cliente sin truncar, timestamps de inicio/fin, motivo de cierre y total de cambios exitosos en streams. El primer cambio guarda un unico snapshot previo para un futuro rollback por sesion; los cambios posteriores no reemplazan esa base.
 
 Tambien puede moverse a otro puerto para una ejecucion:
 
@@ -313,13 +387,14 @@ Luego abre `http://127.0.0.1:8584/` en el navegador local. No expongas este puer
 
 Al aplicar cambios se valida la configuracion completa, se actualiza `streams.json` y se vuelven a enlazar las entradas UDP sin reiniciar Node. El boton amarillo **Reload streams** vuelve a leer los cambios hechos directamente en `streams.json` y los aplica con la misma validacion y restauracion ante errores. Los cambios que solo modifican nombres visibles conservan los listeners actuales. Los cambios de rutas o entradas de audio reconectan las sesiones de audio del navegador. Si no se puede abrir un puerto UDP nuevo, se restauran tanto la configuracion anterior en ejecucion como el archivo.
 
-La grafica de usuarios conectados utiliza el contador interno de clientes unicos del servidor en lugar de analizar logs. Las muestras de un minuto se conservan durante 12 horas en el backend JSON o SQLite seleccionado.
+La grafica de usuarios conectados utiliza el contador interno de clientes unicos del servidor en lugar de analizar logs. Las muestras de un minuto se conservan durante 12 horas en SQLite.
 
 El boton de reinicio envia una senal de cierre controlado despues de pedir confirmacion. Web Admin detecta `systemd` mediante el entorno de ejecucion y avisa si el servicio debe configurarse para reinicio automatico o si el proceso iniciado en consola tendra que arrancarse manualmente. Una unidad de `systemd` debe incluir, por ejemplo:
 
 ```ini
 [Service]
 ExecStart=/usr/bin/node /opt/udp-airband-server/server.js --webserver 8584
+EnvironmentFile=/etc/udp-airband-admin.env
 Restart=on-failure
 ```
 
@@ -419,7 +494,7 @@ La pagina del stream muestra contador de usuarios, estado UDP/stream, buffered, 
 
 Cuando el stream fue validado por al menos un paquete UDP, el estado cambia a `Connected`. Al presionar `Connected`, la pagina cambia a `Push to Reconnect`, cierra solo el socket de audio y detiene el consumo de bandwidth sin cerrar la pagina ni la conexion de control/estado. Al presionar `Push to Reconnect`, se reanuda el mismo modo que estaba activo antes de pausar.
 
-La ultima transmision es detectada por el servidor y se guarda en el backend JSON o SQLite seleccionado, asi la pagina principal y nuevos oyentes pueden ver la ultima actividad conocida incluso despues de reiniciar el servidor.
+La ultima transmision es detectada por el servidor y se guarda en SQLite, asi la pagina principal y nuevos oyentes pueden ver la ultima actividad conocida incluso despues de reiniciar el servidor.
 
 La pagina principal lista todos los feeds configurados bajo `Real-time Airband audio streams`, muestra usuarios activos, selector de idioma, ruta, informacion de canales/sample rate y la ultima transmision detectada por el servidor para cada feed.
 

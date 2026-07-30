@@ -8,17 +8,25 @@ const http = require('http');
 const net = require('net');
 const os = require('os');
 const path = require('path');
-const { loadServerConfig, parseArgs, setServerConfigSetting } = require('../lib/config');
+const { DEFAULT_SERVER_CONFIG_TEMPLATE, ensureServerConfigFromTemplateWithTemp, loadServerConfig, parseArgs, setServerConfigSetting } = require('../lib/config');
+const { upsertAdministrator } = require('../lib/admin-auth');
+const { createPasswordHasher } = require('../lib/admin-password');
 const { createGeoService } = require('../lib/geo-service');
 const { aggregateGeoStats } = require('../lib/geo-stats');
 const { classifyAddress } = require('../lib/ip-privacy');
 const { detectRuntimeMode } = require('../lib/runtime');
 const { openSqliteDatabase } = require('../lib/sqlite-database');
 const { createStorage } = require('../lib/storage');
-const { migrateStorage } = require('../lib/storage-migration');
+const { findLegacyJsonFiles, migrateStorage } = require('../lib/storage-migration');
 const { createUserHistory } = require('../lib/user-history');
 
 const projectDir = path.resolve(__dirname, '..');
+const TEST_AUTH_ENV = {
+  ADMIN_AUTH_SECRET: 'integration-auth-secret-that-is-at-least-thirty-two-bytes',
+  ADMIN_ALTCHA_SECRET: 'integration-altcha-secret-that-is-at-least-thirty-two-bytes',
+  ADMIN_TRUSTED_PROXIES: '127.0.0.1,::1',
+};
+const adminSessions = new Map();
 
 run().catch((err) => {
   console.error(err);
@@ -28,6 +36,7 @@ run().catch((err) => {
 async function run() {
   testRuntimeDetection();
   testServerConfigSettingUpdate();
+  testServerConfigTemplateUpdate();
   testUserHistoryWindow();
   testGeoStatsAggregation();
   testStorageMigration();
@@ -43,13 +52,15 @@ async function run() {
   const serverConfigPath = path.join(temporaryDir, 'server.conf');
   const dataDir = path.join(temporaryDir, 'data');
   fs.mkdirSync(dataDir, { recursive: true });
-  fs.writeFileSync(path.join(dataDir, 'geo-cache.json'), JSON.stringify({
-    '203.0.113.0': geoRecord('203.0.113.0', 'PE', 'Peru', 'Cusco'),
-    '203.0.114.0': geoRecord('203.0.114.0', 'PE', 'Peru', 'Cusco'),
-    '203.0.115.0': geoRecord('203.0.115.0', 'PE', 'Peru', 'Lima'),
-    '198.51.100.0': geoRecord('198.51.100.0', 'US', 'United States', 'Miami'),
-    '127.0.0.1': geoRecord('127.0.0.1', '', 'Local IP', 'Local IP', 'local'),
-  }));
+  const runtimeDatabasePath = path.join(dataDir, 'localdb.sqlite');
+  await createTestAdministrator(runtimeDatabasePath);
+  seedGeoRecords(runtimeDatabasePath, [
+    geoRecord('203.0.113.0', 'PE', 'Peru', 'Cusco'),
+    geoRecord('203.0.114.0', 'PE', 'Peru', 'Cusco'),
+    geoRecord('203.0.115.0', 'PE', 'Peru', 'Lima'),
+    geoRecord('198.51.100.0', 'US', 'United States', 'Miami'),
+    geoRecord('127.0.0.1', '', 'Local IP', 'Local IP', 'local'),
+  ]);
   fs.writeFileSync(serverConfigPath, [
     '[web]',
     'host = 127.0.0.1',
@@ -64,6 +75,7 @@ async function run() {
     'enabled = false',
     '',
   ].join('\n'));
+  ensureServerConfigFromTemplateWithTemp(serverConfigPath, path.join(temporaryDir, 'server.conf.tmp'), fs, path);
   fs.writeFileSync(configPath, JSON.stringify({
     streams: [{
       name: 'test',
@@ -74,6 +86,7 @@ async function run() {
       channels: 1,
     }],
   }));
+
 
   const child = childProcess.spawn(process.execPath, [
     'server.js',
@@ -86,6 +99,7 @@ async function run() {
     '--compressed-enabled', 'false',
   ], {
     cwd: projectDir,
+    env: { ...process.env, ...TEST_AUTH_ENV },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -95,8 +109,17 @@ async function run() {
 
   const occupiedSocket = dgram.createSocket('udp4');
   try {
+    const loginPage = await waitFor(() => request(adminPort, '/'));
+    assert.match(loginPage.body, /id="loginForm"/);
+    assert.match(loginPage.body, /<form[^>]+novalidate/);
+    assert.strictEqual((await request(adminPort, '/api/state')).statusCode, 401);
+    const altchaWorker = await request(adminPort, '/altcha-pbkdf2.js');
+    assert.strictEqual(altchaWorker.statusCode, 200);
+    assert.match(altchaWorker.body, /onmessage/);
+    await loginTestAdmin(adminPort, true);
     await waitFor(() => requestJson(adminPort, '/api/state'));
     await waitFor(() => output.includes('webadmin_config_override') && output.includes('priority=command-line'));
+    assert.doesNotMatch(output, /Legacy JSON runtime data was detected/);
     assert.match(output, /webadmin_config_override source=--webserver/);
     assert.match(output, /overridden="admin\.enabled,admin\.port"/);
 
@@ -149,12 +172,19 @@ async function run() {
         channels: 1,
       }],
     };
+    const csrfRejected = await request(adminPort, '/api/streams/reload', {
+      method: 'POST',
+      skipCsrf: true,
+    });
+    assert.strictEqual(csrfRejected.statusCode, 403);
+
     const updateResponse = await requestJson(adminPort, '/api/streams', {
       method: 'PUT',
       headers: { 'content-type': 'application/json', 'x-admin-request': '1' },
       body: JSON.stringify(updated),
     });
     assert.strictEqual(updateResponse.ok, true);
+    assert.strictEqual(updateResponse.audit.changeCount, 1);
     assert.strictEqual(JSON.parse(fs.readFileSync(configPath, 'utf8')).streams[0].label, 'Updated live');
     const unavailableMessage = await activePlayer.waitForMessage('streamUnavailable');
     assert.strictEqual(unavailableMessage.reason, 'configuration_changed');
@@ -234,14 +264,60 @@ function testServerConfigSettingUpdate() {
       '',
       '[storage]',
       '# keep this comment',
-      'backend = json',
       'sqlite_file = localdb.sqlite',
       '',
     ].join('\n'));
-    setServerConfigSetting(filePath, 'storage', 'backend', 'sqlite', fs, path);
+    setServerConfigSetting(filePath, 'storage', 'sqlite_file', 'runtime.sqlite', fs, path);
     const config = loadServerConfig(filePath, fs, path);
-    assert.strictEqual(config['storage.backend'], 'sqlite');
+    assert.strictEqual(config['storage.sqliteFile'], 'runtime.sqlite');
     assert.match(fs.readFileSync(filePath, 'utf8'), /# keep this comment/);
+  } finally {
+    fs.rmSync(temporaryDir, { recursive: true, force: true });
+  }
+}
+
+function testServerConfigTemplateUpdate() {
+  const temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-config-template-test-'));
+  const configPath = path.join(temporaryDir, 'server.conf');
+  const temporaryPath = path.join(temporaryDir, 'server.conf.tmp');
+  const template = [
+    '[web]',
+    'host = 0.0.0.0',
+    'port = 8585',
+    '',
+    '[admin]',
+    '# Keep admin on loopback.',
+    'host = 127.0.0.1',
+    'port = 8584',
+    'enabled = true',
+    '',
+  ].join('\n');
+  try {
+    let result = ensureServerConfigFromTemplateWithTemp(configPath, temporaryPath, fs, path, template);
+    assert.strictEqual(result.created, true);
+    assert.strictEqual(fs.existsSync(temporaryPath), false);
+    assert.strictEqual(loadServerConfig(configPath, fs, path)['admin.port'], '8584');
+
+    fs.writeFileSync(configPath, [
+      '[web]',
+      'port = 9000',
+      '',
+      '[admin]',
+      'enabled = false',
+      '',
+    ].join('\n'));
+    result = ensureServerConfigFromTemplateWithTemp(configPath, temporaryPath, fs, path, template);
+    const config = loadServerConfig(configPath, fs, path);
+    assert.strictEqual(result.updated, true);
+    assert.deepStrictEqual(result.added, ['web.host', 'admin.host', 'admin.port']);
+    assert.strictEqual(config['web.port'], '9000');
+    assert.strictEqual(config['admin.enabled'], 'false');
+    assert.strictEqual(config['admin.host'], '127.0.0.1');
+    assert.strictEqual(config['admin.port'], '8584');
+    assert.match(fs.readFileSync(configPath, 'utf8'), /# Keep admin on loopback./);
+    assert.strictEqual((fs.readFileSync(configPath, 'utf8').match(/^\[admin\]$/gm) || []).length, 1);
+    assert.strictEqual(fs.existsSync(temporaryPath), false);
+    assert.match(DEFAULT_SERVER_CONFIG_TEMPLATE, /\[storage\]/);
   } finally {
     fs.rmSync(temporaryDir, { recursive: true, force: true });
   }
@@ -298,6 +374,27 @@ function geoRecord(anonymizedIp, countryCode, country, city, source = 'ipwhois')
   };
 }
 
+function seedGeoRecords(sqliteFile, records) {
+  const database = openSqliteDatabase({ filePath: sqliteFile, fs, path });
+  const insert = database.db.prepare(`
+    INSERT INTO geo_cache (anonymized_ip, country_code, country, city, looked_up_at, source)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  database.transaction(() => {
+    for (const record of records) {
+      insert.run(
+        record.anonymizedIp,
+        record.countryCode,
+        record.country,
+        record.city,
+        record.lookedUpAt,
+        record.source,
+      );
+    }
+  });
+  database.close();
+}
+
 function testStorageMigration() {
   const temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-storage-test-'));
   const sqliteFile = path.join(temporaryDir, 'runtime.sqlite');
@@ -305,38 +402,26 @@ function testStorageMigration() {
   const lastHeardPath = path.join(temporaryDir, 'last-heard.json');
   const geoCachePath = path.join(temporaryDir, 'geo-cache.json');
   const now = Date.now();
-  const logger = {
-    info: () => {},
-    warn: () => {},
-  };
+  const logger = { info: () => {}, warn: () => {} };
 
   try {
     fs.writeFileSync(historyPath, JSON.stringify([
       { at: now - 2000, count: 2 },
       { at: now - 1000, count: 3 },
     ]));
-    fs.writeFileSync(lastHeardPath, JSON.stringify({
-      alpha: now - 5000,
-    }));
+    fs.writeFileSync(lastHeardPath, JSON.stringify({ alpha: now - 5000 }));
     fs.writeFileSync(geoCachePath, JSON.stringify({
-      '203.0.114.0': {
-        anonymizedIp: '203.0.114.0',
-        countryCode: 'PE',
-        country: 'Peru',
-        city: 'Cusco',
-        lookedUpAt: now - 4000,
-        source: 'ipwhois',
-      },
+      '203.0.114.0': geoRecord('203.0.114.0', 'PE', 'Peru', 'Cusco'),
     }));
 
-    migrateStorage({
-      dataDir: temporaryDir,
-      fs,
-      logger,
-      path,
-      sqliteFile,
-      target: 'sqlite',
-    });
+    const result = migrateStorage({ dataDir: temporaryDir, fs, logger, path, sqliteFile });
+    assert.strictEqual(result.userHistory, 2);
+    assert.strictEqual(result.lastHeard, 1);
+    assert.strictEqual(result.geoCache, 1);
+    assert.deepStrictEqual(findLegacyJsonFiles({ dataDir: temporaryDir, fs, path }), []);
+    assert.strictEqual(fs.existsSync(path.join(result.backupDir, 'user-history.json')), true);
+    assert.strictEqual(fs.existsSync(path.join(result.backupDir, 'last-heard.json')), true);
+    assert.strictEqual(fs.existsSync(path.join(result.backupDir, 'geo-cache.json')), true);
 
     let database = openSqliteDatabase({ filePath: sqliteFile, fs, path });
     assert.strictEqual(database.db.prepare('SELECT COUNT(*) AS count FROM user_history').get().count, 2);
@@ -348,68 +433,9 @@ function testStorageMigration() {
       database.db.prepare('SELECT city FROM geo_cache WHERE anonymized_ip = ?').get('203.0.114.0').city,
       'Cusco',
     );
-    assert.strictEqual(
-      database.db.prepare('SELECT country_code FROM geo_cache WHERE anonymized_ip = ?').get('203.0.114.0').country_code,
-      'PE',
-    );
-    database.db.prepare('INSERT INTO user_history (at, count) VALUES (?, ?)').run(now, 4);
-    database.db.prepare('INSERT INTO last_heard (stream_name, last_heard_at) VALUES (?, ?)').run('beta', now - 3000);
-    database.db.prepare(`
-      INSERT INTO geo_cache (anonymized_ip, country_code, country, city, looked_up_at, source)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run('2001:4860:4860::', 'US', 'United States', 'Mountain View', now - 2000, 'ipwhois');
     database.close();
 
-    fs.writeFileSync(historyPath, JSON.stringify([
-      { at: now - 2000, count: 5 },
-    ]));
-    fs.writeFileSync(lastHeardPath, JSON.stringify({
-      alpha: now - 6000,
-      gamma: now - 1000,
-    }));
-    fs.writeFileSync(geoCachePath, JSON.stringify({
-      '203.0.114.0': {
-        anonymizedIp: '203.0.114.0',
-        countryCode: 'PE',
-        country: 'Peru',
-        city: 'Lima',
-        lookedUpAt: now - 8000,
-        source: 'ipwhois',
-      },
-    }));
-    migrateStorage({
-      dataDir: temporaryDir,
-      fs,
-      logger,
-      path,
-      sqliteFile,
-      target: 'json',
-    });
-
-    assert.deepStrictEqual(JSON.parse(fs.readFileSync(historyPath, 'utf8')), [
-      { at: now - 2000, count: 5 },
-      { at: now - 1000, count: 3 },
-      { at: now, count: 4 },
-    ]);
-    assert.deepStrictEqual(JSON.parse(fs.readFileSync(lastHeardPath, 'utf8')), {
-      alpha: now - 5000,
-      gamma: now - 1000,
-      beta: now - 3000,
-    });
-    const migratedGeo = JSON.parse(fs.readFileSync(geoCachePath, 'utf8'));
-    assert.strictEqual(migratedGeo['203.0.114.0'].countryCode, 'PE');
-    assert.strictEqual(migratedGeo['203.0.114.0'].city, 'Cusco');
-    assert.strictEqual(migratedGeo['2001:4860:4860::'].countryCode, 'US');
-    assert.strictEqual(migratedGeo['2001:4860:4860::'].city, 'Mountain View');
-
-    const storage = createStorage({
-      backend: 'sqlite',
-      dataDir: temporaryDir,
-      fs,
-      logger,
-      path,
-      sqliteFile,
-    });
+    const storage = createStorage({ dataDir: temporaryDir, fs, logger, path, sqliteFile });
     const history = storage.createUserHistory();
     const lastHeard = storage.createLastHeardStore();
     const geoCache = storage.createGeoCache();
@@ -419,10 +445,8 @@ function testStorageMigration() {
     lastHeard.record('alpha', now);
     assert.strictEqual(lastHeard.flush(), true);
     history.record(7, now + 1000);
-    const recentHistory = history.snapshot(now);
-    assert.strictEqual(recentHistory[recentHistory.length - 1].count, 7);
+    assert.strictEqual(history.snapshot(now).at(-1).count, 7);
     assert.strictEqual(geoCache.get('203.0.114.0').countryCode, 'PE');
-    assert.strictEqual(geoCache.get('203.0.114.0').country, 'Peru');
     storage.close();
 
     database = openSqliteDatabase({ filePath: sqliteFile, fs, path });
@@ -431,12 +455,10 @@ function testStorageMigration() {
       now,
     );
     database.close();
-
   } finally {
     fs.rmSync(temporaryDir, { recursive: true, force: true });
   }
 }
-
 async function testGeoPrivacyAndCache() {
   assert.deepStrictEqual(classifyAddress('::ffff:192.168.1.45'), {
     anonymized: '192.168.1.45',
@@ -540,10 +562,13 @@ async function testConfigEnabledStartup() {
     'enabled = false',
     '',
     '[storage]',
-    'backend = sqlite',
     'sqlite_file = runtime.sqlite',
     '',
   ].join('\n'));
+  ensureServerConfigFromTemplateWithTemp(serverConfigPath, path.join(temporaryDir, 'server.conf.tmp'), fs, path);
+
+  fs.mkdirSync(dataDir, { recursive: true });
+  await createTestAdministrator(path.join(dataDir, 'runtime.sqlite'));
 
   const child = childProcess.spawn(process.execPath, [
     'server.js',
@@ -552,6 +577,7 @@ async function testConfigEnabledStartup() {
     '--data-dir', dataDir,
   ], {
     cwd: projectDir,
+    env: { ...process.env, ...TEST_AUTH_ENV },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
@@ -559,6 +585,8 @@ async function testConfigEnabledStartup() {
   child.stderr.on('data', (chunk) => { output += chunk; });
 
   try {
+    await waitFor(() => request(adminPort, '/api/auth/status'));
+    await loginTestAdmin(adminPort);
     const state = await waitFor(() => requestJson(adminPort, '/api/state'));
     assert.strictEqual(state.streams[0].name, 'config-test');
     await waitFor(() => output.includes('webAdminEnabled=true') && output.includes('storageBackend=sqlite'));
@@ -577,14 +605,75 @@ async function testConfigEnabledStartup() {
   }
 }
 
+async function createTestAdministrator(sqliteFile) {
+  const database = openSqliteDatabase({ filePath: sqliteFile, fs, path });
+  try {
+    await upsertAdministrator({
+      database,
+      password: "integration password is sufficiently long",
+      passwordHasher: createPasswordHasher({ N: 1024, maxmem: 16 * 1024 * 1024 }),
+      username: "admin",
+    });
+  } finally {
+    database.close();
+  }
+}
+
+async function loginTestAdmin(port, forwardedHttps = false) {
+  const proxyHeaders = forwardedHttps ? {
+    'x-forwarded-for': '198.51.100.25',
+    'x-forwarded-host': 'admin.example.test',
+    'x-forwarded-proto': 'https',
+  } : {};
+  const statusResponse = await request(port, "/api/auth/status", { headers: proxyHeaders });
+  const status = JSON.parse(statusResponse.body);
+  const loginCookie = firstSetCookie(statusResponse.headers["set-cookie"]);
+  const loginResponse = await request(port, "/api/auth/login", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      cookie: loginCookie,
+      "x-csrf-token": status.loginCsrfToken,
+      ...proxyHeaders,
+    },
+    body: JSON.stringify({
+      username: "admin",
+      password: "integration password is sufficiently long",
+    }),
+  });
+  assert.strictEqual(loginResponse.statusCode, 200, loginResponse.body);
+  if (forwardedHttps) {
+    assert.match(String(loginResponse.headers["set-cookie"]), /Secure/);
+  }
+  const body = JSON.parse(loginResponse.body);
+  adminSessions.set(port, {
+    cookie: firstSetCookie(loginResponse.headers["set-cookie"]),
+    csrfToken: body.csrfToken,
+  });
+}
+
+function firstSetCookie(value) {
+  const header = Array.isArray(value) ? value[0] : value;
+  return String(header || "").split(";")[0];
+}
+
 function request(port, pathname, options = {}) {
   return new Promise((resolve, reject) => {
+    const method = options.method || 'GET';
+    const auth = adminSessions.get(port);
+    const headers = {
+      ...(auth ? { cookie: auth.cookie } : {}),
+      ...(options.headers || {}),
+    };
+    if (auth && !options.skipCsrf && !['GET', 'HEAD'].includes(method.toUpperCase())) {
+      headers['x-csrf-token'] = auth.csrfToken;
+    }
     const req = http.request({
       host: '127.0.0.1',
       port,
       path: pathname,
-      method: options.method || 'GET',
-      headers: options.headers || {},
+      method,
+      headers,
     }, (res) => {
       const chunks = [];
       res.on('data', (chunk) => chunks.push(chunk));

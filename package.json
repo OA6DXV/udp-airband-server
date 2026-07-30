@@ -1,16 +1,21 @@
 {
   "name": "udp-airband-server",
-  "version": "1.7",
+  "version": "1.8",
   "private": false,
   "description": "UDP float PCM to browser audio bridge for RTLSDR-Airband.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "admin:setup": "node tools/create-admin.js",
     "check": "node --check server.js",
-    "test": "node test/web-admin.integration.js"
+    "test": "node test/admin-secrets.js && node test/admin-users.js && node test/admin-auth.security.js && node test/web-admin.integration.js"
   },
   "license": "MIT",
   "engines": {
-    "node": ">=12"
+    "node": ">=18.20"
+  },
+  "dependencies": {
+    "altcha": "^3.2.1",
+    "altcha-lib": "^2.3.2"
   }
 }

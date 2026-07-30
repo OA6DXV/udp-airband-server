@@ -24,6 +24,7 @@ const versionEl = document.getElementById('version');
 const languageSelect = document.getElementById('languageSelect');
 const chart = document.getElementById('historyChart');
 const chartEmpty = document.getElementById('chartEmpty');
+const logoutButton = document.getElementById('logoutButton');
 
 const ONLINE_REFRESH_MS = 15000;
 const RECOVERY_REFRESH_MS = 1000;
@@ -101,6 +102,7 @@ const translations = {
     statusRestarting: 'Server restarting',
     statusOffline: 'Server offline',
     requestFailed: 'Request failed ({status}).',
+    logout: 'Logout',
   },
   es: {
     webAdmin: 'Administración web',
@@ -172,6 +174,7 @@ const translations = {
     statusRestarting: 'Servidor reiniciando',
     statusOffline: 'Servidor fuera de línea',
     requestFailed: 'La solicitud falló ({status}).',
+    logout: 'Cerrar sesión',
   },
 };
 
@@ -190,6 +193,7 @@ let postSaveNotice = null;
 let reloadPending = false;
 let previousAppliedStreams = null;
 let pendingRemoveRow = null;
+let csrfToken = '';
 let language = localStorage.getItem(LANGUAGE_STORAGE_KEY);
 if (!translations[language]) language = 'en';
 
@@ -214,6 +218,7 @@ confirmReloadButton.addEventListener('click', reloadStreams);
 confirmRemoveStreamButton.addEventListener('click', removePendingStream);
 restartButton.addEventListener('click', openRestartDialog);
 confirmRestartButton.addEventListener('click', requestRestart);
+logoutButton.addEventListener('click', logout);
 languageSelect.addEventListener('change', () => {
   language = languageSelect.value;
   localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
@@ -223,7 +228,29 @@ window.addEventListener('resize', () => renderChart(lastUserHistory));
 
 languageSelect.value = language;
 applyLanguage();
-loadState(true);
+bootstrap();
+
+async function bootstrap() {
+  try {
+    const status = await request('/api/auth/status');
+    if (!status.authenticated) {
+      window.location.replace('/');
+      return;
+    }
+    csrfToken = status.csrfToken || '';
+    loadState(true);
+  } catch {
+    window.location.replace('/');
+  }
+}
+
+async function logout() {
+  try {
+    await request('/api/auth/logout', { method: 'POST' });
+  } finally {
+    window.location.replace('/');
+  }
+}
 
 async function loadState(renderStreams) {
   if (stateRequestInFlight) return false;
@@ -472,16 +499,25 @@ function setServerState(nextState) {
   updateControls();
 }
 
-async function request(url, options) {
+async function request(url, options = {}) {
+  const method = String(options.method || 'GET').toUpperCase();
+  const headers = { ...(options.headers || {}) };
+  if (!['GET', 'HEAD'].includes(method) && csrfToken) headers['x-csrf-token'] = csrfToken;
   const response = await fetch(url, {
-    cache: 'no-store',
     ...options,
+    cache: 'no-store',
+    credentials: 'same-origin',
+    headers,
   });
   let body;
   try {
     body = await response.json();
   } catch {
     body = {};
+  }
+  if (response.status === 401) {
+    window.location.replace('/');
+    throw new Error('Authentication required.');
   }
   if (!response.ok) throw new Error(body.error || translate('requestFailed', { status: response.status }));
   return body;

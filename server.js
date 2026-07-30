@@ -10,9 +10,11 @@ const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 
+const { ensureAdminSecrets } = require('./lib/admin-secrets');
+const { createProxyTrust, resolveRequestContext } = require('./lib/proxy-trust');
 const { normalizeClientId } = require('./lib/clients');
 const {
-  ensureServerConfigDefaults,
+  ensureServerConfigFromTemplateWithTemp,
   getSetting,
   loadServerConfig,
   parseArgs,
@@ -37,13 +39,13 @@ const { createGeoService } = require('./lib/geo-service');
 const { aggregateGeoStats } = require('./lib/geo-stats');
 const { createNativeMultiAac } = require('./lib/native-multi-aac');
 const { detectRuntimeMode } = require('./lib/runtime');
-const { createStorage, normalizeStorageBackend } = require('./lib/storage');
-const { migrateStorage } = require('./lib/storage-migration');
-const { createWebAdmin } = require('./lib/web-admin');
+const { createStorage } = require('./lib/storage');
+const { archiveLegacyJsonFiles, inspectLegacyJsonRuntimeStorage, migrateStorage, verifySqliteIntegrity } = require('./lib/storage-migration');
+const { createWebAdmin } = require('./lib/web-admin-secure');
 
 const MAX_SOCKET_BUFFER_BYTES = 1024 * 1024;
 const MAX_OPUS_STDIN_BUFFER_BYTES = 512 * 1024;
-const SOFTWARE_VERSION = '1.7';
+const SOFTWARE_VERSION = '1.8';
 const COMPRESSED_CODECS = new Set(['adpcm', 'opus', 'aac', 'hls']);
 const serverInstanceId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
 
@@ -52,43 +54,20 @@ if (args.help) {
   printHelp();
   process.exit(0);
 }
+if (hasAdministratorCommand(args)) {
+  const result = spawnSync(process.execPath, [path.join(__dirname, 'tools', 'manage-admin.js'), ...process.argv.slice(2)], { stdio: 'inherit' });
+  process.exit(result.status === null ? 1 : result.status);
+}
 const serverConfigPath = args.serverConfig || args.serverConf || 'server.conf';
-const serverConfigExists = fs.existsSync(path.resolve(serverConfigPath));
-const serverConfigUpdated = ensureServerConfigDefaults(serverConfigPath, [
-  {
-    name: 'admin',
-    comments: ['Separate Web Admin listener. Keep disabled unless administrative access is required.'],
-    keys: [
-      { key: 'host', value: '127.0.0.1' },
-      { key: 'port', value: '8584' },
-      { key: 'enabled', value: 'true' },
-    ],
-  },
-  {
-    name: 'storage',
-    comments: ['Runtime persistence backend. Supported values: json and sqlite.'],
-    keys: [
-      { key: 'backend', value: 'json' },
-      { key: 'sqlite_file', value: 'localdb.sqlite' },
-    ],
-  },
-  {
-    name: 'geo',
-    comments: [
-      'Optional server-side IP geolocation. Public addresses are anonymized before storage.',
-      'Private/local addresses never leave the server.',
-    ],
-    keys: [
-      { key: 'enabled', value: 'true' },
-      { key: 'provider', value: 'ipwhois' },
-      { key: 'key', value: '' },
-      { key: 'cache_ttl_days', value: '30' },
-      { key: 'timeout_ms', value: '1500' },
-      { key: 'ipv4_anonymize', value: '/24' },
-      { key: 'ipv6_anonymize', value: '/48' },
-    ],
-  },
-], fs, path);
+const serverConfigResolvedPath = path.resolve(serverConfigPath);
+const serverConfigExists = fs.existsSync(serverConfigResolvedPath);
+const serverConfigTemporaryPath = path.resolve(path.dirname(serverConfigResolvedPath), 'server.conf.tmp');
+const serverConfigUpdate = ensureServerConfigFromTemplateWithTemp(
+  serverConfigPath,
+  serverConfigTemporaryPath,
+  fs,
+  path,
+);
 const serverConfig = loadServerConfig(serverConfigPath, fs, path);
 const defaultUdpHost = args.udpHost || getSetting(serverConfig, 'udp.host', '0.0.0.0');
 const httpHost = args.httpHost || getSetting(serverConfig, 'web.host', '0.0.0.0');
@@ -106,9 +85,13 @@ const webAdminPort = Number(webAdminCliFlag
   : adminConfigPort);
 const webAdminHost = String(args.webadminHost || adminConfigHost);
 const webAdminConfigOverridden = Boolean(webAdminCliFlag || args.webadminHost !== undefined);
+const adminSessionTtlSeconds = getSetting(serverConfig, 'admin.sessionTtlSeconds', 8 * 60 * 60);
+const adminSessionIdleSeconds = getSetting(serverConfig, 'admin.sessionIdleSeconds', 30 * 60);
+const adminSecure = parseBoolean(args.webadminSecure !== undefined ? args.webadminSecure : getSetting(serverConfig, 'admin.secure', false));
+const adminTlsKeyPath = args.webadminKey || getSetting(serverConfig, 'admin.key', '');
+const adminTlsCertPath = args.webadminCert || getSetting(serverConfig, 'admin.cert', '');
 const configPath = args.config || getSetting(serverConfig, 'streams.file', 'streams.json');
 const dataDir = path.resolve(args.dataDir || path.join(__dirname, 'data'));
-const storageBackendSetting = args.storageBackend || getSetting(serverConfig, 'storage.backend', 'json');
 const sqliteFileSetting = String(
   args.sqliteFile || getSetting(serverConfig, 'storage.sqliteFile', '') || 'localdb.sqlite',
 ).trim();
@@ -139,61 +122,89 @@ const logTimestamps = parseBoolean(args.logTimestamps !== undefined ? args.logTi
 const logColors = parseBoolean(args.logColors !== undefined ? args.logColors : (debugEnabled ? true : getSetting(serverConfig, 'logging.colors', false)));
 const logger = createLogger({ debug: debugEnabled, level: logLevel, timestamps: logTimestamps, colors: logColors });
 const runtimeMode = detectRuntimeMode();
-let storageBackend;
-try {
-  storageBackend = normalizeStorageBackend(storageBackendSetting);
-} catch (err) {
-  fatal(err.message);
+if (args.generateCert) {
+  try {
+    generateSelfSignedCertificate({
+      adminTlsCertPath,
+      adminTlsKeyPath,
+      serverConfigPath,
+      tlsCertPath,
+      tlsKeyPath,
+    });
+    process.exit(0);
+  } catch (err) {
+    fatal(`Certificate generation failed: ${err.message}`);
+  }
+}
+if (args.storageBackend !== undefined) {
+  fatal('--storage-backend was removed in 1.8 because runtime persistence now uses SQLite exclusively.');
 }
 if (args.migrate !== undefined) {
-  const migrationTarget = args.migrate === true ? getOppositeStorageBackend(storageBackend) : args.migrate;
   try {
-    const normalizedMigrationTarget = normalizeStorageBackend(migrationTarget);
-    const migrationSource = normalizedMigrationTarget === 'sqlite' ? 'json' : 'sqlite';
-    confirmStorageMigration({
-      source: migrationSource,
-      target: normalizedMigrationTarget,
-      serverConfigPath,
-      sqliteFile,
-    });
+    if (args.migrate !== true && String(args.migrate).trim().toLowerCase() !== 'sqlite') {
+      throw new Error('--migrate only supports JSON to SQLite. Use --migrate or --migrate sqlite.');
+    }
+    confirmStorageMigration({ serverConfigPath, sqliteFile });
     const result = migrateStorage({
       dataDir,
       fs,
       logger,
       path,
       sqliteFile,
-      target: normalizedMigrationTarget,
-    });
-    setServerConfigSetting(serverConfigPath, 'storage', 'backend', normalizedMigrationTarget, fs, path);
-    logger.warn('storage_backend_config_updated', {
-      serverConfig: serverConfigPath,
-      storageBackend: normalizedMigrationTarget,
     });
     logger.info('storage_migration_summary', {
-      from: migrationSource,
-      to: normalizedMigrationTarget,
+      from: 'json',
+      to: 'sqlite',
       userHistory: result.userHistory,
       lastHeard: result.lastHeard,
       geoCache: result.geoCache,
+      jsonBackup: result.backupDir,
     });
     process.exit(0);
   } catch (err) {
     fatal(`Storage migration failed: ${err.message}`);
   }
 }
-warnWhenJsonStorageIsActive();
+const legacyStorageInspection = inspectLegacyJsonRuntimeStorage({ dataDir, fs, path, sqliteFile });
 let storage;
 try {
   storage = createStorage({
-    backend: storageBackend,
     dataDir,
     fs,
     logger,
     path,
     sqliteFile,
   });
+  verifySqliteIntegrity(storage.database);
 } catch (err) {
   fatal(err.message);
+}
+handleLegacyJsonRuntimeStorage(legacyStorageInspection);
+const adminDatabase = webAdminEnabled ? storage.database : null;
+let createAdminAuth = null;
+let loadAdminAuthConfig = null;
+let adminAuthConfig = null;
+let adminProxyTrust = null;
+if (webAdminEnabled) {
+  try {
+    ({ createAdminAuth, loadAdminAuthConfig } = require('./lib/admin-auth'));
+    const adminSecrets = ensureAdminSecrets({ crypto, dataDir, env: process.env, fs, path });
+    if (adminSecrets.generated) {
+      logGeneratedAdminSecrets(adminSecrets.filePath);
+    }
+    adminAuthConfig = loadAdminAuthConfig({
+      ...adminSecrets.env,
+      ADMIN_SESSION_TTL_SECONDS: process.env.ADMIN_SESSION_TTL_SECONDS || String(adminSessionTtlSeconds),
+      ADMIN_SESSION_IDLE_SECONDS: process.env.ADMIN_SESSION_IDLE_SECONDS || String(adminSessionIdleSeconds),
+      ADMIN_ALTCHA_ENABLED: adminSecure ? 'true' : 'false',
+    });
+    adminProxyTrust = createProxyTrust(adminSecrets.env.ADMIN_TRUSTED_PROXIES || '127.0.0.1,::1');
+  } catch (err) {
+    if (err && err.code === 'MODULE_NOT_FOUND' && String(err.message || '').includes('altcha-lib')) {
+      fatal('Web Admin requires dependencies that are not installed. Run npm install in the project directory, then start the server again.');
+    }
+    fatal(`Web Admin authentication configuration is unsafe: ${err.message}`);
+  }
 }
 const userHistory = storage.createUserHistory();
 const geoCache = storage.createGeoCache();
@@ -251,6 +262,12 @@ const multiJs = fs.readFileSync(path.join(publicDir, 'assets', 'multi.js'));
 const faviconIco = fs.readFileSync(path.join(publicDir, 'assets', 'favicon.ico'));
 const adminAssets = webAdminEnabled ? {
   html: fs.readFileSync(path.join(publicDir, 'admin', 'index.html')),
+  loginHtml: fs.readFileSync(path.join(publicDir, 'admin', 'login.html')),
+  loginJs: fs.readFileSync(path.join(publicDir, 'admin', 'login.js')),
+  loginCss: fs.readFileSync(path.join(publicDir, 'admin', 'login.css')),
+  altchaJs: fs.readFileSync(path.join(publicDir, 'node_modules', 'altcha', 'dist', 'external', 'altcha.js')),
+  altchaCss: fs.readFileSync(path.join(publicDir, 'node_modules', 'altcha', 'dist', 'external', 'altcha.css')),
+  altchaPbkdf2Worker: fs.readFileSync(path.join(publicDir, 'node_modules', 'altcha', 'dist', 'workers', 'pbkdf2.js')),
   usersHtml: fs.readFileSync(path.join(publicDir, 'admin', 'users.html'), 'utf8')
     .replace('__SOFTWARE_VERSION__', SOFTWARE_VERSION),
   usersJs: fs.readFileSync(path.join(publicDir, 'admin', 'users.js')),
@@ -260,6 +277,7 @@ const adminAssets = webAdminEnabled ? {
 } : null;
 const tlsOptions = sslRequested ? loadTlsOptions() : null;
 const tlsEnabled = Boolean(tlsOptions);
+const adminTlsOptions = webAdminEnabled && adminSecure ? loadAdminTlsOptions() : null;
 const hlsRoot = compressedEnabled ? fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-hls-')) : '';
 const compressed = createCompressedManager({
   aacBitrate,
@@ -284,11 +302,16 @@ const compressed = createCompressedManager({
 });
 const compressedAvailable = compressedEnabled && compressed.isCodecAvailable(compressedCodec);
 const opusAvailable = compressedEnabled && compressed.ffmpegAvailable;
-if (!serverConfigExists) {
+if (serverConfigUpdate.created) {
+  logGeneratedServerConfig(serverConfigPath);
+} else if (!serverConfigExists) {
   logger.warn('server_config_missing', { path: serverConfigPath, fallback: 'built-in defaults' });
 }
-if (serverConfigUpdated) {
-  logger.info('server_config_updated', { path: serverConfigPath, added: 'missing defaults' });
+if (serverConfigUpdate.updated) {
+  logUpdatedServerConfig(serverConfigPath, serverConfigUpdate.added);
+}
+if (serverConfigUpdate.created || serverConfigUpdate.updated) {
+  process.exit(0);
 }
 
 const streamsConfigExists = fs.existsSync(path.resolve(configPath));
@@ -326,19 +349,8 @@ const webProtocol = tlsEnabled ? 'https' : 'http';
 const webServer = tlsEnabled
   ? https.createServer(tlsOptions, handleHttpRequest)
   : http.createServer(handleHttpRequest);
-const webAdmin = webAdminEnabled ? createWebAdmin({
-  assets: adminAssets,
-  getGeoStats: () => aggregateGeoStats(geoCache.entries()),
-  getState: getWebAdminState,
-  host: webAdminHost,
-  http,
-  logger,
-  onReloadStreams: reloadStreamsFromDisk,
-  onReplaceStreams: replaceStreamsFromAdmin,
-  onRestart: () => process.kill(process.pid, 'SIGTERM'),
-  port: webAdminPort,
-  softwareVersion: SOFTWARE_VERSION,
-}) : null;
+let webAdmin = null;
+let adminAuth = null;
 
 attachUpgradeHandler(webServer);
 attachShutdownHandlers();
@@ -578,6 +590,7 @@ function attachShutdownHandlers() {
     userHistory.record(clientLifecycleLog.activeCount());
     userHistory.flush();
     geoCache.flush();
+    if (adminAuth) adminAuth.close();
     storage.close();
     process.exit(signal === 'SIGINT' ? 130 : 143);
   }
@@ -668,7 +681,33 @@ function createClientLifecycleLog(activityLogger, onCountChanged, onClientConnec
   };
 }
 
-function startWebServers() {
+async function startWebServers() {
+  if (webAdminEnabled) {
+    adminAuth = await createAdminAuth({
+      config: adminAuthConfig,
+      database: adminDatabase,
+      logger,
+    });
+    warnIfWebAdminNeedsSetup();
+    webAdmin = createWebAdmin({
+      assets: adminAssets,
+      auth: adminAuth,
+      getAdminSetupRequired: () => !hasWebAdminUser(),
+      getGeoStats: () => aggregateGeoStats(geoCache.entries()),
+      getState: getWebAdminState,
+      getStreamConfigSnapshot: () => ({ streams: streams.map(streamFileEntry) }),
+      host: webAdminHost,
+      serverModule: adminTlsOptions ? https : http,
+      tlsOptions: adminTlsOptions,
+      logger,
+      onReloadStreams: reloadStreamsFromDisk,
+      onReplaceStreams: replaceStreamsFromAdmin,
+      onRestart: () => process.kill(process.pid, 'SIGTERM'),
+      port: webAdminPort,
+      resolveRequest: (req) => resolveRequestContext(req, adminProxyTrust),
+      softwareVersion: SOFTWARE_VERSION,
+    });
+  }
   if (debugEnabled) {
     logger.debug('debug_enabled', { flag: '-D' });
   }
@@ -700,7 +739,10 @@ function startWebServers() {
           port: webAdminPort,
         });
       }
-      logger.plain('info', `Web admin: ${formatUrl('http', webAdminHost, webAdminPort)}/`);
+      logger.plain('info', `Web admin: ${formatUrl(adminTlsOptions ? 'https' : 'http', webAdminHost, webAdminPort)}/`);
+      if (!adminSecure) {
+        warnWebAdminInsecure();
+      }
       if (!isLoopbackHost(webAdminHost)) {
         logger.warn('webadmin_exposed', { host: webAdminHost, port: webAdminPort, recommendation: 'bind to 127.0.0.1 and use an authenticated proxy or SSH tunnel' });
       }
@@ -716,8 +758,8 @@ function startWebServers() {
       webAdminHost: webAdminEnabled ? webAdminHost : undefined,
       webAdminPort: webAdminEnabled ? webAdminPort : undefined,
       runtimeMode,
-      storageBackend,
-      storagePath: storageBackend === 'sqlite' ? sqliteFile : dataDir,
+      storageBackend: 'sqlite',
+      storagePath: sqliteFile,
       geoEnabled,
       geoProvider: geoEnabled ? geoProvider : undefined,
       geoKeyConfigured: Boolean(geoKey),
@@ -771,6 +813,7 @@ async function applyStreamReplacement(payload) {
     throw validationError;
   }
 
+  const changeScope = canUpdateStreamsInPlace(streams, candidateStreams) ? 'label' : 'structural';
   const resolvedConfigPath = path.resolve(configPath);
   const temporaryConfigPath = `${resolvedConfigPath}.${process.pid}.tmp`;
   const serializedConfig = `${JSON.stringify({ streams: candidateStreams.map(streamFileEntry) }, null, 2)}\n`;
@@ -807,6 +850,7 @@ async function applyStreamReplacement(payload) {
     });
     return {
       ok: true,
+      changeScope,
       message: `${streams.length} stream${streams.length === 1 ? '' : 's'} updated without interrupting listeners.`,
       streams: streams.map(adminStreamState),
     };
@@ -855,6 +899,7 @@ async function applyStreamReplacement(payload) {
   });
   return {
     ok: true,
+    changeScope,
     message: `${streams.length} stream${streams.length === 1 ? '' : 's'} applied without restarting the server.`,
     streams: streams.map(adminStreamState),
   };
@@ -1113,6 +1158,126 @@ function sendBadRequest(res) {
   res.end('bad request\n');
 }
 
+function loadAdminTlsOptions() {
+  if (!adminTlsKeyPath || !adminTlsCertPath) {
+    warnWebAdminSecureWithoutTls('certificate paths are not configured', {
+      key: adminTlsKeyPath || 'missing',
+      cert: adminTlsCertPath || 'missing',
+    });
+    return null;
+  }
+
+  const resolvedKey = path.resolve(adminTlsKeyPath);
+  const resolvedCert = path.resolve(adminTlsCertPath);
+  if (!fs.existsSync(resolvedKey) || !fs.existsSync(resolvedCert)) {
+    warnWebAdminSecureWithoutTls('certificate files were not found', {
+      key: resolvedKey,
+      cert: resolvedCert,
+    });
+    return null;
+  }
+
+  try {
+    return {
+      key: fs.readFileSync(resolvedKey),
+      cert: fs.readFileSync(resolvedCert),
+    };
+  } catch (err) {
+    warnWebAdminSecureWithoutTls(`certificate files could not be read: ${err.message}`, {
+      key: resolvedKey,
+      cert: resolvedCert,
+    });
+    return null;
+  }
+}
+
+function generateSelfSignedCertificate({ adminTlsCertPath, adminTlsKeyPath, serverConfigPath, tlsCertPath, tlsKeyPath }) {
+  const openssl = spawnSync('openssl', ['version'], { encoding: 'utf8' });
+  if (openssl.error || openssl.status !== 0) {
+    throw new Error('openssl is required. Install it first, for example: sudo apt install openssl');
+  }
+
+  const certDir = path.resolve('certs');
+  const keyPath = path.resolve(certDir, 'admin.key');
+  const certPath = path.resolve(certDir, 'admin.crt');
+  fs.mkdirSync(certDir, { recursive: true });
+
+  if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
+    const result = spawnSync('openssl', [
+      'req',
+      '-x509',
+      '-newkey',
+      'rsa:4096',
+      '-nodes',
+      '-keyout',
+      keyPath,
+      '-out',
+      certPath,
+      '-days',
+      '365',
+      '-subj',
+      '/CN=udp-airband-admin',
+    ], { encoding: 'utf8' });
+    if (result.error || result.status !== 0) {
+      throw new Error((result.stderr || result.error && result.error.message || 'openssl failed').trim());
+    }
+  }
+
+  if (!String(adminTlsKeyPath || '').trim()) {
+    setServerConfigSetting(serverConfigPath, 'admin', 'key', path.relative(process.cwd(), keyPath), fs, path);
+  }
+  if (!String(adminTlsCertPath || '').trim()) {
+    setServerConfigSetting(serverConfigPath, 'admin', 'cert', path.relative(process.cwd(), certPath), fs, path);
+  }
+  setServerConfigSetting(serverConfigPath, 'admin', 'secure', 'true', fs, path);
+
+  logger.plain('info', [
+    'Generated Web Admin self-signed certificate:',
+    `  Key:  ${keyPath}`,
+    `  Cert: ${certPath}`,
+    '  Updated [admin].secure, [admin].key, and [admin].cert in server.conf when needed.',
+  ].join('\n'));
+
+  if (shouldAskInteractiveQuestion()) {
+    const answer = askYesNo('Do you also want to enable SSL for the public stream server with this certificate? This is optional and usually unnecessary behind a reverse proxy. [y/N] ');
+    if (answer === null) {
+      logger.plain('info', 'Public stream SSL was left unchanged because no terminal answer could be read.');
+    } else if (answer) {
+      setServerConfigSetting(serverConfigPath, 'ssl', 'enabled', 'true', fs, path);
+      if (!String(tlsKeyPath || '').trim()) setServerConfigSetting(serverConfigPath, 'ssl', 'key', path.relative(process.cwd(), keyPath), fs, path);
+      if (!String(tlsCertPath || '').trim()) setServerConfigSetting(serverConfigPath, 'ssl', 'cert', path.relative(process.cwd(), certPath), fs, path);
+      logger.plain('info', 'Public stream SSL was enabled in [ssl].');
+    } else {
+      logger.plain('info', 'Public stream SSL was left unchanged. This is fine when the stream server is behind a reverse proxy.');
+    }
+  } else {
+    logger.plain('info', 'Public stream SSL was left unchanged because this terminal is not interactive.');
+  }
+}
+
+function shouldAskInteractiveQuestion() {
+  return Boolean(process.stdin && process.stdin.isTTY && process.stdout && process.stdout.isTTY);
+}
+
+function askYesNo(question) {
+  const device = process.platform === 'win32' ? 'CON' : '/dev/tty';
+  let fd;
+  try {
+    fd = fs.openSync(device, 'r+');
+    fs.writeSync(fd, question);
+    const buffer = Buffer.alloc(64);
+    const bytes = fs.readSync(fd, buffer, 0, buffer.length, null);
+    return /^y(es)?$/i.test(buffer.toString('utf8', 0, bytes).trim());
+  } catch (err) {
+    if (err && ['EAGAIN', 'EWOULDBLOCK', 'EINTR', 'ENXIO', 'ENOENT'].includes(err.code)) {
+      return null;
+    }
+    throw err;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
 function loadTlsOptions() {
   if (!tlsKeyPath || !tlsCertPath) {
     logger.warn('ssl_fallback_http', { reason: 'missing certificate path', key: tlsKeyPath || 'missing', cert: tlsCertPath || 'missing' });
@@ -1210,56 +1375,154 @@ function securityHeaders() {
   };
 }
 
+function logGeneratedServerConfig(filePath) {
+  const separator = '############################################################';
+  logger.plain('warn', [
+    separator,
+    'server.conf was missing and has been generated automatically.',
+    '  File: ' + filePath,
+    '  Source: built-in default configuration template.',
+    '  Review this file before exposing the service publicly.',
+    separator,
+  ].join('\n'));
+}
+
+function logUpdatedServerConfig(filePath, added) {
+  const separator = '############################################################';
+  logger.plain('warn', [
+    separator,
+    'server.conf was updated with missing default settings.',
+    '  File: ' + filePath,
+    '  Temporary file: server.conf.tmp was generated and removed automatically.',
+    '  Added settings: ' + (added && added.length ? added.join(', ') : 'none'),
+    '  Existing local values were preserved.',
+    '  Startup stopped because server.conf changed; review the updated configuration before starting the server again.',
+    separator,
+  ].join('\n'));
+}
+
 function fatal(message) {
   logger.error('fatal', { message });
   process.exit(1);
 }
 
-function warnWhenJsonStorageIsActive() {
-  if (storageBackend !== 'json') return;
+function hasWebAdminUser() {
+  if (!adminDatabase) return false;
+  try {
+    const row = adminDatabase.db.prepare('SELECT COUNT(*) AS count FROM admin_users WHERE enabled = 1 AND deleted_at IS NULL').get();
+    return Number(row && row.count) > 0;
+  } catch {
+    return false;
+  }
+}
+
+function warnWebAdminInsecure() {
   const separator = '############################################################';
   logger.plain('warn', [
     separator,
-    'Storage recommendation: SQLite is recommended for production.',
-    `  Current storage: JSON files in ${dataDir}`,
-    `  Recommended storage: SQLite database at ${sqliteFile}`,
-    `  Node.js version: ${process.versions.node}`,
-    `  ${getSqliteRuntimeGuidance(process.versions.node)}`,
-    '  To migrate: stop the server, then run: node server.js --migrate sqlite',
-    '  The migration keeps the old JSON files and updates [storage].backend in server.conf after confirmation.',
+    'Web Admin secure mode is disabled.',
+    '  [admin].secure = false keeps Web Admin on HTTP and disables ALTCHA challenges.',
+    '  Login rate limits remain active, but brute-force protection is reduced.',
+    '  Set [admin].secure = true to enable captcha protection.',
+    '  If [admin].key and [admin].cert are empty, Web Admin will still run on HTTP and must be placed behind an HTTPS reverse proxy for captcha to work in browsers.',
+    '  Or run node server.js --generate-cert to create self-signed certificates for direct HTTPS access.',
     separator,
   ].join('\n'));
 }
 
-function getSqliteRuntimeGuidance(version) {
-  const [major, minor] = String(version).split('.').map((part) => Number(part));
-  if (major === 18) {
-    return 'Node 18 needs npm install better-sqlite3, or upgrade to Node 22.13+ for built-in node:sqlite.';
-  }
-  if (major > 22 || (major === 22 && minor >= 13)) {
-    return 'This Node version includes node:sqlite without extra SQLite packages.';
-  }
-  if (major === 22) {
-    return 'Upgrade to Node 22.13+ for node:sqlite without flags, or run npm install better-sqlite3.';
-  }
-  return 'Run npm install better-sqlite3, or use Node 22.13+ for built-in node:sqlite.';
+function warnWebAdminSecureWithoutTls(reason, details = {}) {
+  const separator = '############################################################';
+  const lines = [
+    separator,
+    'Web Admin secure mode is enabled, but no usable TLS certificate was loaded.',
+    `  Reason: ${reason}.`,
+  ];
+  if (details.key) lines.push(`  Key: ${details.key}`);
+  if (details.cert) lines.push(`  Cert: ${details.cert}`);
+  lines.push(
+    '  The Web Admin server will continue on HTTP with ALTCHA captcha enabled.',
+    '  A reverse proxy must provide HTTPS to browsers for captcha verification to work.',
+    '  Or run node server.js --generate-cert and restart to use self-signed HTTPS directly.',
+    separator,
+  );
+  logger.plain('warn', lines.join('\n'));
 }
 
-function getOppositeStorageBackend(backend) {
-  return backend === 'json' ? 'sqlite' : 'json';
+function warnIfWebAdminNeedsSetup() {
+  if (hasWebAdminUser()) return;
+  const separator = '############################################################';
+  logger.plain('warn', [
+    separator,
+    'Web Admin is enabled but no administrator account exists yet.',
+    '  Login will not work until you create the admin user.',
+    '  Run: node server.js --createuser USER',
+    '  The interactive compatibility command npm run admin:setup is also available.',
+    '  If custom secrets are desired, configure them before creating the admin user.',
+    separator,
+  ].join('\n'));
+}
+function logGeneratedAdminSecrets(filePath) {
+  const separator = '############################################################';
+  logger.plain('warn', [
+    separator,
+    'Web Admin secrets were generated automatically on first startup.',
+    '  File: ' + filePath,
+    '  Keep this file private and include it in backups.',
+    '  These secrets protect admin sessions, CSRF tokens, and ALTCHA challenges.',
+    '  You can replace them with custom ADMIN_AUTH_SECRET and ADMIN_ALTCHA_SECRET values.',
+    '  If you want custom secrets, configure them before creating admin users or accepting real admin sessions.',
+    '  Changing secrets later invalidates existing Web Admin sessions and login challenges.',
+    separator,
+  ].join('\n'));
+}
+function handleLegacyJsonRuntimeStorage(inspection) {
+  if (!inspection || inspection.action === 'none') return;
+  const separator = '############################################################';
+  if (inspection.action === 'archive') {
+    const backupDir = archiveLegacyJsonFiles({
+      dataDir,
+      files: inspection.legacyFiles,
+      fs,
+      path,
+    });
+    logger.plain('warn', [
+      separator,
+      'Legacy JSON runtime data was detected, but SQLite is newer and passed integrity checks.',
+      '  The JSON files look like leftovers from an older migration and were archived automatically.',
+      `  Files: ${inspection.legacyFiles.join(', ')}`,
+      `  Newest SQLite file: ${inspection.newestSqliteFile || sqliteFile}`,
+      `  JSON backup: ${backupDir}`,
+      separator,
+    ].join('\n'));
+    return;
+  }
+
+  logger.plain('warn', [
+    separator,
+    'Legacy JSON runtime data was detected.',
+    '  Version 1.8 uses SQLite exclusively and will not read these JSON files during normal startup.',
+    `  Files: ${inspection.legacyFiles.join(', ')}`,
+    `  SQLite destination: ${sqliteFile}`,
+    inspection.reason === 'json_newer_than_sqlite'
+      ? `  The JSON files are newer than SQLite. Newest JSON: ${inspection.newestJsonFile}`
+      : '  No existing SQLite runtime database was found.',
+    '  Stop the server and migrate the data with: node server.js --migrate',
+    '  Migration merges the data into SQLite and preserves the JSON files in a backup directory.',
+    separator,
+  ].join('\n'));
 }
 
-function confirmStorageMigration({ source, target, serverConfigPath, sqliteFile }) {
+function confirmStorageMigration({ serverConfigPath, sqliteFile }) {
   logger.plain('warn', [
     'Storage migration requested.',
-    `  From: ${source}`,
-    `  To: ${target}`,
-    `  Server config to update: ${serverConfigPath}`,
+    '  From: legacy JSON runtime files',
+    '  To: SQLite',
+    `  Server config: ${serverConfigPath}`,
     `  SQLite file: ${sqliteFile}`,
-    '  Existing destination data will be merged. Source data will not be deleted.',
+    '  Existing SQLite data will be merged. The JSON files will be moved to a backup directory.',
   ].join('\n'));
 
-  const answer = readTerminalConfirmation(`Continue migration ${source} -> ${target}? Type Y to continue or N to cancel: `);
+  const answer = readTerminalConfirmation('Continue migration JSON -> SQLite? Type Y to continue or N to cancel: ');
   if (!['y', 'yes'].includes(answer.toLowerCase())) {
     throw new Error('Storage migration cancelled by user.');
   }
@@ -1297,11 +1560,9 @@ Core options:
   --data-dir PATH               Directory for runtime data. Default: ./data.
 
 Storage:
-  --storage-backend BACKEND     Persistence backend: json or sqlite. Overrides [storage].backend.
   --sqlite-file PATH            SQLite database path. Relative paths use --data-dir.
-  --migrate [json|sqlite]       Merge persisted data into the selected destination and exit.
-                                Without a value, migrates to the opposite backend.
-                                Requires Y/N confirmation and updates server.conf on success.
+  --migrate [sqlite]            Import legacy JSON runtime data into SQLite and exit.
+                                Requires Y/N confirmation and preserves JSON files as backups.
 
 Public web player:
   --http-host HOST              Web player bind host. Overrides [web].host.
@@ -1312,6 +1573,21 @@ Web Admin:
   --webserver PORT              Enable Web Admin on PORT. Overrides [admin].enabled and [admin].port.
   --webadmin PORT               Alias for --webserver.
   --webadmin-host HOST          Web Admin bind host. Overrides [admin].host.
+  --webadmin-secure true|false  Enable Web Admin secure mode/captcha. Uses HTTPS only when key/cert exist.
+  --webadmin-key PATH           Web Admin TLS private key path. Overrides [admin].key.
+  --webadmin-cert PATH          Web Admin TLS certificate path. Overrides [admin].cert.
+  --generate-cert               Generate certs/admin.key and certs/admin.crt with openssl, update [admin],
+                                and optionally enable [ssl] for the public stream server.
+
+Administrator accounts:
+  --createuser USER [--password PASSWORD]
+                                Create an administrator account. Without --password, prompts hidden input.
+  --modifyuser USER --password [PASSWORD]
+                                Change its password and close its active sessions. Without a value, prompts hidden input.
+  --modifyuser USER enable|disable
+                                Enable or disable an account. Disabling closes active sessions.
+  --deleteuser USER             Delete an account after Y/N confirmation and close its sessions.
+  --listusers                   List accounts and their lifecycle timestamps.
 
 UDP and streams:
   --udp-host HOST               Default UDP bind host for streams without udpHost.
@@ -1347,8 +1623,14 @@ Examples:
   node server.js
   node server.js -D
   node server.js --webserver 8584
-  node server.js --migrate sqlite
+  node server.js --createuser admin
+  node server.js --modifyuser admin disable
+  node server.js --listusers
   node server.js --migrate
   node server.js --config streams.json --http-host 0.0.0.0 --http-port 8585
 `);
+}
+
+function hasAdministratorCommand(parsedArgs) {
+  return ['createuser', 'modifyuser', 'deleteuser', 'listusers'].some((name) => parsedArgs[name] !== undefined);
 }
