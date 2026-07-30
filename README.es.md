@@ -317,7 +317,7 @@ printf 'ADMIN_ALTCHA_SECRET=%s\n' "$(openssl rand -base64 48)" | sudo tee -a /et
 printf 'ADMIN_TRUSTED_PROXIES=127.0.0.1,::1\n' | sudo tee -a /etc/udp-airband-admin.env >/dev/null
 ```
 
-Crea y administra cuentas desde la linea de comandos del servidor:
+Usa `node server.js --help` para mostrar la referencia completa de comandos, incluyendo Web Admin, TLS, migracion, logging y flags de cuentas administradoras. La gestion basica de administradores se hace desde la linea de comandos del servidor:
 
 ```bash
 node server.js --createuser USER
