@@ -24,13 +24,17 @@ assert.strictEqual(writes[0], encoded, 'pre-encoded frames must be written witho
 assert.strictEqual(sendWsBinary(socket, Buffer.from('direct')), true);
 
 const controlSocket = createSocket();
-attachWsControlFrames(controlSocket, maskedFrame(0x9, Buffer.from('ping')));
+let closeNotifications = 0;
+attachWsControlFrames(controlSocket, maskedFrame(0x9, Buffer.from('ping')), {
+  onClose: () => { closeNotifications += 1; },
+});
 assert.strictEqual(controlSocket.writes.length, 1);
 assert.strictEqual(controlSocket.writes[0][0], 0x8a, 'client ping must receive a pong');
 assert.strictEqual(controlSocket.writes[0].subarray(2).toString(), 'ping');
 controlSocket.emit('data', maskedFrame(0x8, Buffer.from([0x03, 0xe8])));
 assert.strictEqual(controlSocket.ended, true, 'client close must receive a close response');
 assert.strictEqual(controlSocket.endFrame[0], 0x88);
+assert.strictEqual(closeNotifications, 1);
 
 const invalidSocket = createSocket();
 attachWsControlFrames(invalidSocket);

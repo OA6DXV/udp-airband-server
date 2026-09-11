@@ -630,7 +630,7 @@ function attachUpgradeHandler(server) {
       recordClientActivity('disconnected', stream.name, connectionLogMode, clientId, remoteAddress);
       removeWsClient(stream, socket);
     });
-    attachWsControlFrames(socket, head);
+    attachWsControlFrames(socket, head, { onClose: () => removeWsClient(stream, socket) });
   });
 }
 
