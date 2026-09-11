@@ -37,7 +37,7 @@ pacer.enqueue(stream, [20, 21, 22]);
 assert.strictEqual(delivered.at(-1).frame, 20);
 currentTime += 35;
 runNextTimer(false);
-assert.strictEqual(scheduled[0].delay, 20, 'a late timer must not cause catch-up bursts');
+assert.strictEqual(scheduled[0].delay, 10, 'late timers may recover gradually but must not cause an immediate burst');
 while (scheduled.length) runNextTimer();
 
 currentTime = 1300;
