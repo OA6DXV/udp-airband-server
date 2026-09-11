@@ -100,6 +100,8 @@ let audioWorkletFailure = '';
 let audioWorkletNeedsReset = false;
 let audioWorkletDiagnostics = null;
 let audioWorkletSuspendedDrops = 0;
+let pendingAudioWorkletPcm = [];
+let pendingAudioWorkletFrames = 0;
 let lastUdpAt = 0;
 let lastAudioAt = 0;
 let streamConfirmed = false;
@@ -297,11 +299,11 @@ async function startAudioPlayback() {
   const resumed = audioContext.resume();
   const workletReady = ensureAudioWorklet();
   await resumed;
-  await workletReady;
   connectControlWebSocket();
   streamPaused = false;
-  startSelectedMode();
   audioStarted = true;
+  startSelectedMode();
+  await workletReady;
   updateAudioButton();
   updateGainControl();
   updateConnectionState();
@@ -360,9 +362,11 @@ async function ensureAudioWorklet() {
       configureAudioWorklet(config.sampleRate, config.channels);
       bufferedEl.dataset.delivery = 'worklet';
       bufferedEl.title = '';
+      flushPendingAudioWorkletPcm();
       return true;
     })
     .catch((error) => {
+      clearPendingAudioWorkletPcm();
       disableAudioWorklet(error?.message || 'module load failed');
       return false;
     });
@@ -388,6 +392,7 @@ function configureAudioWorklet(inputSampleRate, channels) {
 }
 
 function resetAudioWorklet() {
+  clearPendingAudioWorkletPcm();
   if (!audioWorkletNode) return;
   audioWorkletNode.port.postMessage({ type: 'reset' });
   audioWorkletDiagnostics = null;
@@ -450,7 +455,37 @@ function deliverPcm(samples, frames, inputSampleRate, channels) {
   lastAudioAt = Date.now();
 
   if (postPcmToAudioWorklet(samples, frames, inputSampleRate, channels)) return;
+  if (isAudioWorkletRequested() && audioWorkletLoadPromise && !audioWorkletFailed) {
+    queuePendingAudioWorkletPcm(samples, frames, inputSampleRate, channels);
+    return;
+  }
   scheduleAudio(samples, frames, channels, inputSampleRate);
+}
+
+function queuePendingAudioWorkletPcm(samples, frames, inputSampleRate, channels) {
+  pendingAudioWorkletPcm.push({ samples, frames, inputSampleRate, channels });
+  pendingAudioWorkletFrames += frames;
+  const maximumFrames = Math.max(1, Math.round(inputSampleRate * workletHighWaterMs / 1000));
+  while (pendingAudioWorkletFrames > maximumFrames && pendingAudioWorkletPcm.length > 1) {
+    const dropped = pendingAudioWorkletPcm.shift();
+    pendingAudioWorkletFrames -= dropped.frames;
+  }
+}
+
+function flushPendingAudioWorkletPcm() {
+  const pending = pendingAudioWorkletPcm;
+  pendingAudioWorkletPcm = [];
+  pendingAudioWorkletFrames = 0;
+  for (const item of pending) {
+    if (!postPcmToAudioWorklet(item.samples, item.frames, item.inputSampleRate, item.channels)) {
+      scheduleAudio(item.samples, item.frames, item.channels, item.inputSampleRate);
+    }
+  }
+}
+
+function clearPendingAudioWorkletPcm() {
+  pendingAudioWorkletPcm = [];
+  pendingAudioWorkletFrames = 0;
 }
 
 function postPcmToAudioWorklet(samples, frames, inputSampleRate, channels) {
