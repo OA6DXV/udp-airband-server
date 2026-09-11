@@ -105,13 +105,16 @@ let lastAudioAt = 0;
 let streamConfirmed = false;
 let wsGeneration = 0;
 let controlWs;
+let controlReconnectTimer;
 let serverInstanceId = '';
 let serverNoticeEl;
 let serverNoticeKind = '';
 let streamUnavailable = false;
 let rawWs;
+let rawReconnectTimer;
 let suppressRawReconnect = false;
 let adpcmWs;
+let adpcmReconnectTimer;
 let suppressAdpcmReconnect = false;
 let lastAdpcmSequence = null;
 let opusAudio;
@@ -119,6 +122,7 @@ let opusSourceNode;
 let opusAnalyser;
 let opusAnalyserBuffer;
 let opusWs;
+let opusReconnectTimer;
 let suppressOpusReconnect = false;
 let compatibleAudio;
 let compatibleSourceNode;
@@ -512,19 +516,23 @@ function updateGainControl() {
 
 function connectControlWebSocket() {
   if (controlWs && controlWs.readyState <= 1) return;
+  clearTimeout(controlReconnectTimer);
+  controlReconnectTimer = null;
 
   const generation = ++wsGeneration;
-  controlWs = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/${encodeURIComponent(streamName)}/control?clientId=${encodeURIComponent(clientId)}`);
+  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/${encodeURIComponent(streamName)}/control?clientId=${encodeURIComponent(clientId)}`);
+  controlWs = socket;
 
   controlWs.addEventListener('open', () => {
     if (generation === wsGeneration) updateConnectionState();
   });
   controlWs.addEventListener('close', () => {
+    if (controlWs === socket) controlWs = null;
     if (generation === wsGeneration) {
       setStatus('', 'disconnected');
       if (!streamUnavailable) {
         showServerNotice('disconnected');
-        setTimeout(connectControlWebSocket, 1000);
+        scheduleControlReconnect();
       }
     }
   });
@@ -568,6 +576,14 @@ function connectControlWebSocket() {
       }
     }
   });
+}
+
+function scheduleControlReconnect() {
+  if (controlReconnectTimer || streamUnavailable) return;
+  controlReconnectTimer = setTimeout(() => {
+    controlReconnectTimer = null;
+    connectControlWebSocket();
+  }, 1000);
 }
 
 function applyStreamUpdate(stream) {
@@ -699,16 +715,20 @@ function startRaw() {
   stopOpus();
   stopCompatible();
   if (rawWs && rawWs.readyState <= 1) return;
+  clearTimeout(rawReconnectTimer);
+  rawReconnectTimer = null;
 
-  rawWs = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/${encodeURIComponent(streamName)}/audio?clientId=${encodeURIComponent(clientId)}`);
+  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/${encodeURIComponent(streamName)}/audio?clientId=${encodeURIComponent(clientId)}`);
+  rawWs = socket;
   rawWs.binaryType = 'arraybuffer';
   rawWs.addEventListener('close', () => {
+    if (rawWs === socket) rawWs = null;
     resetAudioWorklet();
     if (suppressRawReconnect) {
       suppressRawReconnect = false;
       return;
     }
-    if (currentMode === 'raw') setTimeout(startRaw, 1000);
+    scheduleRawReconnect();
   });
   rawWs.addEventListener('message', (event) => {
     receivedBytes += event.data.byteLength || 0;
@@ -722,6 +742,14 @@ function startRaw() {
     updateConnectionState();
   });
   currentMode = 'raw';
+}
+
+function scheduleRawReconnect() {
+  if (rawReconnectTimer || currentMode !== 'raw' || !audioStarted || streamPaused) return;
+  rawReconnectTimer = setTimeout(() => {
+    rawReconnectTimer = null;
+    if (currentMode === 'raw' && audioStarted && !streamPaused) startRaw();
+  }, 1000);
 }
 
 function startOpus() {
@@ -786,13 +814,14 @@ function startOpus() {
         suppressOpusReconnect = false;
         return;
       }
-      if (currentMode === 'opus' && audioStarted) setTimeout(startOpus, 1000);
+      scheduleOpusReconnect();
     });
     opusWs.addEventListener('error', () => setStatus('', 'opusUnavailable'));
   }, { once: true });
 }
 
 function startAdpcmCompressed() {
+  if (adpcmWs && adpcmWs.readyState <= 1) return;
   currentMode = 'opus';
   activeCompressedKind = 'adpcm';
   lastAdpcmSequence = null;
@@ -800,7 +829,11 @@ function startAdpcmCompressed() {
     nextPlayTime = audioContext.currentTime + targetLatencySeconds;
   }
 
-  adpcmWs = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/${encodeURIComponent(streamName)}/adpcm?clientId=${encodeURIComponent(clientId)}`);
+  clearTimeout(adpcmReconnectTimer);
+  adpcmReconnectTimer = null;
+
+  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/${encodeURIComponent(streamName)}/adpcm?clientId=${encodeURIComponent(clientId)}`);
+  adpcmWs = socket;
   adpcmWs.binaryType = 'arraybuffer';
   adpcmWs.addEventListener('message', (event) => {
     receivedBytes += event.data.byteLength || 0;
@@ -819,17 +852,32 @@ function startAdpcmCompressed() {
     updateConnectionState();
   });
   adpcmWs.addEventListener('close', () => {
+    if (adpcmWs === socket) adpcmWs = null;
     lastAdpcmSequence = null;
     resetAudioWorklet();
     if (suppressAdpcmReconnect) {
       suppressAdpcmReconnect = false;
       return;
     }
-    if (currentMode === 'opus' && activeCompressedKind === 'adpcm' && audioStarted) {
-      setTimeout(startOpus, 1000);
-    }
+    scheduleAdpcmReconnect();
   });
   adpcmWs.addEventListener('error', () => setStatus('', 'opusUnavailable'));
+}
+
+function scheduleAdpcmReconnect() {
+  if (adpcmReconnectTimer || currentMode !== 'opus' || activeCompressedKind !== 'adpcm' || !audioStarted || streamPaused) return;
+  adpcmReconnectTimer = setTimeout(() => {
+    adpcmReconnectTimer = null;
+    if (currentMode === 'opus' && activeCompressedKind === 'adpcm' && audioStarted && !streamPaused) startAdpcmCompressed();
+  }, 1000);
+}
+
+function scheduleOpusReconnect() {
+  if (opusReconnectTimer || currentMode !== 'opus' || !audioStarted || streamPaused) return;
+  opusReconnectTimer = setTimeout(() => {
+    opusReconnectTimer = null;
+    if (currentMode === 'opus' && audioStarted && !streamPaused) startOpus();
+  }, 1000);
 }
 
 function startHttpOpus() {
@@ -1036,6 +1084,8 @@ function syncOpusLivePlayback() {
 }
 
 function stopRaw() {
+  clearTimeout(rawReconnectTimer);
+  rawReconnectTimer = null;
   if (rawWs) {
     resetAudioWorklet();
     suppressRawReconnect = true;
@@ -1045,6 +1095,10 @@ function stopRaw() {
 }
 
 function stopOpus() {
+  clearTimeout(adpcmReconnectTimer);
+  adpcmReconnectTimer = null;
+  clearTimeout(opusReconnectTimer);
+  opusReconnectTimer = null;
   usingNativeHls = false;
   if (adpcmWs) resetAudioWorklet();
   activeCompressedKind = null;
