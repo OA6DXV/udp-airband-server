@@ -33,13 +33,13 @@ const translations = {
     users: 'Users', gain: 'Gain', startAudio: 'Start Audio', mute: 'Mute', unmute: 'Unmute', buffered: 'Buffered', bandwidth: 'Bandwidth', lastHeardTime: 'Last Heard Time', mode: 'Mode', level: 'Level', localTime: 'Local Time', disconnected: 'Disconnected', waitingUdp: 'Waiting for UDP', connected: 'Connected', idle: 'Push to Reconnect', pushDisconnect: 'Push to disconnect', stopStream: 'Stop stream', returnHome: 'Click to return home', opusUnavailable: 'Compressed unavailable', compressed: 'Compressed', uncompressed: 'Uncompressed', switchMode: 'Switch audio mode', opusNeedsFfmpeg: 'Compressed mode is unavailable on the server', never: 'never', now: 'Now',
     compatible: 'Compatible', compatibleUnavailable: 'Compatible unavailable', modeUnavailable: 'Mode unavailable',
     compatibleNoticeTitle: 'Compatible Mode',
-    compatibleNoticeBody: 'Compatible Mode was designed for mobile devices and background playback. It uses native AAC audio, so it can keep playing with the phone locked, but it may add a variable delay of about 5 to 10 seconds.',
+    compatibleNoticeBody: 'Compatible Mode uses native AAC for broader mobile and background compatibility. Results depend on the device, and it may add a variable delay of about 5 to 10 seconds.',
     uncompressedNoticeTitle: 'Uncompressed Realtime Mode',
-    uncompressedNoticeBody: 'This mode uses raw realtime audio with the lowest latency. It must stay open and active in this page.',
+    uncompressedNoticeBody: 'This mode uses raw realtime audio with persistent low-latency playback when AudioWorklet is supported. Background behavior still depends on the browser and device.',
     compressedNoticeTitle: 'Compressed Realtime Mode',
-    compressedNoticeBody: 'This mode uses realtime compressed audio to reduce bandwidth. It is ideal for slow connections, but it still needs this page to stay open and active.',
+    compressedNoticeBody: 'This mode uses realtime compressed audio and persistent low-latency playback when AudioWorklet is supported. Background behavior still depends on the browser and device.',
     mobileStartupNoticeTitle: 'Compressed realtime mode',
-    mobileStartupNoticeBody: 'This stream starts in low-delay compressed realtime mode. To keep audio playing in the background or with the phone locked, select Compatible Mode; it may add some delay.',
+    mobileStartupNoticeBody: 'This stream starts in low-delay compressed realtime mode. Its persistent audio path may continue in the background on supported devices; Compatible Mode remains available with more delay.',
     serverDisconnected: 'Connection to the server was lost. Reconnecting...',
     serverRestarted: 'The server restarted. This page reconnected; refresh if audio does not resume.',
     streamUnavailableTitle: 'Stream updated',
@@ -47,18 +47,19 @@ const translations = {
     returnToHome: 'Return to home',
     reload: 'Reload',
     accept: 'Accept',
+    workletFallback: 'AudioWorklet unavailable; using the compatibility scheduler.',
   },
   es: {
     users: 'Usuarios', gain: 'Ganancia', startAudio: 'Iniciar audio', mute: 'Silenciar', unmute: 'Activar audio', buffered: 'Buffer', bandwidth: 'Ancho de banda', lastHeardTime: 'Ultima transmision', mode: 'Modo', level: 'Nivel', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP', connected: 'Conectado', idle: 'Presiona para reconectar', pushDisconnect: 'Presiona para desconectar', stopStream: 'Detener stream', returnHome: 'Click para volver a la pagina principal', opusUnavailable: 'Comprimido no disponible', compressed: 'Comprimido', uncompressed: 'Sin comprimir', switchMode: 'Cambiar modo de audio', opusNeedsFfmpeg: 'El modo comprimido no esta disponible en el servidor', never: 'nunca', now: 'Ahora',
     compatible: 'Compatible', compatibleUnavailable: 'Compatible no disponible', modeUnavailable: 'Modo no disponible',
     compatibleNoticeTitle: 'Modo Compatible',
-    compatibleNoticeBody: 'El Modo Compatible fue disenado para moviles y reproduccion en segundo plano. Usa audio AAC nativo, asi que puede seguir sonando con el telefono bloqueado, pero puede agregar un delay variable de unos 5 a 10 segundos.',
+    compatibleNoticeBody: 'El Modo Compatible usa AAC nativo para mayor compatibilidad movil y en segundo plano. El resultado depende del dispositivo y puede agregar un delay variable de unos 5 a 10 segundos.',
     uncompressedNoticeTitle: 'Modo Realtime sin comprimir',
-    uncompressedNoticeBody: 'Este modo usa audio realtime crudo con la menor latencia. Debe mantenerse abierto y activo en esta pagina.',
+    uncompressedNoticeBody: 'Este modo usa audio realtime crudo con reproduccion persistente de baja latencia cuando AudioWorklet esta disponible. El comportamiento en background depende del navegador y dispositivo.',
     compressedNoticeTitle: 'Modo Realtime comprimido',
-    compressedNoticeBody: 'Este modo usa audio realtime comprimido para reducir el ancho de banda. Es ideal para conexiones lentas, pero igual necesita que esta pagina siga abierta y activa.',
+    compressedNoticeBody: 'Este modo usa audio realtime comprimido y reproduccion persistente de baja latencia cuando AudioWorklet esta disponible. El comportamiento en background depende del navegador y dispositivo.',
     mobileStartupNoticeTitle: 'Modo comprimido realtime',
-    mobileStartupNoticeBody: 'Este stream inicia en modo comprimido sin delay. Si quieres escuchar el audio en background o con el telefono bloqueado, selecciona el Modo Compatible; puede agregar cierto delay.',
+    mobileStartupNoticeBody: 'Este stream inicia en modo comprimido de baja latencia. Su ruta persistente puede continuar en background en dispositivos compatibles; el Modo Compatible sigue disponible con mayor delay.',
     serverDisconnected: 'Se perdio la conexion con el servidor. Reconectando...',
     serverRestarted: 'El servidor se reinicio. Esta pagina se reconecto; actualiza si el audio no vuelve.',
     streamUnavailableTitle: 'Stream actualizado',
@@ -66,6 +67,7 @@ const translations = {
     returnToHome: 'Volver al inicio',
     reload: 'Actualizar',
     accept: 'Aceptar',
+    workletFallback: 'AudioWorklet no disponible; usando el scheduler de compatibilidad.',
   },
 };
 
@@ -80,10 +82,24 @@ let gainNode;
 let config = { sampleRate: 8000, channels: 1 };
 let queuedFrames = 0;
 const targetLatencySeconds = 0.05;
+const workletTargetLatencyMs = 80;
+const workletHighWaterMs = 500;
+const workletCapacitySeconds = 4;
+const workletMaxDrift = 0.004;
+const maxPcmPacketSeconds = 1;
 let nextPlayTime = 0;
 let gain = Number(gainInput.value);
 let lastPeak = 0;
 let latestWave = new Float32Array(0);
+let latestWaveChannels = 1;
+let audioWorkletNode;
+let audioWorkletLoadPromise;
+let audioWorkletConfiguration = '';
+let audioWorkletFailed = false;
+let audioWorkletFailure = '';
+let audioWorkletNeedsReset = false;
+let audioWorkletDiagnostics = null;
+let audioWorkletSuspendedDrops = 0;
 let lastUdpAt = 0;
 let lastAudioAt = 0;
 let streamConfirmed = false;
@@ -97,6 +113,7 @@ let rawWs;
 let suppressRawReconnect = false;
 let adpcmWs;
 let suppressAdpcmReconnect = false;
+let lastAdpcmSequence = null;
 let opusAudio;
 let opusSourceNode;
 let opusAnalyser;
@@ -128,6 +145,7 @@ let streamPaused = false;
 let pausedMode = null;
 let statusHovering = false;
 let mobileStartupNoticeShown = false;
+let resumeAfterPageShow = false;
 let receivedBytes = 0;
 let lastBandwidthBytes = 0;
 let lastBandwidthAt = Date.now();
@@ -261,15 +279,20 @@ async function startAudioPlayback() {
     return;
   }
 
+  requestPlaybackAudioSession();
   if (!audioContext) {
-    audioContext = new AudioContext();
+    audioContext = new AudioContext({ latencyHint: 'interactive' });
     gainNode = audioContext.createGain();
     applyOutputGain();
     gainNode.connect(audioContext.destination);
     nextPlayTime = audioContext.currentTime + targetLatencySeconds;
+    audioContext.addEventListener('statechange', handleAudioContextStateChange);
   }
 
-  await audioContext.resume();
+  const resumed = audioContext.resume();
+  const workletReady = ensureAudioWorklet();
+  await resumed;
+  await workletReady;
   connectControlWebSocket();
   streamPaused = false;
   startSelectedMode();
@@ -278,6 +301,193 @@ async function startAudioPlayback() {
   updateGainControl();
   updateConnectionState();
 }
+
+function requestPlaybackAudioSession() {
+  if (!('audioSession' in navigator)) return;
+  try {
+    navigator.audioSession.type = 'playback';
+  } catch {
+    // This API is optional and differs between browser versions.
+  }
+}
+
+function handleAudioContextStateChange() {
+  if (!audioContext) return;
+  if (audioContext.state === 'running') {
+    if (audioWorkletNeedsReset) resetAudioWorklet();
+    audioWorkletNeedsReset = false;
+    return;
+  }
+  audioWorkletNeedsReset = true;
+}
+
+function isAudioWorkletRequested() {
+  return config.audioWorkletStreaming !== false;
+}
+
+async function ensureAudioWorklet() {
+  if (!isAudioWorkletRequested() || audioWorkletFailed || audioWorkletNode) return Boolean(audioWorkletNode);
+  if (audioWorkletLoadPromise) return audioWorkletLoadPromise;
+  if (!window.isSecureContext || !audioContext?.audioWorklet || typeof window.AudioWorkletNode !== 'function') {
+    disableAudioWorklet('unsupported or insecure browser context');
+    return false;
+  }
+
+  const version = encodeURIComponent(config.softwareVersion || 'current');
+  audioWorkletLoadPromise = audioContext.audioWorklet.addModule(`/assets/audio-worklet.js?v=${version}`)
+    .then(() => {
+      if (!isAudioWorkletRequested()) {
+        audioWorkletLoadPromise = null;
+        return false;
+      }
+      const node = new AudioWorkletNode(audioContext, 'airband-pcm', {
+        numberOfInputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+      });
+      node.connect(gainNode);
+      node.port.onmessage = ({ data }) => handleAudioWorkletMessage(data);
+      node.addEventListener('processorerror', () => disableAudioWorklet('processor error'));
+      audioWorkletNode = node;
+      audioWorkletFailed = false;
+      audioWorkletFailure = '';
+      audioWorkletConfiguration = '';
+      configureAudioWorklet(config.sampleRate, config.channels);
+      bufferedEl.dataset.delivery = 'worklet';
+      bufferedEl.title = '';
+      return true;
+    })
+    .catch((error) => {
+      disableAudioWorklet(error?.message || 'module load failed');
+      return false;
+    });
+  return audioWorkletLoadPromise;
+}
+
+function configureAudioWorklet(inputSampleRate, channels) {
+  if (!audioWorkletNode) return false;
+  const key = `${inputSampleRate}:${channels}`;
+  if (key === audioWorkletConfiguration) return true;
+  audioWorkletNode.port.postMessage({
+    type: 'configure',
+    inputSampleRate,
+    channels,
+    targetLatencyMs: workletTargetLatencyMs,
+    highWaterMs: workletHighWaterMs,
+    capacitySeconds: workletCapacitySeconds,
+    maxDrift: workletMaxDrift,
+  });
+  audioWorkletConfiguration = key;
+  audioWorkletDiagnostics = null;
+  return true;
+}
+
+function resetAudioWorklet() {
+  if (!audioWorkletNode) return;
+  audioWorkletNode.port.postMessage({ type: 'reset' });
+  audioWorkletDiagnostics = null;
+}
+
+function disableAudioWorklet(reason) {
+  if (audioWorkletNode) {
+    try {
+      audioWorkletNode.disconnect();
+    } catch {
+      // The node may already be disconnected after a processor failure.
+    }
+    audioWorkletNode.port.onmessage = null;
+  }
+  audioWorkletNode = null;
+  audioWorkletLoadPromise = null;
+  audioWorkletConfiguration = '';
+  audioWorkletFailed = true;
+  audioWorkletFailure = reason;
+  nextPlayTime = audioContext ? audioContext.currentTime + targetLatencySeconds : 0;
+  bufferedEl.dataset.delivery = 'scheduler';
+  bufferedEl.title = t('workletFallback');
+  console.warn(`AudioWorklet fallback: ${reason}`);
+}
+
+function handleAudioWorkletMessage(message) {
+  if (!message || typeof message !== 'object') return;
+  if (message.type === 'worklet-diagnostics') {
+    audioWorkletDiagnostics = message;
+  } else if (message.type === 'worklet-error') {
+    audioWorkletDiagnostics = { ...(audioWorkletDiagnostics || {}), invalidMessages: message.invalidMessages };
+    console.warn(`AudioWorklet rejected audio data: ${message.message}`);
+  }
+}
+
+function applyAudioWorkletPreference() {
+  if (isAudioWorkletRequested()) {
+    if (audioStarted && !audioWorkletNode && !audioWorkletFailed) ensureAudioWorklet();
+    return;
+  }
+  if (audioWorkletNode) {
+    audioWorkletNode.port.postMessage({ type: 'reset' });
+    audioWorkletNode.disconnect();
+    audioWorkletNode.port.onmessage = null;
+  }
+  audioWorkletNode = null;
+  audioWorkletLoadPromise = null;
+  audioWorkletConfiguration = '';
+  audioWorkletDiagnostics = null;
+  audioWorkletFailed = false;
+  audioWorkletFailure = '';
+  bufferedEl.dataset.delivery = 'scheduler';
+  bufferedEl.title = '';
+}
+
+function deliverPcm(samples, frames, inputSampleRate, channels) {
+  latestWave = waveformPreview(samples, frames, channels);
+  latestWaveChannels = 1;
+  lastPeak = Math.max(lastPeak * 0.92, peakOf(samples));
+  lastAudioAt = Date.now();
+
+  if (postPcmToAudioWorklet(samples, frames, inputSampleRate, channels)) return;
+  scheduleAudio(samples, frames, channels, inputSampleRate);
+}
+
+function postPcmToAudioWorklet(samples, frames, inputSampleRate, channels) {
+  if (!isAudioWorkletRequested() || !audioWorkletNode || audioWorkletFailed) return false;
+  if (audioContext?.state !== 'running') {
+    audioWorkletSuspendedDrops += frames;
+    audioWorkletNeedsReset = true;
+    return true;
+  }
+  try {
+    configureAudioWorklet(inputSampleRate, channels);
+    if (samples.byteOffset !== 0 || samples.byteLength !== samples.buffer.byteLength) return false;
+    audioWorkletNode.port.postMessage({ type: 'samples', buffer: samples.buffer, frames }, [samples.buffer]);
+    return true;
+  } catch (error) {
+    disableAudioWorklet(error?.message || 'sample transfer failed');
+    return false;
+  }
+}
+
+function waveformPreview(samples, frames, channels, maximumFrames = 512) {
+  const previewFrames = Math.min(frames, maximumFrames);
+  const preview = new Float32Array(previewFrames);
+  for (let index = 0; index < previewFrames; index += 1) {
+    const frame = Math.min(frames - 1, Math.floor(index * frames / previewFrames));
+    let sample = samples[frame * channels] || 0;
+    if (channels === 2) sample = (sample + (samples[frame * channels + 1] || 0)) * 0.5;
+    preview[index] = sample;
+  }
+  return preview;
+}
+
+window.getAudioWorkletDiagnostics = () => ({
+  enabled: isAudioWorkletRequested(),
+  active: Boolean(audioWorkletNode),
+  failure: audioWorkletFailure,
+  contextState: audioContext?.state || 'not-created',
+  transport: currentMode === 'raw' ? 'raw' : activeCompressedKind || currentMode,
+  lastFrameAt: lastAudioAt,
+  suspendedDroppedFrames: audioWorkletSuspendedDrops,
+  ...(audioWorkletDiagnostics || {}),
+});
 
 function applyOutputGain() {
   if (gainNode) gainNode.gain.value = muted ? 0 : gain;
@@ -323,6 +533,8 @@ function connectControlWebSocket() {
       const message = JSON.parse(event.data);
       if (message.type === 'config') {
         config = message;
+        applyAudioWorkletPreference();
+        if (audioWorkletNode) configureAudioWorklet(config.sampleRate, config.channels);
         opusAvailable = Boolean(message.opusAvailable);
         compressedAvailable = Boolean(message.compressedAvailable);
         compressedTransport = getCompressedTransport();
@@ -462,8 +674,10 @@ function pauseStream() {
   stopRaw();
   stopOpus();
   stopCompatible();
+  resetAudioWorklet();
   queuedFrames = 0;
   latestWave = new Float32Array(0);
+  latestWaveChannels = 1;
   lastPeak = 0;
   updateConnectionState();
   updateBuffered();
@@ -489,6 +703,7 @@ function startRaw() {
   rawWs = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/${encodeURIComponent(streamName)}/audio?clientId=${encodeURIComponent(clientId)}`);
   rawWs.binaryType = 'arraybuffer';
   rawWs.addEventListener('close', () => {
+    resetAudioWorklet();
     if (suppressRawReconnect) {
       suppressRawReconnect = false;
       return;
@@ -497,15 +712,13 @@ function startRaw() {
   });
   rawWs.addEventListener('message', (event) => {
     receivedBytes += event.data.byteLength || 0;
+    if (!(event.data instanceof ArrayBuffer) || event.data.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) return;
     const samples = new Float32Array(event.data);
     const frames = samples.length / config.channels;
-    if (!Number.isInteger(frames)) return;
+    if (!Number.isInteger(frames) || frames < 1 || frames > config.sampleRate * maxPcmPacketSeconds) return;
 
     streamConfirmed = true;
-    scheduleAudio(samples, frames);
-    latestWave = samples;
-    lastPeak = Math.max(lastPeak * 0.92, peakOf(samples));
-    lastAudioAt = Date.now();
+    deliverPcm(samples, frames, config.sampleRate, config.channels);
     updateConnectionState();
   });
   currentMode = 'raw';
@@ -582,6 +795,7 @@ function startOpus() {
 function startAdpcmCompressed() {
   currentMode = 'opus';
   activeCompressedKind = 'adpcm';
+  lastAdpcmSequence = null;
   if (audioContext) {
     nextPlayTime = audioContext.currentTime + targetLatencySeconds;
   }
@@ -593,16 +807,20 @@ function startAdpcmCompressed() {
     const decoded = decodeAdpcmFrame(event.data);
     if (!decoded) return;
 
+    if (lastAdpcmSequence !== null && decoded.sequence !== ((lastAdpcmSequence + 1) >>> 0)) {
+      resetAudioWorklet();
+    }
+    lastAdpcmSequence = decoded.sequence;
+
     config.sampleRate = decoded.sampleRate;
     config.channels = decoded.channels;
     streamConfirmed = true;
-    scheduleAudio(decoded.samples, decoded.frames);
-    latestWave = decoded.samples;
-    lastPeak = Math.max(lastPeak * 0.92, peakOf(decoded.samples));
-    lastAudioAt = Date.now();
+    deliverPcm(decoded.samples, decoded.frames, decoded.sampleRate, decoded.channels);
     updateConnectionState();
   });
   adpcmWs.addEventListener('close', () => {
+    lastAdpcmSequence = null;
+    resetAudioWorklet();
     if (suppressAdpcmReconnect) {
       suppressAdpcmReconnect = false;
       return;
@@ -633,6 +851,7 @@ function startHlsCompressed() {
   usingNativeHls = true;
   activeCompressedKind = 'hls';
   latestWave = new Float32Array(0);
+  latestWaveChannels = 1;
   lastPeak = 0;
   applyOutputGain();
   opusAudio.src = `/${encodeURIComponent(streamName)}/hls/${encodeURIComponent(clientId)}/playlist.m3u8?t=${Date.now()}`;
@@ -726,6 +945,7 @@ function stopCompatible() {
   compatibleAudioReady = false;
   compatibleBandwidthReady = false;
   latestWave = new Float32Array(0);
+  latestWaveChannels = 1;
   lastPeak = 0;
 }
 
@@ -817,6 +1037,7 @@ function syncOpusLivePlayback() {
 
 function stopRaw() {
   if (rawWs) {
+    resetAudioWorklet();
     suppressRawReconnect = true;
     rawWs.close();
     rawWs = null;
@@ -825,8 +1046,10 @@ function stopRaw() {
 
 function stopOpus() {
   usingNativeHls = false;
+  if (adpcmWs) resetAudioWorklet();
   activeCompressedKind = null;
   if (adpcmWs) {
+    lastAdpcmSequence = null;
     suppressAdpcmReconnect = true;
     adpcmWs.close();
     adpcmWs = null;
@@ -866,7 +1089,7 @@ function updateModeButton() {
   updateModeMenu();
 }
 
-function scheduleAudio(samples, frames) {
+function scheduleAudio(samples, frames, channels = config.channels, inputSampleRate = config.sampleRate) {
   if (!audioContext || !gainNode) return;
 
   const now = audioContext.currentTime;
@@ -874,11 +1097,11 @@ function scheduleAudio(samples, frames) {
     nextPlayTime = now + targetLatencySeconds;
   }
 
-  const buffer = audioContext.createBuffer(config.channels, frames, config.sampleRate);
-  for (let channel = 0; channel < config.channels; channel += 1) {
+  const buffer = audioContext.createBuffer(channels, frames, inputSampleRate);
+  for (let channel = 0; channel < channels; channel += 1) {
     const data = buffer.getChannelData(channel);
     for (let i = 0; i < frames; i += 1) {
-      data[i] = samples[i * config.channels + channel];
+      data[i] = samples[i * channels + channel];
     }
   }
 
@@ -890,7 +1113,7 @@ function scheduleAudio(samples, frames) {
   applyResumeFade(sourceGain, nextPlayTime);
   source.start(nextPlayTime);
   nextPlayTime += buffer.duration;
-  queuedFrames = Math.max(0, Math.round((nextPlayTime - now) * config.sampleRate));
+  queuedFrames = Math.max(0, Math.round((nextPlayTime - now) * inputSampleRate));
 }
 
 function applyResumeFade(sourceGain, startTime) {
@@ -915,11 +1138,23 @@ function decodeAdpcmFrame(arrayBuffer) {
   }
 
   const channels = view.getUint8(4);
+  const bitsPerSample = view.getUint8(5);
   const headerBytes = view.getUint16(6, true);
   const sampleRate = view.getUint32(8, true);
+  const sequence = view.getUint32(12, true);
   const frames = view.getUint16(16, true);
   const payloadBytes = view.getUint16(18, true);
-  if (![1, 2].includes(channels) || headerBytes !== 20 + channels * 4 || frames < 1 || view.byteLength < headerBytes + payloadBytes) {
+  const expectedPayloadBytes = Math.ceil(Math.max(0, frames - 1) * channels / 2);
+  if (![1, 2].includes(channels)
+    || bitsPerSample !== 4
+    || !Number.isInteger(sampleRate)
+    || sampleRate < 1000
+    || sampleRate > 96000
+    || headerBytes !== 20 + channels * 4
+    || frames < 1
+    || frames > sampleRate * maxPcmPacketSeconds
+    || payloadBytes !== expectedPayloadBytes
+    || view.byteLength !== headerBytes + payloadBytes) {
     return null;
   }
 
@@ -929,6 +1164,7 @@ function decodeAdpcmFrame(arrayBuffer) {
     const stateOffset = 20 + channel * 4;
     const predictor = view.getInt16(stateOffset, true);
     const index = view.getUint8(stateOffset + 2);
+    if (index >= adpcmStepTable.length) return null;
     states.push({ predictor, index });
     samples[channel] = predictor / 32768;
   }
@@ -944,7 +1180,7 @@ function decodeAdpcmFrame(arrayBuffer) {
     }
   }
 
-  return { samples, frames, channels, sampleRate };
+  return { samples, frames, channels, sampleRate, sequence };
 }
 
 function decodeAdpcmNibble(code, state) {
@@ -1015,13 +1251,16 @@ function draw() {
   if (currentMode === 'opus' && activeCompressedKind === 'media' && opusAnalyser && opusAnalyserBuffer) {
     opusAnalyser.getFloatTimeDomainData(opusAnalyserBuffer);
     latestWave = opusAnalyserBuffer;
+    latestWaveChannels = 1;
     lastPeak = Math.max(lastPeak * 0.92, peakOf(opusAnalyserBuffer));
   } else if (currentMode === 'compatible' && compatibleAnalyser && compatibleAnalyserBuffer) {
     compatibleAnalyser.getFloatTimeDomainData(compatibleAnalyserBuffer);
     latestWave = compatibleAnalyserBuffer;
+    latestWaveChannels = 1;
     lastPeak = Math.max(lastPeak * 0.92, peakOf(compatibleAnalyserBuffer));
   } else if ((currentMode === 'raw' || activeCompressedKind === 'adpcm') && lastAudioAt && Date.now() - lastAudioAt > 350) {
     latestWave = new Float32Array(0);
+    latestWaveChannels = 1;
     lastPeak = 0;
   }
 
@@ -1037,7 +1276,7 @@ function drawBarWaveform() {
   const centerY = canvas.height / 2;
   const barStride = waveformBarWidth + waveformBarGap;
   const barCount = Math.max(1, Math.floor((canvas.width + waveformBarGap) / barStride));
-  const channels = (currentMode === 'opus' && activeCompressedKind === 'media') || currentMode === 'compatible' ? 1 : config.channels;
+  const channels = latestWaveChannels;
   const frames = channels ? Math.floor(latestWave.length / channels) : 0;
   const totalWidth = barCount * waveformBarWidth + (barCount - 1) * waveformBarGap;
   let x = Math.max(0, (canvas.width - totalWidth) / 2);
@@ -1090,6 +1329,36 @@ setInterval(updateLastHeard, 500);
 updateClocks();
 setInterval(updateClocks, 1000);
 
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !audioStarted || streamPaused || !audioContext) return;
+  audioContext.resume()
+    .then(() => {
+      if (audioWorkletNeedsReset) resetAudioWorklet();
+      audioWorkletNeedsReset = false;
+    })
+    .catch(() => {});
+});
+
+window.addEventListener('pagehide', (event) => {
+  resumeAfterPageShow = Boolean(event.persisted && audioStarted && !streamPaused);
+  resetAudioWorklet();
+  stopRaw();
+  stopOpus();
+  stopCompatible();
+});
+
+window.addEventListener('pageshow', (event) => {
+  if (!event.persisted || !resumeAfterPageShow || !audioStarted || streamPaused) return;
+  resumeAfterPageShow = false;
+  const resumed = audioContext ? audioContext.resume() : Promise.resolve();
+  resumed
+    .then(() => {
+      resetAudioWorklet();
+      startSelectedMode(currentMode || preferredMode);
+    })
+    .catch(() => {});
+});
+
 function updateBuffered() {
   if (streamPaused) {
     bufferedEl.textContent = 'Idle';
@@ -1106,11 +1375,21 @@ function updateBuffered() {
     bufferedEl.textContent = `${getOpusBufferedMs()} ms`;
     return;
   }
+  if (audioWorkletNode && (currentMode === 'raw' || activeCompressedKind === 'adpcm')) {
+    const inputSampleRate = audioWorkletDiagnostics?.inputSampleRate || config.sampleRate;
+    const bufferedFrames = audioWorkletDiagnostics?.bufferedFrames || 0;
+    const bufferedMs = inputSampleRate ? Math.round(bufferedFrames / inputSampleRate * 1000) : 0;
+    bufferedEl.textContent = `${bufferedMs} ms`;
+    bufferedEl.dataset.underruns = String(audioWorkletDiagnostics?.underruns || 0);
+    bufferedEl.dataset.overflows = String(audioWorkletDiagnostics?.overflows || 0);
+    bufferedEl.dataset.droppedFrames = String(audioWorkletDiagnostics?.droppedFrames || 0);
+    return;
+  }
   if (audioContext) {
     queuedFrames = Math.max(0, Math.round((nextPlayTime - audioContext.currentTime) * config.sampleRate));
   }
   const bufferedMs = config.sampleRate ? Math.round(queuedFrames / config.sampleRate * 1000) : 0;
-  bufferedEl.textContent = `${bufferedMs} ms`;
+  bufferedEl.textContent = `${bufferedMs} ms${audioWorkletFailed && isAudioWorkletRequested() ? ' · Fallback' : ''}`;
 }
 
 function updateBrowserBandwidth() {
@@ -1195,6 +1474,7 @@ function applyLanguage() {
   }
   updateStatusLabel();
   lastHeardEl.textContent = localizeLastHeard(lastHeardLabel);
+  if (audioWorkletFailed) bufferedEl.title = t('workletFallback');
 }
 
 function localizeLastHeard(label) {

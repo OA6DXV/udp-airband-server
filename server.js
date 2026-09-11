@@ -105,9 +105,12 @@ const geoCacheTtlDays = Number(getSetting(serverConfig, 'geo.cacheTtlDays', 30))
 const geoTimeoutMs = Number(getSetting(serverConfig, 'geo.timeoutMs', 1500));
 const geoIpv4Anonymize = String(getSetting(serverConfig, 'geo.ipv4Anonymize', '/24')).trim();
 const geoIpv6Anonymize = String(getSetting(serverConfig, 'geo.ipv6Anonymize', '/48')).trim();
+const audioWorkletStreaming = parseBoolean(args.audioWorkletStreaming !== undefined
+  ? args.audioWorkletStreaming
+  : getSetting(serverConfig, 'audio.workletStreaming', true));
 const compressedEnabled = parseBoolean(args.compressedEnabled !== undefined ? args.compressedEnabled : getSetting(serverConfig, 'compressed.enabled', true));
 const compressedCodec = String(args.compressedCodec || args.codec || getSetting(serverConfig, 'compressed.codec', 'adpcm')).trim().toLowerCase();
-const adpcmFrameMs = Number(args.adpcmFrameMs || getSetting(serverConfig, 'compressed.adpcmFrameMs', 40));
+const adpcmFrameMs = Number(args.adpcmFrameMs || getSetting(serverConfig, 'compressed.adpcmFrameMs', 20));
 const opusBitrate = args.opusBitrate || getSetting(serverConfig, 'compressed.opusBitrate', '24k');
 const aacBitrate = args.aacBitrate || getSetting(serverConfig, 'compressed.aacBitrate', '32k');
 const opusKeepaliveMs = Number(args.opusKeepaliveMs || getSetting(serverConfig, 'compressed.keepaliveMs', 1000));
@@ -257,6 +260,8 @@ if (!Number.isInteger(adpcmFrameMs) || adpcmFrameMs < 10 || adpcmFrameMs > 100) 
 const publicDir = __dirname;
 const indexHtml = fs.readFileSync(path.join(publicDir, 'index.html'));
 const appJs = fs.readFileSync(path.join(publicDir, 'assets', 'app.js'));
+const audioWorkletJs = fs.readFileSync(path.join(publicDir, 'assets', 'audio-worklet.mjs'));
+const audioRingBufferJs = fs.readFileSync(path.join(publicDir, 'assets', 'audio-ring-buffer.mjs'));
 const styleCss = fs.readFileSync(path.join(publicDir, 'assets', 'style.css'));
 const multiJs = fs.readFileSync(path.join(publicDir, 'assets', 'multi.js'));
 const faviconIco = fs.readFileSync(path.join(publicDir, 'assets', 'favicon.ico'));
@@ -473,6 +478,14 @@ function handleHttpRequest(req, res) {
   }
   if (pathname === '/assets/app.js') {
     sendAsset(res, appJs, 'application/javascript; charset=utf-8');
+    return;
+  }
+  if (pathname === '/assets/audio-worklet.js') {
+    sendAsset(res, audioWorkletJs, 'application/javascript; charset=utf-8');
+    return;
+  }
+  if (pathname === '/assets/audio-ring-buffer.mjs') {
+    sendAsset(res, audioRingBufferJs, 'application/javascript; charset=utf-8');
     return;
   }
   if (pathname === '/assets/multi.js') {
@@ -1045,6 +1058,7 @@ function streamConfig(stream) {
     sampleRate: stream.sampleRate,
     channels: stream.channels,
     format: 'f32le',
+    audioWorkletStreaming,
     compressedEnabled,
     compressedAvailable,
     compressedCodec,
@@ -1371,7 +1385,7 @@ function securityHeaders() {
     'x-content-type-options': 'nosniff',
     'x-frame-options': 'DENY',
     'referrer-policy': 'no-referrer',
-    'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; media-src 'self' blob:; worker-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+    'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; media-src 'self' blob:; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'",
   };
 }
 
@@ -1568,6 +1582,8 @@ Public web player:
   --http-host HOST              Web player bind host. Overrides [web].host.
   --http-port PORT              Web player port. Overrides [web].port.
   --http PORT                   Alias for --http-port.
+  --audio-worklet-streaming true|false
+                                Enable persistent AudioWorklet delivery for raw/ADPCM streams.
 
 Web Admin:
   --webserver PORT              Enable Web Admin on PORT. Overrides [admin].enabled and [admin].port.
@@ -1608,7 +1624,7 @@ Compressed audio:
                                 Enable or disable compressed audio modes.
   --compressed-codec CODEC      Compressed codec: adpcm, opus, aac, or hls.
   --codec CODEC                 Alias for --compressed-codec.
-  --adpcm-frame-ms MS           ADPCM frame duration, 10-100 ms. Default: 40.
+  --adpcm-frame-ms MS           ADPCM frame duration, 10-100 ms. Default: 20.
   --ffmpeg PATH                 ffmpeg executable path.
   --opus-bitrate RATE           Opus bitrate for ffmpeg modes. Default: 24k.
   --aac-bitrate RATE            AAC bitrate for native/compatible modes. Default: 32k.

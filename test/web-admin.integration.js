@@ -156,10 +156,21 @@ async function run() {
     const publicPage = await request(publicPort, '/');
     assert.strictEqual(publicPage.statusCode, 200);
     assert.match(publicPage.body, /Initial test/);
+    assert.match(publicPage.headers['content-security-policy'], /worker-src 'self'/);
+
+    const audioWorklet = await request(publicPort, '/assets/audio-worklet.js');
+    assert.strictEqual(audioWorklet.statusCode, 200);
+    assert.match(audioWorklet.headers['content-type'], /application\/javascript/);
+    assert.match(audioWorklet.body, /registerProcessor\('airband-pcm'/);
+    const audioRingBuffer = await request(publicPort, '/assets/audio-ring-buffer.mjs');
+    assert.strictEqual(audioRingBuffer.statusCode, 200);
+    assert.match(audioRingBuffer.body, /class MonoPcmRingBuffer/);
 
     const activePlayer = await openControlWebSocket(publicPort, '/test/control?clientId=integration-player');
     const hubMonitor = await openControlWebSocket(publicPort, '/test/control?monitor=1&clientId=integration-hub');
-    await activePlayer.waitForMessage('config');
+    const playerConfig = await activePlayer.waitForMessage('config');
+    assert.strictEqual(playerConfig.audioWorkletStreaming, true);
+    assert.strictEqual(playerConfig.adpcmFrameMs, 20);
     await hubMonitor.waitForMessage('config');
 
     const updated = {
@@ -318,6 +329,8 @@ function testServerConfigTemplateUpdate() {
     assert.strictEqual((fs.readFileSync(configPath, 'utf8').match(/^\[admin\]$/gm) || []).length, 1);
     assert.strictEqual(fs.existsSync(temporaryPath), false);
     assert.match(DEFAULT_SERVER_CONFIG_TEMPLATE, /\[storage\]/);
+    assert.match(DEFAULT_SERVER_CONFIG_TEMPLATE, /\[audio\][\s\S]*worklet_streaming = true/);
+    assert.match(DEFAULT_SERVER_CONFIG_TEMPLATE, /adpcm_frame_ms = 20/);
   } finally {
     fs.rmSync(temporaryDir, { recursive: true, force: true });
   }
@@ -325,6 +338,7 @@ function testServerConfigTemplateUpdate() {
 
 function testRuntimeDetection() {
   assert.deepStrictEqual(parseArgs(['--migrate', '-D']), { migrate: true, debug: true });
+  assert.deepStrictEqual(parseArgs(['--audio-worklet-streaming', 'false']), { audioWorkletStreaming: 'false' });
   const noTty = { stdin: {}, stdout: {}, stderr: {} };
   assert.strictEqual(detectRuntimeMode({ INVOCATION_ID: 'test-service' }, noTty), 'systemd');
   assert.strictEqual(detectRuntimeMode({ JOURNAL_STREAM: '8:1' }, noTty), 'systemd');
