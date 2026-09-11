@@ -52,6 +52,12 @@ Loop a file into the default `test` stream:
 python3 tools/file-to-udp.py sample.mp3 --loop
 ```
 
+To test UDP cadence with 20 ms chunks:
+
+```bash
+python3 tools/file-to-udp.py sample.mp3 --chunk-ms 20 --loop
+```
+
 Send to a different host or port:
 
 ```bash
@@ -75,6 +81,7 @@ Available arguments:
 - `input_file`: audio file to read.
 - `--ip`: destination IP address. Default: `127.0.0.1`.
 - `--port`: destination UDP port. Default: `8690`.
+- `--chunk-ms`: PCM datagram duration. Default: `100` ms.
 - `--rate`: output sample rate. Default: `8000`.
 - `--channels`: output channel count. Default: `1`.
 - `--volume`: ffmpeg volume multiplier. Default: `0.35`.
