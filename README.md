@@ -463,7 +463,7 @@ For individual streams, the browser can play either:
 - `Uncompressed`: original float32 PCM over WebSocket. This is the default on desktop browsers and feeds the persistent AudioWorklet directly when available.
 - `Compressed`: low-latency IMA ADPCM over WebSocket by default. This is the default on mobile browsers; decoded PCM feeds the same AudioWorklet.
 
-The AudioWorklet keeps a bounded mono ring buffer, resamples continuously to the device output rate, and applies limited clock-drift correction. It starts near an 80 ms target and discards stale audio if the queue exceeds 500 ms. AudioWorklet requires a secure browser context outside localhost. If it cannot be loaded, playback falls back automatically to the previous per-packet scheduler. AAC, Opus, HLS, and Multi Stream keep their existing playback paths.
+The AudioWorklet keeps a bounded mono ring buffer, resamples continuously to the device output rate, and applies limited clock-drift correction. It starts near an 80 ms target and discards stale audio if the queue exceeds 200 ms. AudioWorklet requires a secure browser context outside localhost. If it cannot be loaded, playback falls back automatically to the previous per-packet scheduler. AAC, Opus, HLS, and Multi Stream keep their existing playback paths.
 
 Persistent AudioWorklet playback continued with the screen locked on the tested iPhone, but this is not a universal background-playback guarantee. iOS may still suspend network delivery, the audio context, or the page depending on browser version, power state, and the duration of radio silence.
 

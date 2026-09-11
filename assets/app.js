@@ -83,7 +83,7 @@ let config = { sampleRate: 8000, channels: 1 };
 let queuedFrames = 0;
 const targetLatencySeconds = 0.05;
 const workletTargetLatencyMs = 80;
-const workletHighWaterMs = 500;
+const workletHighWaterMs = 200;
 const workletCapacitySeconds = 4;
 const workletMaxDrift = 0.004;
 const maxPcmPacketSeconds = 1;
@@ -150,6 +150,7 @@ let pausedMode = null;
 let statusHovering = false;
 let mobileStartupNoticeShown = false;
 let resumeAfterPageShow = false;
+let resumeAfterOnline = false;
 let receivedBytes = 0;
 let lastBandwidthBytes = 0;
 let lastBandwidthAt = Date.now();
@@ -1389,6 +1390,35 @@ document.addEventListener('visibilitychange', () => {
     .then(() => {
       if (audioWorkletNeedsReset) resetAudioWorklet();
       audioWorkletNeedsReset = false;
+    })
+    .catch(() => {});
+});
+
+window.addEventListener('offline', () => {
+  resumeAfterOnline = Boolean(audioStarted && !streamPaused);
+  clearTimeout(controlReconnectTimer);
+  controlReconnectTimer = null;
+  wsGeneration += 1;
+  if (controlWs) {
+    controlWs.close();
+    controlWs = null;
+  }
+  stopRaw();
+  stopOpus();
+  stopCompatible();
+  resetAudioWorklet();
+  setStatus('', 'disconnected');
+});
+
+window.addEventListener('online', () => {
+  connectControlWebSocket();
+  if (!resumeAfterOnline || !audioStarted || streamPaused) return;
+  resumeAfterOnline = false;
+  const resumed = audioContext ? audioContext.resume() : Promise.resolve();
+  resumed
+    .then(() => {
+      resetAudioWorklet();
+      startSelectedMode(preferredMode);
     })
     .catch(() => {});
 });
