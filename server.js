@@ -35,7 +35,7 @@ const { createLogger } = require('./lib/logger');
 const { createFramePacer } = require('./lib/frame-pacer');
 const { createRawPcmFramer } = require('./lib/raw-pcm');
 const { DEFAULT_STREAMS, loadStreams, loadStreamsFromConfig, renderMultiStreamPage, renderStreamList, validateStreams } = require('./lib/streams');
-const { acceptWebSocket, encodeWsBinary, sendWsBinary, sendWsEncoded, sendWsJson } = require('./lib/websocket');
+const { acceptWebSocket, attachWsControlFrames, encodeWsBinary, sendWsBinary, sendWsEncoded, sendWsJson } = require('./lib/websocket');
 const { createCompressedManager } = require('./lib/compressed');
 const { createGeoService } = require('./lib/geo-service');
 const { aggregateGeoStats } = require('./lib/geo-stats');
@@ -566,7 +566,7 @@ function handleHttpRequest(req, res) {
 }
 
 function attachUpgradeHandler(server) {
-  server.on('upgrade', (req, socket) => {
+  server.on('upgrade', (req, socket, head) => {
     const remoteAddress = getRemoteAddress(req, socket);
     if (typeof socket.setNoDelay === 'function') socket.setNoDelay(true);
     const requestUrl = new URL(req.url, `${socket.encrypted ? 'https' : 'http'}://${req.headers.host || 'localhost'}`);
@@ -630,7 +630,7 @@ function attachUpgradeHandler(server) {
       recordClientActivity('disconnected', stream.name, connectionLogMode, clientId, remoteAddress);
       removeWsClient(stream, socket);
     });
-    socket.on('data', () => {});
+    attachWsControlFrames(socket, head);
   });
 }
 
