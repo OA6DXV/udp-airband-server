@@ -171,6 +171,7 @@ async function run() {
     const playerConfig = await activePlayer.waitForMessage('config');
     assert.strictEqual(playerConfig.audioWorkletStreaming, true);
     assert.strictEqual(playerConfig.adpcmFrameMs, 20);
+    assert.strictEqual(playerConfig.adpcmPacing, true);
     await hubMonitor.waitForMessage('config');
 
     const updated = {
@@ -339,6 +340,7 @@ function testServerConfigTemplateUpdate() {
 function testRuntimeDetection() {
   assert.deepStrictEqual(parseArgs(['--migrate', '-D']), { migrate: true, debug: true });
   assert.deepStrictEqual(parseArgs(['--audio-worklet-streaming', 'false']), { audioWorkletStreaming: 'false' });
+  assert.deepStrictEqual(parseArgs(['--adpcm-pacing', 'false']), { adpcmPacing: 'false' });
   const noTty = { stdin: {}, stdout: {}, stderr: {} };
   assert.strictEqual(detectRuntimeMode({ INVOCATION_ID: 'test-service' }, noTty), 'systemd');
   assert.strictEqual(detectRuntimeMode({ JOURNAL_STREAM: '8:1' }, noTty), 'systemd');

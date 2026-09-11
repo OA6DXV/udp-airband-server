@@ -10,6 +10,7 @@ const sentBytes = new Map();
 const manager = createCompressedManager({
   aacBitrate: '32k',
   adpcmFrameMs: 20,
+  adpcmPacing: false,
   addListenerBytes(stream, clientId, mode, bytes) {
     sentBytes.set(clientId, (sentBytes.get(clientId) || 0) + bytes);
   },

@@ -111,6 +111,7 @@ const audioWorkletStreaming = parseBoolean(args.audioWorkletStreaming !== undefi
 const compressedEnabled = parseBoolean(args.compressedEnabled !== undefined ? args.compressedEnabled : getSetting(serverConfig, 'compressed.enabled', true));
 const compressedCodec = String(args.compressedCodec || args.codec || getSetting(serverConfig, 'compressed.codec', 'adpcm')).trim().toLowerCase();
 const adpcmFrameMs = Number(args.adpcmFrameMs || getSetting(serverConfig, 'compressed.adpcmFrameMs', 20));
+const adpcmPacing = parseBoolean(args.adpcmPacing !== undefined ? args.adpcmPacing : getSetting(serverConfig, 'compressed.adpcmPacing', true));
 const opusBitrate = args.opusBitrate || getSetting(serverConfig, 'compressed.opusBitrate', '24k');
 const aacBitrate = args.aacBitrate || getSetting(serverConfig, 'compressed.aacBitrate', '32k');
 const opusKeepaliveMs = Number(args.opusKeepaliveMs || getSetting(serverConfig, 'compressed.keepaliveMs', 1000));
@@ -287,6 +288,7 @@ const hlsRoot = compressedEnabled ? fs.mkdtempSync(path.join(os.tmpdir(), 'udp-a
 const compressed = createCompressedManager({
   aacBitrate,
   adpcmFrameMs,
+  adpcmPacing,
   addListenerBytes,
   addListenerMode,
   ensureListenerStats,
@@ -1054,6 +1056,7 @@ function streamConfig(stream) {
     compressedCodec,
     adpcmAvailable: compressedEnabled,
     adpcmFrameMs,
+    adpcmPacing,
     opusAvailable,
     opusBitrate,
     aacAvailable: opusAvailable && compressedCodec === 'aac',
@@ -1615,6 +1618,7 @@ Compressed audio:
   --compressed-codec CODEC      Compressed codec: adpcm, opus, aac, or hls.
   --codec CODEC                 Alias for --compressed-codec.
   --adpcm-frame-ms MS           ADPCM frame duration, 10-100 ms. Default: 20.
+  --adpcm-pacing true|false     Pace ADPCM frames at their media cadence. Default: true.
   --ffmpeg PATH                 ffmpeg executable path.
   --opus-bitrate RATE           Opus bitrate for ffmpeg modes. Default: 24k.
   --aac-bitrate RATE            AAC bitrate for native/compatible modes. Default: 32k.

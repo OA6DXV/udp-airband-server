@@ -91,6 +91,7 @@ worklet_streaming = true
 enabled = true
 codec = adpcm
 adpcm_frame_ms = 20
+adpcm_pacing = true
 ffmpeg = ffmpeg
 opus_bitrate = 24k
 aac_bitrate = 32k
@@ -116,6 +117,7 @@ Campos importantes:
 - `[logging].colors`: usa `true` para colorear logs en terminal. Mantenlo en `false` para logs normales de servicio con `systemd`.
 - `[ssl]`: modo HTTPS opcional para el mismo host y puerto de `[web]`. Activalo y define rutas validas `key` y `cert` cuando quieras que Node.js sirva TLS directamente. Si SSL esta activado pero faltan las rutas del certificado o son invalidas, el servidor muestra un warning y cae a HTTP en el mismo puerto.
 - `[audio].worklet_streaming`: activa la entrega persistente mediante AudioWorklet para streams individuales raw y ADPCM. Los navegadores incompatibles o contextos inseguros usan automaticamente el scheduler anterior.
+- `[compressed].adpcm_pacing`: espacia los frames ADPCM codificados segun su cadencia para que paquetes UDP grandes no lleguen al navegador como una rafaga.
 - `[compressed].enabled`: usa `false` para desactivar todos los modos comprimidos y su logica de transcoding/framing.
 - `[compressed].codec`: backend del modo comprimido. `adpcm` es la opcion predeterminada de baja latencia y no requiere `ffmpeg`.
 

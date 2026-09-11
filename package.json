@@ -8,7 +8,7 @@
     "start": "node server.js",
     "admin:setup": "node tools/create-admin.js",
     "check": "node --check server.js",
-    "test": "node test/audio-ring-buffer.mjs && node test/adpcm-delivery.js && node test/admin-secrets.js && node test/admin-users.js && node test/admin-auth.security.js && node test/web-admin.integration.js"
+    "test": "node test/audio-ring-buffer.mjs && node test/adpcm-pacer.js && node test/adpcm-delivery.js && node test/admin-secrets.js && node test/admin-users.js && node test/admin-auth.security.js && node test/web-admin.integration.js"
   },
   "license": "MIT",
   "engines": {
