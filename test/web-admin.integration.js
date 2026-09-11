@@ -170,8 +170,8 @@ async function run() {
     const hubMonitor = await openControlWebSocket(publicPort, '/test/control?monitor=1&clientId=integration-hub');
     const playerConfig = await activePlayer.waitForMessage('config');
     assert.strictEqual(playerConfig.audioWorkletStreaming, true);
-    assert.strictEqual(playerConfig.workletTargetLatencyMs, 80);
-    assert.strictEqual(playerConfig.workletHighWaterMs, 200);
+    assert.strictEqual(playerConfig.workletTargetLatencyMs, 160);
+    assert.strictEqual(playerConfig.workletHighWaterMs, 320);
     assert.strictEqual(playerConfig.rawFrameMs, 20);
     assert.strictEqual(playerConfig.rawPacing, true);
     assert.strictEqual(playerConfig.adpcmFrameMs, 20);
@@ -348,8 +348,8 @@ function testServerConfigTemplateUpdate() {
     assert.strictEqual(fs.existsSync(temporaryPath), false);
     assert.match(DEFAULT_SERVER_CONFIG_TEMPLATE, /\[storage\]/);
     assert.match(DEFAULT_SERVER_CONFIG_TEMPLATE, /\[audio\][\s\S]*worklet_streaming = true/);
-    assert.match(DEFAULT_SERVER_CONFIG_TEMPLATE, /worklet_target_latency_ms = 80/);
-    assert.match(DEFAULT_SERVER_CONFIG_TEMPLATE, /worklet_high_water_ms = 200/);
+    assert.match(DEFAULT_SERVER_CONFIG_TEMPLATE, /worklet_target_latency_ms = 160/);
+    assert.match(DEFAULT_SERVER_CONFIG_TEMPLATE, /worklet_high_water_ms = 320/);
     assert.match(DEFAULT_SERVER_CONFIG_TEMPLATE, /\[audio\][\s\S]*raw_pacing = true/);
     assert.match(DEFAULT_SERVER_CONFIG_TEMPLATE, /adpcm_frame_ms = 20/);
   } finally {

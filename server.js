@@ -111,8 +111,8 @@ const geoIpv6Anonymize = String(getSetting(serverConfig, 'geo.ipv6Anonymize', '/
 const audioWorkletStreaming = parseBoolean(args.audioWorkletStreaming !== undefined
   ? args.audioWorkletStreaming
   : getSetting(serverConfig, 'audio.workletStreaming', true));
-const workletTargetLatencyMs = Number(args.workletTargetLatencyMs || getSetting(serverConfig, 'audio.workletTargetLatencyMs', 80));
-const workletHighWaterMs = Number(args.workletHighWaterMs || getSetting(serverConfig, 'audio.workletHighWaterMs', 200));
+const workletTargetLatencyMs = Number(args.workletTargetLatencyMs || getSetting(serverConfig, 'audio.workletTargetLatencyMs', 160));
+const workletHighWaterMs = Number(args.workletHighWaterMs || getSetting(serverConfig, 'audio.workletHighWaterMs', 320));
 const rawPacing = parseBoolean(args.rawPacing !== undefined
   ? args.rawPacing
   : getSetting(serverConfig, 'audio.rawPacing', true));
@@ -1645,8 +1645,8 @@ Public web player:
   --audio-worklet-streaming true|false
                                 Enable persistent AudioWorklet delivery for raw/ADPCM streams.
   --worklet-target-latency-ms MS
-                                Worklet jitter target, 20-500 ms. Default: 80.
-  --worklet-high-water-ms MS    Worklet backlog limit above target, up to 2000 ms. Default: 200.
+                                Worklet jitter target, 20-500 ms. Default: 160.
+  --worklet-high-water-ms MS    Worklet backlog limit above target, up to 2000 ms. Default: 320.
   --raw-pacing true|false       Pace raw PCM frames at 20 ms media cadence. Default: true.
 
 Web Admin:

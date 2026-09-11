@@ -82,12 +82,12 @@ let gainNode;
 let config = { sampleRate: 8000, channels: 1 };
 let queuedFrames = 0;
 const targetLatencySeconds = 0.05;
-const defaultWorkletTargetLatencyMs = 80;
-const defaultWorkletHighWaterMs = 200;
+const defaultWorkletTargetLatencyMs = 160;
+const defaultWorkletHighWaterMs = 320;
 const workletCapacitySeconds = 4;
 const workletMaxDrift = 0.004;
 const maxPcmPacketSeconds = 1;
-const maxToleratedAdpcmSequenceGap = 10;
+const maxToleratedAdpcmSequenceGap = 5;
 let nextPlayTime = 0;
 let gain = Number(gainInput.value);
 let lastPeak = 0;
@@ -893,7 +893,14 @@ function startAdpcmCompressed() {
       if (missingPackets > 0) {
         adpcmSequenceGaps += 1;
         if (missingPackets <= maxToleratedAdpcmSequenceGap) {
-          adpcmMissingFrames += missingPackets * decoded.frames;
+          const missingFrames = missingPackets * decoded.frames;
+          adpcmMissingFrames += missingFrames;
+          deliverPcm(
+            new Float32Array(missingFrames * decoded.channels),
+            missingFrames,
+            decoded.sampleRate,
+            decoded.channels,
+          );
         } else {
           resetAudioWorklet();
         }
