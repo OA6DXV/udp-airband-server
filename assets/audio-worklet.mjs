@@ -50,8 +50,14 @@ class AirbandPcmProcessor extends AudioWorkletProcessor {
     const output = channels[0];
     if (!output) return true;
 
-    if (this.ring) this.ring.render(output, sampleRate);
-    else output.fill(0);
+    if (this.ring) {
+      const wasStarted = this.ring.started;
+      this.ring.render(output, sampleRate);
+      if (!wasStarted && this.ring.started) this.postDiagnostics('started');
+      if (wasStarted && !this.ring.started) this.postDiagnostics('underrun');
+    } else {
+      output.fill(0);
+    }
     for (let channel = 1; channel < channels.length; channel += 1) channels[channel].set(output);
 
     this.framesUntilTelemetry -= output.length;

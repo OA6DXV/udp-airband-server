@@ -433,6 +433,7 @@ function applyAudioWorkletPreference() {
     if (audioStarted && !audioWorkletNode && !audioWorkletFailed) ensureAudioWorklet();
     return;
   }
+  clearPendingAudioWorkletPcm();
   if (audioWorkletNode) {
     audioWorkletNode.port.postMessage({ type: 'reset' });
     audioWorkletNode.disconnect();
