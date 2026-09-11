@@ -84,10 +84,13 @@ enabled = false
 key =
 cert =
 
+[audio]
+worklet_streaming = true
+
 [compressed]
 enabled = true
 codec = adpcm
-adpcm_frame_ms = 40
+adpcm_frame_ms = 20
 ffmpeg = ffmpeg
 opus_bitrate = 24k
 aac_bitrate = 32k
@@ -112,6 +115,7 @@ Campos importantes:
 - `[logging].timestamps`: usa `true` para anteponer timestamps ISO. Con `systemd`, normalmente puede quedar en `false` porque `journalctl` ya agrega timestamps.
 - `[logging].colors`: usa `true` para colorear logs en terminal. Mantenlo en `false` para logs normales de servicio con `systemd`.
 - `[ssl]`: modo HTTPS opcional para el mismo host y puerto de `[web]`. Activalo y define rutas validas `key` y `cert` cuando quieras que Node.js sirva TLS directamente. Si SSL esta activado pero faltan las rutas del certificado o son invalidas, el servidor muestra un warning y cae a HTTP en el mismo puerto.
+- `[audio].worklet_streaming`: activa la entrega persistente mediante AudioWorklet para streams individuales raw y ADPCM. Los navegadores incompatibles o contextos inseguros usan automaticamente el scheduler anterior.
 - `[compressed].enabled`: usa `false` para desactivar todos los modos comprimidos y su logica de transcoding/framing.
 - `[compressed].codec`: backend del modo comprimido. `adpcm` es la opcion predeterminada de baja latencia y no requiere `ffmpeg`.
 
@@ -452,10 +456,14 @@ Los navegadores mostraran una advertencia con certificados autogenerados porque 
 
 ## Modos Uncompressed Y Compressed
 
-El navegador puede reproducir:
+Para streams individuales, el navegador puede reproducir:
 
-- `Uncompressed`: PCM float32 original sobre WebSocket. Es el modo predeterminado en navegadores de escritorio.
-- `Compressed`: IMA ADPCM de baja latencia sobre WebSocket por defecto. Es el modo predeterminado en navegadores moviles.
+- `Uncompressed`: PCM float32 original sobre WebSocket. Es el modo predeterminado en navegadores de escritorio y alimenta directamente al AudioWorklet persistente cuando esta disponible.
+- `Compressed`: IMA ADPCM de baja latencia sobre WebSocket por defecto. Es el modo predeterminado en navegadores moviles; el PCM decodificado alimenta al mismo AudioWorklet.
+
+El AudioWorklet mantiene un ring buffer mono acotado, remuestrea continuamente a la frecuencia real de salida y aplica una correccion limitada de deriva de reloj. Inicia cerca de un objetivo de 80 ms y descarta audio viejo si la cola supera 500 ms. AudioWorklet requiere un contexto seguro fuera de localhost. Si no puede cargarse, la reproduccion vuelve automaticamente al scheduler anterior por paquetes. AAC, Opus, HLS y Multi Stream conservan sus rutas actuales.
+
+La reproduccion persistente mediante AudioWorklet continuo con la pantalla bloqueada en el iPhone probado, pero esto no garantiza background universal. iOS todavia puede suspender la red, el contexto de audio o la pagina segun la version del navegador, el estado de energia y la duracion del silencio de radio.
 
 ADPCM esta pensado para audio de radio intermitente. El servidor solo envia frames comprimidos cuando llega audio UDP, asi que los periodos con squelch cerrado no consumen ancho de banda de audio. Cada frame ADPCM incluye suficiente estado de decodificacion para que nuevos clientes, o clientes luego de un silencio, puedan resincronizarse rapidamente.
 
@@ -465,7 +473,7 @@ El modo comprimido predeterminado es:
 [compressed]
 enabled = true
 codec = adpcm
-adpcm_frame_ms = 40
+adpcm_frame_ms = 20
 ```
 
 Codecs comprimidos soportados:

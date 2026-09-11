@@ -2,6 +2,20 @@
 
 ## 1.9-testing - Unreleased
 
+### English
+
+- Added optional persistent AudioWorklet delivery for individual raw and ADPCM streams, with automatic fallback to the legacy scheduler.
+- Added a bounded mono ring buffer, continuous output-rate resampling, limited clock-drift correction, stale-audio dropping, lifecycle resets, and low-rate diagnostics.
+- Reduced the default ADPCM frame duration from 40 ms to 20 ms for faster startup while keeping low bandwidth usage.
+- Kept AAC, Opus, HLS, and Multi Stream playback paths unchanged.
+
+### Espanol
+
+- Se agrego entrega persistente opcional mediante AudioWorklet para streams individuales raw y ADPCM, con fallback automatico al scheduler anterior.
+- Se agrego ring buffer mono acotado, remuestreo continuo a la salida, correccion limitada de deriva de reloj, descarte de audio viejo, resets de ciclo de vida y diagnosticos de baja frecuencia.
+- Se redujo la duracion predeterminada de frames ADPCM de 40 ms a 20 ms para iniciar mas rapido manteniendo bajo consumo de ancho de banda.
+- Se conservaron sin cambios las rutas de reproduccion AAC, Opus, HLS y Multi Stream.
+
 ## 1.8 - 2026-07-29
 
 ### English
