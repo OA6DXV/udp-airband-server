@@ -420,17 +420,7 @@ function handleUdpMessage(stream, msg) {
     addListenerBytes(stream, clientId, 'raw', msg.length);
   }
 
-  for (const opusClient of stream.opusClients) {
-    if (!compressed.isWritableClient(opusClient)) {
-      compressed.cleanupClient(stream, opusClient);
-      continue;
-    }
-    if (opusClient.backpressured) {
-      opusClient.droppedBytes += msg.length;
-      continue;
-    }
-    compressed.writeInput(stream, opusClient, msg);
-  }
+  compressed.writeStreamInput(stream, msg);
 }
 
 function handleHttpRequest(req, res) {
