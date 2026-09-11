@@ -7,6 +7,7 @@ const path = require('path');
 const { createCompressedManager } = require('../lib/compressed');
 
 const sentBytes = new Map();
+let encodedFrames = 0;
 const manager = createCompressedManager({
   aacBitrate: '32k',
   adpcmFrameMs: 20,
@@ -16,6 +17,10 @@ const manager = createCompressedManager({
   },
   addListenerMode() {},
   debugEnabled: false,
+  encodeWsBinary(frame) {
+    encodedFrames += 1;
+    return { payload: frame };
+  },
   ffmpegPath: 'ffmpeg',
   fs,
   hlsRoot: '/tmp',
@@ -27,6 +32,10 @@ const manager = createCompressedManager({
   removeListenerMode() {},
   sendWsBinary(socket, frame) {
     socket.frames.push(Buffer.from(frame));
+    return !socket.applyBackpressure;
+  },
+  sendWsEncoded(socket, frame) {
+    socket.frames.push(Buffer.from(frame.payload));
     return !socket.applyBackpressure;
   },
   spawn() { throw new Error('ffmpeg must not be used for ADPCM'); },
@@ -63,6 +72,7 @@ manager.writeStreamInput(stream, samples.subarray(333 * 4));
 
 assert.strictEqual(first.frames.length, 5);
 assert.strictEqual(second.frames.length, 5);
+assert.strictEqual(encodedFrames, 5, 'each shared ADPCM frame must be WebSocket-encoded only once');
 assert.strictEqual(stream.adpcmPendingBuffer.length, 0);
 for (let index = 0; index < first.frames.length; index += 1) {
   assert.deepStrictEqual(first.frames[index], second.frames[index], 'all clients must receive identical ADPCM');

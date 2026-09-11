@@ -35,7 +35,7 @@ const { createLogger } = require('./lib/logger');
 const { createFramePacer } = require('./lib/frame-pacer');
 const { createRawPcmFramer } = require('./lib/raw-pcm');
 const { DEFAULT_STREAMS, loadStreams, loadStreamsFromConfig, renderMultiStreamPage, renderStreamList, validateStreams } = require('./lib/streams');
-const { acceptWebSocket, sendWsBinary, sendWsJson } = require('./lib/websocket');
+const { acceptWebSocket, encodeWsBinary, sendWsBinary, sendWsEncoded, sendWsJson } = require('./lib/websocket');
 const { createCompressedManager } = require('./lib/compressed');
 const { createGeoService } = require('./lib/geo-service');
 const { aggregateGeoStats } = require('./lib/geo-stats');
@@ -314,7 +314,9 @@ const compressed = createCompressedManager({
   normalizeClientId: (value) => normalizeClientId(value, crypto),
   path,
   removeListenerMode,
+  encodeWsBinary,
   sendWsBinary,
+  sendWsEncoded,
   spawn,
   spawnSync,
   opusBitrate,
@@ -443,6 +445,7 @@ function writeRawInput(stream, msg) {
 }
 
 function deliverRawFrame(stream, frame) {
+  const encodedFrame = encodeWsBinary(frame);
   for (const [client, clientId] of stream.rawClients) {
     if (client.destroyed || client.writableLength > MAX_SOCKET_BUFFER_BYTES) {
       logger.warn('raw_client_backpressure', { stream: stream.name, client: clientId, writableLength: client.writableLength });
@@ -450,7 +453,7 @@ function deliverRawFrame(stream, frame) {
       removeWsClient(stream, client);
       continue;
     }
-    const ok = sendWsBinary(client, frame);
+    const ok = sendWsEncoded(client, encodedFrame);
     addListenerBytes(stream, clientId, 'raw', frame.length);
     if (!ok) {
       logger.warn('raw_client_backpressure', { stream: stream.name, client: clientId, writableLength: client.writableLength });
