@@ -87,6 +87,7 @@ const defaultWorkletHighWaterMs = 200;
 const workletCapacitySeconds = 4;
 const workletMaxDrift = 0.004;
 const maxPcmPacketSeconds = 1;
+const maxToleratedAdpcmSequenceGap = 10;
 let nextPlayTime = 0;
 let gain = Number(gainInput.value);
 let lastPeak = 0;
@@ -119,6 +120,8 @@ let adpcmWs;
 let adpcmReconnectTimer;
 let suppressAdpcmReconnect = false;
 let lastAdpcmSequence = null;
+let adpcmSequenceGaps = 0;
+let adpcmMissingFrames = 0;
 let opusAudio;
 let opusSourceNode;
 let opusAnalyser;
@@ -530,6 +533,8 @@ window.getAudioWorkletDiagnostics = () => ({
   transport: currentMode === 'raw' ? 'raw' : activeCompressedKind || currentMode,
   lastFrameAt: lastAudioAt,
   suspendedDroppedFrames: audioWorkletSuspendedDrops,
+  adpcmSequenceGaps,
+  adpcmMissingFrames,
   ...(audioWorkletDiagnostics || {}),
 });
 
@@ -865,6 +870,8 @@ function startAdpcmCompressed() {
   currentMode = 'opus';
   activeCompressedKind = 'adpcm';
   lastAdpcmSequence = null;
+  adpcmSequenceGaps = 0;
+  adpcmMissingFrames = 0;
   if (audioContext) {
     nextPlayTime = audioContext.currentTime + targetLatencySeconds;
   }
@@ -880,8 +887,17 @@ function startAdpcmCompressed() {
     const decoded = decodeAdpcmFrame(event.data);
     if (!decoded) return;
 
-    if (lastAdpcmSequence !== null && decoded.sequence !== ((lastAdpcmSequence + 1) >>> 0)) {
-      resetAudioWorklet();
+    if (lastAdpcmSequence !== null) {
+      const expectedSequence = (lastAdpcmSequence + 1) >>> 0;
+      const missingPackets = (decoded.sequence - expectedSequence) >>> 0;
+      if (missingPackets > 0) {
+        adpcmSequenceGaps += 1;
+        if (missingPackets <= maxToleratedAdpcmSequenceGap) {
+          adpcmMissingFrames += missingPackets * decoded.frames;
+        } else {
+          resetAudioWorklet();
+        }
+      }
     }
     lastAdpcmSequence = decoded.sequence;
 
