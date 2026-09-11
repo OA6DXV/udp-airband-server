@@ -99,6 +99,11 @@ assert.strictEqual(stream.adpcmPendingBuffer.length, 0, 'stale partial PCM must 
 assert.strictEqual(first.frames.at(-1).readUInt32LE(12), 19);
 assert.strictEqual(second.frames.at(-1).readUInt32LE(12), 19);
 
+assert.strictEqual(manager.releaseWebSocket(stream, first), true);
+assert.strictEqual(first.destroyed, false, 'a client close handshake must be allowed to flush its response');
+assert.strictEqual(stream.opusClients.size, 1);
+assert.strictEqual(manager.releaseWebSocket(stream, first), false, 'releasing the same socket twice must be harmless');
+
 console.log('ADPCM shared delivery tests passed');
 
 function createSocket() {
