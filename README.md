@@ -86,6 +86,8 @@ cert =
 
 [audio]
 worklet_streaming = true
+worklet_target_latency_ms = 80
+worklet_high_water_ms = 200
 raw_pacing = true
 
 [compressed]
@@ -118,6 +120,8 @@ Important fields:
 - `[logging].colors`: set to `true` to color terminal logs. Keep it `false` for normal `systemd` service logs.
 - `[ssl]`: optional HTTPS mode for the same `[web]` host and port. Enable it and provide valid `key` and `cert` paths when you want Node.js to serve TLS directly. If SSL is enabled but the certificate paths are missing or invalid, the server logs a warning and falls back to HTTP on the same port.
 - `[audio].worklet_streaming`: enables the persistent AudioWorklet delivery path for individual raw and ADPCM streams. Unsupported or insecure browser contexts automatically use the legacy scheduler.
+- `[audio].worklet_target_latency_ms`: initial jitter-buffer target for raw and ADPCM AudioWorklet playback. The default is 80 ms.
+- `[audio].worklet_high_water_ms`: backlog ceiling that causes stale Worklet audio to be discarded. It must exceed the target; the default is 200 ms.
 - `[audio].raw_pacing`: splits raw PCM into 20 ms frames and spaces them at their media cadence so large UDP packets do not reach the browser as a burst.
 - `[compressed].adpcm_pacing`: spaces encoded ADPCM frames at their media cadence so large UDP packets do not reach the browser as a burst.
 - `[compressed].enabled`: set to `false` to disable all compressed modes and their transcoding/framing logic.

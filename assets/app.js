@@ -82,8 +82,8 @@ let gainNode;
 let config = { sampleRate: 8000, channels: 1 };
 let queuedFrames = 0;
 const targetLatencySeconds = 0.05;
-const workletTargetLatencyMs = 80;
-const workletHighWaterMs = 200;
+const defaultWorkletTargetLatencyMs = 80;
+const defaultWorkletHighWaterMs = 200;
 const workletCapacitySeconds = 4;
 const workletMaxDrift = 0.004;
 const maxPcmPacketSeconds = 1;
@@ -375,14 +375,16 @@ async function ensureAudioWorklet() {
 
 function configureAudioWorklet(inputSampleRate, channels) {
   if (!audioWorkletNode) return false;
-  const key = `${inputSampleRate}:${channels}`;
+  const targetLatencyMs = Number(config.workletTargetLatencyMs) || defaultWorkletTargetLatencyMs;
+  const highWaterMs = Number(config.workletHighWaterMs) || defaultWorkletHighWaterMs;
+  const key = `${inputSampleRate}:${channels}:${targetLatencyMs}:${highWaterMs}`;
   if (key === audioWorkletConfiguration) return true;
   audioWorkletNode.port.postMessage({
     type: 'configure',
     inputSampleRate,
     channels,
-    targetLatencyMs: workletTargetLatencyMs,
-    highWaterMs: workletHighWaterMs,
+    targetLatencyMs,
+    highWaterMs,
     capacitySeconds: workletCapacitySeconds,
     maxDrift: workletMaxDrift,
   });
@@ -466,7 +468,8 @@ function deliverPcm(samples, frames, inputSampleRate, channels) {
 function queuePendingAudioWorkletPcm(samples, frames, inputSampleRate, channels) {
   pendingAudioWorkletPcm.push({ samples, frames, inputSampleRate, channels });
   pendingAudioWorkletFrames += frames;
-  const maximumFrames = Math.max(1, Math.round(inputSampleRate * workletHighWaterMs / 1000));
+  const highWaterMs = Number(config.workletHighWaterMs) || defaultWorkletHighWaterMs;
+  const maximumFrames = Math.max(1, Math.round(inputSampleRate * highWaterMs / 1000));
   while (pendingAudioWorkletFrames > maximumFrames && pendingAudioWorkletPcm.length > 1) {
     const dropped = pendingAudioWorkletPcm.shift();
     pendingAudioWorkletFrames -= dropped.frames;

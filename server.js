@@ -111,6 +111,8 @@ const geoIpv6Anonymize = String(getSetting(serverConfig, 'geo.ipv6Anonymize', '/
 const audioWorkletStreaming = parseBoolean(args.audioWorkletStreaming !== undefined
   ? args.audioWorkletStreaming
   : getSetting(serverConfig, 'audio.workletStreaming', true));
+const workletTargetLatencyMs = Number(args.workletTargetLatencyMs || getSetting(serverConfig, 'audio.workletTargetLatencyMs', 80));
+const workletHighWaterMs = Number(args.workletHighWaterMs || getSetting(serverConfig, 'audio.workletHighWaterMs', 200));
 const rawPacing = parseBoolean(args.rawPacing !== undefined
   ? args.rawPacing
   : getSetting(serverConfig, 'audio.rawPacing', true));
@@ -263,6 +265,12 @@ if (!COMPRESSED_CODECS.has(compressedCodec)) {
 }
 if (!Number.isInteger(adpcmFrameMs) || adpcmFrameMs < 10 || adpcmFrameMs > 100) {
   fatal('--adpcm-frame-ms must be between 10 and 100');
+}
+if (!Number.isInteger(workletTargetLatencyMs) || workletTargetLatencyMs < 20 || workletTargetLatencyMs > 500) {
+  fatal('--worklet-target-latency-ms must be between 20 and 500');
+}
+if (!Number.isInteger(workletHighWaterMs) || workletHighWaterMs <= workletTargetLatencyMs || workletHighWaterMs > 2000) {
+  fatal('--worklet-high-water-ms must exceed the target latency and be at most 2000');
 }
 const publicDir = __dirname;
 const indexHtml = fs.readFileSync(path.join(publicDir, 'index.html'));
@@ -1106,6 +1114,8 @@ function streamConfig(stream) {
     channels: stream.channels,
     format: 'f32le',
     audioWorkletStreaming,
+    workletTargetLatencyMs,
+    workletHighWaterMs,
     rawFrameMs: RAW_FRAME_MS,
     rawPacing,
     compressedEnabled,
@@ -1634,6 +1644,9 @@ Public web player:
   --http PORT                   Alias for --http-port.
   --audio-worklet-streaming true|false
                                 Enable persistent AudioWorklet delivery for raw/ADPCM streams.
+  --worklet-target-latency-ms MS
+                                Worklet jitter target, 20-500 ms. Default: 80.
+  --worklet-high-water-ms MS    Worklet backlog limit above target, up to 2000 ms. Default: 200.
   --raw-pacing true|false       Pace raw PCM frames at 20 ms media cadence. Default: true.
 
 Web Admin:
