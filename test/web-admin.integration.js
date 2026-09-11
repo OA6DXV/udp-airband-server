@@ -170,9 +170,24 @@ async function run() {
     const hubMonitor = await openControlWebSocket(publicPort, '/test/control?monitor=1&clientId=integration-hub');
     const playerConfig = await activePlayer.waitForMessage('config');
     assert.strictEqual(playerConfig.audioWorkletStreaming, true);
+    assert.strictEqual(playerConfig.rawFrameMs, 20);
+    assert.strictEqual(playerConfig.rawPacing, true);
     assert.strictEqual(playerConfig.adpcmFrameMs, 20);
     assert.strictEqual(playerConfig.adpcmPacing, true);
     await hubMonitor.waitForMessage('config');
+
+    const firstRaw = await openControlWebSocket(publicPort, '/test/audio?clientId=integration-raw-first');
+    const secondRaw = await openControlWebSocket(publicPort, '/test/audio?clientId=integration-raw-second');
+    const rawInput = Buffer.alloc(800 * 4);
+    for (let sample = 0; sample < 800; sample += 1) rawInput.writeFloatLE(Math.sin(sample / 10), sample * 4);
+    await sendUdpBuffer(initialUdpPort, rawInput);
+    const firstRawFrames = await firstRaw.waitForBinaryCount(5);
+    const secondRawFrames = await secondRaw.waitForBinaryCount(5);
+    assert.deepStrictEqual(firstRawFrames.map((frame) => frame.length), [640, 640, 640, 640, 640]);
+    assert.deepStrictEqual(firstRawFrames, secondRawFrames, 'raw clients must receive identical 20 ms PCM frames');
+    assert.deepStrictEqual(Buffer.concat(firstRawFrames), rawInput);
+    firstRaw.close();
+    secondRaw.close();
 
     const updated = {
       streams: [{
@@ -331,6 +346,7 @@ function testServerConfigTemplateUpdate() {
     assert.strictEqual(fs.existsSync(temporaryPath), false);
     assert.match(DEFAULT_SERVER_CONFIG_TEMPLATE, /\[storage\]/);
     assert.match(DEFAULT_SERVER_CONFIG_TEMPLATE, /\[audio\][\s\S]*worklet_streaming = true/);
+    assert.match(DEFAULT_SERVER_CONFIG_TEMPLATE, /\[audio\][\s\S]*raw_pacing = true/);
     assert.match(DEFAULT_SERVER_CONFIG_TEMPLATE, /adpcm_frame_ms = 20/);
   } finally {
     fs.rmSync(temporaryDir, { recursive: true, force: true });
@@ -340,6 +356,7 @@ function testServerConfigTemplateUpdate() {
 function testRuntimeDetection() {
   assert.deepStrictEqual(parseArgs(['--migrate', '-D']), { migrate: true, debug: true });
   assert.deepStrictEqual(parseArgs(['--audio-worklet-streaming', 'false']), { audioWorkletStreaming: 'false' });
+  assert.deepStrictEqual(parseArgs(['--raw-pacing', 'false']), { rawPacing: 'false' });
   assert.deepStrictEqual(parseArgs(['--adpcm-pacing', 'false']), { adpcmPacing: 'false' });
   const noTty = { stdin: {}, stdout: {}, stderr: {} };
   assert.strictEqual(detectRuntimeMode({ INVOCATION_ID: 'test-service' }, noTty), 'systemd');
@@ -710,6 +727,8 @@ function openControlWebSocket(port, pathname) {
     const socket = net.createConnection({ host: '127.0.0.1', port });
     const messages = [];
     const waiters = [];
+    const binaryMessages = [];
+    const binaryWaiters = [];
     let buffer = Buffer.alloc(0);
     let handshakeComplete = false;
 
@@ -720,6 +739,16 @@ function openControlWebSocket(port, pathname) {
         const waiter = waiters.splice(index, 1)[0];
         clearTimeout(waiter.timer);
         waiter.resolve(message);
+      }
+    }
+
+    function dispatchBinary(payload) {
+      binaryMessages.push(Buffer.from(payload));
+      for (let index = binaryWaiters.length - 1; index >= 0; index -= 1) {
+        if (binaryMessages.length < binaryWaiters[index].count) continue;
+        const waiter = binaryWaiters.splice(index, 1)[0];
+        clearTimeout(waiter.timer);
+        waiter.resolve(binaryMessages.slice(0, waiter.count));
       }
     }
 
@@ -741,6 +770,7 @@ function openControlWebSocket(port, pathname) {
         const payload = buffer.subarray(headerLength, headerLength + payloadLength);
         buffer = buffer.subarray(headerLength + payloadLength);
         if (opcode === 0x1) dispatch(JSON.parse(payload.toString('utf8')));
+        if (opcode === 0x2) dispatchBinary(payload);
       }
     }
 
@@ -777,6 +807,21 @@ function openControlWebSocket(port, pathname) {
                 }, timeoutMs),
               };
               waiters.push(waiter);
+            });
+          },
+          waitForBinaryCount(count, timeoutMs = 3000) {
+            if (binaryMessages.length >= count) return Promise.resolve(binaryMessages.slice(0, count));
+            return new Promise((resolveMessages, rejectMessages) => {
+              const waiter = {
+                count,
+                resolve: resolveMessages,
+                timer: setTimeout(() => {
+                  const index = binaryWaiters.indexOf(waiter);
+                  if (index >= 0) binaryWaiters.splice(index, 1);
+                  rejectMessages(new Error(`Timed out waiting for ${count} binary WebSocket messages`));
+                }, timeoutMs),
+              };
+              binaryWaiters.push(waiter);
             });
           },
         });
@@ -855,10 +900,14 @@ function bindUdp(socket, port) {
 }
 
 function sendUdpFloat(port) {
+  const packet = Buffer.alloc(4);
+  packet.writeFloatLE(0.25, 0);
+  return sendUdpBuffer(port, packet);
+}
+
+function sendUdpBuffer(port, packet) {
   return new Promise((resolve, reject) => {
     const socket = dgram.createSocket('udp4');
-    const packet = Buffer.alloc(4);
-    packet.writeFloatLE(0.25, 0);
     socket.send(packet, port, '127.0.0.1', (err) => {
       socket.close();
       if (err) reject(err);

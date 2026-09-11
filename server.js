@@ -28,10 +28,12 @@ const {
   getActiveListeners,
   getLastHeard,
   pruneInactiveListeners,
-  removeWsClient,
+  removeWsClient: removeTrackedWsClient,
   removeListenerMode,
 } = require('./lib/listeners');
 const { createLogger } = require('./lib/logger');
+const { createFramePacer } = require('./lib/frame-pacer');
+const { createRawPcmFramer } = require('./lib/raw-pcm');
 const { DEFAULT_STREAMS, loadStreams, loadStreamsFromConfig, renderMultiStreamPage, renderStreamList, validateStreams } = require('./lib/streams');
 const { acceptWebSocket, sendWsBinary, sendWsJson } = require('./lib/websocket');
 const { createCompressedManager } = require('./lib/compressed');
@@ -45,6 +47,7 @@ const { createWebAdmin } = require('./lib/web-admin-secure');
 
 const MAX_SOCKET_BUFFER_BYTES = 1024 * 1024;
 const MAX_OPUS_STDIN_BUFFER_BYTES = 512 * 1024;
+const RAW_FRAME_MS = 20;
 const SOFTWARE_VERSION = '1.9-testing';
 const COMPRESSED_CODECS = new Set(['adpcm', 'opus', 'aac', 'hls']);
 const serverInstanceId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
@@ -108,6 +111,9 @@ const geoIpv6Anonymize = String(getSetting(serverConfig, 'geo.ipv6Anonymize', '/
 const audioWorkletStreaming = parseBoolean(args.audioWorkletStreaming !== undefined
   ? args.audioWorkletStreaming
   : getSetting(serverConfig, 'audio.workletStreaming', true));
+const rawPacing = parseBoolean(args.rawPacing !== undefined
+  ? args.rawPacing
+  : getSetting(serverConfig, 'audio.rawPacing', true));
 const compressedEnabled = parseBoolean(args.compressedEnabled !== undefined ? args.compressedEnabled : getSetting(serverConfig, 'compressed.enabled', true));
 const compressedCodec = String(args.compressedCodec || args.codec || getSetting(serverConfig, 'compressed.codec', 'adpcm')).trim().toLowerCase();
 const adpcmFrameMs = Number(args.adpcmFrameMs || getSetting(serverConfig, 'compressed.adpcmFrameMs', 20));
@@ -285,6 +291,14 @@ const tlsOptions = sslRequested ? loadTlsOptions() : null;
 const tlsEnabled = Boolean(tlsOptions);
 const adminTlsOptions = webAdminEnabled && adminSecure ? loadAdminTlsOptions() : null;
 const hlsRoot = compressedEnabled ? fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-hls-')) : '';
+const rawPcmFramer = createRawPcmFramer({ frameMs: RAW_FRAME_MS });
+const rawPacer = createFramePacer({
+  frameMs: RAW_FRAME_MS,
+  deliver: deliverRawFrame,
+  onDrop(stream, frames) {
+    if (debugEnabled) logger.debug('raw_pacer_overflow', { stream: stream.name, droppedFrames: frames.length });
+  },
+});
 const compressed = createCompressedManager({
   aacBitrate,
   adpcmFrameMs,
@@ -411,6 +425,24 @@ function handleUdpMessage(stream, msg) {
   stream.levelPeakAt = stream.lastUdpAt;
   nativeMultiAac.pushPcm(stream, msg);
 
+  writeRawInput(stream, msg);
+
+  compressed.writeStreamInput(stream, msg);
+}
+
+function writeRawInput(stream, msg) {
+  if (stream.rawClients.size === 0) {
+    resetRawDelivery(stream);
+    return;
+  }
+  if (!rawPacing) {
+    deliverRawFrame(stream, msg);
+    return;
+  }
+  rawPacer.enqueue(stream, rawPcmFramer.push(stream, msg));
+}
+
+function deliverRawFrame(stream, frame) {
   for (const [client, clientId] of stream.rawClients) {
     if (client.destroyed || client.writableLength > MAX_SOCKET_BUFFER_BYTES) {
       logger.warn('raw_client_backpressure', { stream: stream.name, client: clientId, writableLength: client.writableLength });
@@ -418,11 +450,25 @@ function handleUdpMessage(stream, msg) {
       removeWsClient(stream, client);
       continue;
     }
-    sendWsBinary(client, msg);
-    addListenerBytes(stream, clientId, 'raw', msg.length);
+    const ok = sendWsBinary(client, frame);
+    addListenerBytes(stream, clientId, 'raw', frame.length);
+    if (!ok) {
+      logger.warn('raw_client_backpressure', { stream: stream.name, client: clientId, writableLength: client.writableLength });
+      client.destroy();
+      removeWsClient(stream, client);
+    }
   }
+}
 
-  compressed.writeStreamInput(stream, msg);
+function resetRawDelivery(stream) {
+  rawPacer.reset(stream);
+  rawPcmFramer.reset(stream);
+}
+
+function removeWsClient(stream, socket) {
+  const wasRawClient = stream.rawClients.has(socket);
+  removeTrackedWsClient(stream, socket);
+  if (wasRawClient && stream.rawClients.size === 0) resetRawDelivery(stream);
 }
 
 function handleHttpRequest(req, res) {
@@ -945,6 +991,7 @@ function closeStreamClients(stream) {
   stream.controlClients.clear();
   stream.monitorClients.clear();
   stream.rawClients.clear();
+  resetRawDelivery(stream);
   stream.listenerStats.clear();
 }
 
@@ -1051,6 +1098,8 @@ function streamConfig(stream) {
     channels: stream.channels,
     format: 'f32le',
     audioWorkletStreaming,
+    rawFrameMs: RAW_FRAME_MS,
+    rawPacing,
     compressedEnabled,
     compressedAvailable,
     compressedCodec,
@@ -1577,6 +1626,7 @@ Public web player:
   --http PORT                   Alias for --http-port.
   --audio-worklet-streaming true|false
                                 Enable persistent AudioWorklet delivery for raw/ADPCM streams.
+  --raw-pacing true|false       Pace raw PCM frames at 20 ms media cadence. Default: true.
 
 Web Admin:
   --webserver PORT              Enable Web Admin on PORT. Overrides [admin].enabled and [admin].port.

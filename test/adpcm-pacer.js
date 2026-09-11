@@ -1,14 +1,14 @@
 'use strict';
 
 const assert = require('assert');
-const { createAdpcmPacer } = require('../lib/compressed/adpcm-pacer');
+const { createFramePacer } = require('../lib/frame-pacer');
 
 let currentTime = 1000;
 let scheduled = [];
 const delivered = [];
 const dropped = [];
 const stream = {};
-const pacer = createAdpcmPacer({
+const pacer = createFramePacer({
   frameMs: 20,
   maxQueueMs: 80,
   now: () => currentTime,
