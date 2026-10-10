@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9-preview - 2026-10-10
+
+### English
+
+- Added direct libopus encoding of 20 ms float PCM frames for 8 kHz and 16 kHz single streams, with no FFmpeg dependency for Opus.
+- Shared one Opus encoder among listeners of a stream and retained it for 10 seconds after the last listener disconnects.
+- Added WebCodecs Opus decoding and AudioWorklet PCM playback for the single-stream browser profiles: raw, ADPCM, and Opus Realtime.
+- Replaced the single-stream Compatible AAC choice with Opus Realtime. Legacy AAC/HLS and multi-stream native AAC still use FFmpeg.
+- Added native build and UDP-to-WebSocket integration tests. iPhone locked-screen playback remains a device validation step.
+
+### Espanol
+
+- Se agrego codificacion directa con libopus de frames PCM float de 20 ms para streams individuales de 8 kHz y 16 kHz, sin depender de FFmpeg para Opus.
+- Se comparte un encoder Opus entre los oyentes de cada stream y se conserva durante 10 segundos tras desconectarse el ultimo.
+- Se agrego decodificacion Opus con WebCodecs y reproduccion PCM con AudioWorklet para raw, ADPCM y Opus Realtime en el reproductor individual.
+- Se reemplazo la opcion Compatible AAC individual por Opus Realtime. AAC/HLS heredados y AAC nativo multistream siguen usando FFmpeg.
+- Se agregaron pruebas de compilacion nativa y de UDP a WebSocket. La reproduccion con la pantalla del iPhone bloqueada queda pendiente de validar en el dispositivo.
+
 ## 1.8 - 2026-07-29
 
 ### English

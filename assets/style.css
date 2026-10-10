@@ -394,7 +394,7 @@ button.audio-muted {
   margin-top: 2px;
 }
 
-.mode-button.compatible-mode {
+.mode-button.opus-live-mode {
   border-color: var(--wave);
 }
 
@@ -439,8 +439,8 @@ button.audio-muted {
   border-color: var(--accent);
 }
 
-.mode-option.compatible-option:hover,
-.mode-option.compatible-option:focus-visible {
+.mode-option.opus-live-option:hover,
+.mode-option.opus-live-option:focus-visible {
   border-color: var(--wave);
 }
 
@@ -449,7 +449,7 @@ button.audio-muted {
   color: #06100b;
 }
 
-.mode-option.compatible-option.active {
+.mode-option.opus-live-option.active {
   border-color: var(--wave);
   background: var(--wave);
   color: #160500;

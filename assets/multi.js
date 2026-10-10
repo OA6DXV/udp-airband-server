@@ -1,4 +1,11 @@
 const streamData = JSON.parse(document.getElementById('streamData').textContent);
+const appBasePath = new URL(document.baseURI).pathname;
+function appPath(path) {
+  return `${appBasePath}${String(path).replace(/^\/+/, '')}`;
+}
+function appWebSocketUrl(path) {
+  return `${wsProtocol()}://${location.host}${appPath(path)}`;
+}
 const allStreams = streamData.streams || [];
 const selectedNames = new URLSearchParams(location.search).get('streams');
 const selectedSet = new Set(String(selectedNames || '').split(',').map((item) => item.trim()).filter(Boolean));
@@ -131,7 +138,7 @@ statusEl.addEventListener('mouseleave', () => {
 if (multiStartButton) {
   multiStartButton.addEventListener('click', () => {
     if (streamsUnavailable) {
-      location.href = '/';
+      location.href = appPath('');
       return;
     }
     if (pendingNoticeMode) rememberNoticeAccepted(modeNoticeKeyForMode(pendingNoticeMode));
@@ -346,7 +353,7 @@ function buildNativeMultiAudioUrl() {
     clientId: getClientId(),
     t: String(Date.now()),
   });
-  return `/multi/native.aac?${query.toString()}`;
+  return `${appPath('multi/native.aac')}?${query.toString()}`;
 }
 
 function updateMediaSessionMetadata() {
@@ -563,7 +570,7 @@ function showStreamsUnavailable() {
     hideServerNotice();
   }
   if (!multiStartOverlay) {
-    location.href = '/';
+    location.href = appPath('');
     return;
   }
   if (multiNoticeTitle) multiNoticeTitle.textContent = t('streamsUnavailableTitle');
@@ -708,7 +715,7 @@ class MultiStreamPlayer {
 
   connectControl() {
     if (this.controlWs && this.controlWs.readyState <= 1) return;
-    this.controlWs = new WebSocket(`${wsProtocol()}://${location.host}/${encodeURIComponent(this.stream.name)}/control?clientId=${encodeURIComponent(this.clientId)}`);
+    this.controlWs = new WebSocket(`${appWebSocketUrl(`${encodeURIComponent(this.stream.name)}/control`)}?clientId=${encodeURIComponent(this.clientId)}`);
     this.controlWs.addEventListener('open', () => {
       this.controlOpen = true;
       updateHeader();
@@ -790,7 +797,7 @@ class MultiStreamPlayer {
   startRaw() {
     const generation = this.socketGeneration;
     this.currentMode = 'raw';
-    this.rawWs = new WebSocket(`${wsProtocol()}://${location.host}/${encodeURIComponent(this.stream.name)}/audio?clientId=${encodeURIComponent(this.clientId)}`);
+    this.rawWs = new WebSocket(`${appWebSocketUrl(`${encodeURIComponent(this.stream.name)}/audio`)}?clientId=${encodeURIComponent(this.clientId)}`);
     this.rawWs.binaryType = 'arraybuffer';
     this.rawWs.addEventListener('message', (event) => {
       if (generation !== this.socketGeneration) return;
@@ -811,7 +818,7 @@ class MultiStreamPlayer {
   startAdpcm() {
     const generation = this.socketGeneration;
     this.currentMode = 'opus';
-    this.adpcmWs = new WebSocket(`${wsProtocol()}://${location.host}/${encodeURIComponent(this.stream.name)}/adpcm?clientId=${encodeURIComponent(this.clientId)}`);
+    this.adpcmWs = new WebSocket(`${appWebSocketUrl(`${encodeURIComponent(this.stream.name)}/adpcm`)}?clientId=${encodeURIComponent(this.clientId)}`);
     this.adpcmWs.binaryType = 'arraybuffer';
     this.adpcmWs.addEventListener('message', (event) => {
       if (generation !== this.socketGeneration) return;
@@ -951,7 +958,7 @@ class MultiStreamPlayer {
         stream: this.stream.name,
         gain: String(this.muted ? 0 : this.gain),
       });
-      fetch(`/multi/native-gain?${query.toString()}`).catch(() => {});
+      fetch(`${appPath('multi/native-gain')}?${query.toString()}`).catch(() => {});
     };
     if (options.immediate) {
       clearTimeout(this.nativeGainTimer);
