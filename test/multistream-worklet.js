@@ -40,6 +40,7 @@ class Decoder {
 }
 
 async function main() {
+  let testNow = 1000;
   const timers = new Map();
   let timerId = 0;
   const context = {
@@ -50,7 +51,8 @@ async function main() {
     globalMode: 'opus', globalPaused: false, streamsUnavailable: false,
     multiPlaybackRequested: true, window: { AudioDecoder: {} },
     WebSocket: Socket, AudioWorkletNode: Worklet, Float32Array, ArrayBuffer,
-    Date, Math, Number, String, encodeURIComponent, console: { warn() {} },
+    Date: { now: () => testNow }, Math, Number, String, encodeURIComponent, console: { warn() {} },
+    updateHeader() {},
     getClientId: () => 'test-client', ensureAudioContext: () => context,
     loadWorkletModule: async () => {},
     loadOpusModule: async () => ({ supportsOpusAudioDecoder: async () => true, OpusWebCodecsDecoder: Decoder }),
@@ -101,6 +103,26 @@ async function main() {
   assert.equal(first.started, false);
   assert.equal(timers.size, 1, 'unexpected disconnect schedules one reconnect');
   first.pause();
+
+  first.levelMask = { style: {} };
+  first.levelDb = {};
+  first.paused = false;
+  first.receivedBytes = 0;
+  first.lastBandwidthBytes = 0;
+  first.lastBandwidthAt = testNow;
+  first.bandwidth = 0;
+  for (let i = 0; i < 4; i++) {
+    testNow += 250;
+    first.receivedBytes += 2000;
+    first.updateMeter();
+    assert.equal(first.bandwidth, i === 3 ? 64000 : 0);
+  }
+  first.connectControl();
+  first.controlWs.receive(JSON.stringify({ type: 'stats', listenerBitsPerSecond: 999999 }));
+  assert.equal(first.bandwidth, 64000, 'server stats must not overwrite the browser meter');
+  testNow += 250;
+  first.updateMeter();
+  assert.equal(first.bandwidth, 64000, 'meter must hold the value between one-second updates');
   assert.equal(timers.size, 0, 'pause cancels pending reconnect');
   assert.equal(first.worklet, null);
   assert.equal(first.decoder, null);

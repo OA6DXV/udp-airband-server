@@ -27,6 +27,7 @@ const languageMenu = document.getElementById('languageMenu');
 const languageOptions = Array.from(document.querySelectorAll('.language-option'));
 const multiStartOverlay = document.getElementById('multiStartOverlay');
 const multiStartButton = document.getElementById('multiStartButton');
+const multiPlayButton = document.getElementById('multiPlayButton');
 const multiNoticeTitle = document.getElementById('multiNoticeTitle');
 const multiNoticeBody = document.getElementById('multiNoticeBody');
 const modeButtons = Array.from(document.querySelectorAll('.multi-mode-button'));
@@ -38,11 +39,6 @@ const translations = {
     mode: 'Mode', audio: 'Audio', startAudio: 'Start', mute: 'Mute', unmute: 'Unmute', compressed: 'Compressed',
     uncompressed: 'Uncompressed', streamName: 'Stream', level: 'Level', never: 'never', now: 'Now',
     realTimeMode: 'RAW Audio', compatibleMode: 'Normal Mode', accept: 'Accept',
-    realTimeNoticeTitle: 'RAW Audio',
-    realTimeNoticeBody: 'This mode uses realtime per-stream audio with the lowest latency. It cannot keep playing in the background, so keep this page open and the device active.',
-    realTimeDesktopNoticeBody: 'This mode uses realtime per-stream audio with the lowest latency. Normal Mode is designed for smartphones.',
-    compatibleNoticeTitle: 'Normal Mode',
-    compatibleNoticeBody: 'This mode uses one mixed AAC stream. It can keep playing with the phone locked or in the background, but delay is variable and usually around 5 to 10 seconds.',
     serverDisconnected: 'Connection to the server was lost. Reconnecting...',
     serverRestarted: 'The server restarted. This page reconnected; refresh if audio does not resume.',
     streamsUnavailableTitle: 'Streams updated',
@@ -56,11 +52,6 @@ const translations = {
     mode: 'Modo', audio: 'Audio', startAudio: 'Iniciar', mute: 'Silenciar', unmute: 'Activar', compressed: 'Comprimido',
     uncompressed: 'Sin comprimir', streamName: 'Stream', level: 'Nivel', never: 'nunca', now: 'Ahora',
     realTimeMode: 'RAW Audio', compatibleMode: 'Normal Mode', accept: 'Aceptar',
-    realTimeNoticeTitle: 'RAW Audio',
-    realTimeNoticeBody: 'Este modo usa audio por stream en tiempo real con la menor latencia. No puede seguir sonando en segundo plano, asi que manten esta pagina abierta y el dispositivo activo.',
-    realTimeDesktopNoticeBody: 'Este modo usa audio por stream en tiempo real con la menor latencia. Normal Mode esta disenado para smartphones.',
-    compatibleNoticeTitle: 'Normal Mode',
-    compatibleNoticeBody: 'Este modo usa un stream AAC mezclado. Puede seguir sonando con el telefono bloqueado o en segundo plano, pero el delay es variable y suele rondar los 5 a 10 segundos.',
     serverDisconnected: 'Se perdio la conexion con el servidor. Reconectando...',
     serverRestarted: 'El servidor se reinicio. Esta pagina se reconecto; actualiza si el audio no vuelve.',
     streamsUnavailableTitle: 'Streams actualizados',
@@ -72,7 +63,6 @@ const translations = {
 
 let language = localStorage.getItem('udp-airband-language') || 'en';
 if (!translations[language]) language = 'en';
-const acceptedNoticeStoragePrefix = 'udp-airband-multi-notice-accepted:';
 let audioContext;
 let globalPaused = false;
 let statusHovering = false;
@@ -81,7 +71,6 @@ let multiPlaybackRequested = false;
 let globalMode = 'opus';
 let workletModulePromise;
 let opusModulePromise;
-let pendingNoticeMode = globalMode;
 let serverInstanceId = '';
 let serverNoticeEl;
 let serverNoticeKind = '';
@@ -135,14 +124,15 @@ if (multiStartButton) {
       location.href = appPath('');
       return;
     }
-    if (pendingNoticeMode) rememberNoticeAccepted(modeNoticeKeyForMode(pendingNoticeMode));
-    startMultiPlayback();
+
   });
 }
 
+multiPlayButton.addEventListener('click', startMultiPlayback);
+
 modeButtons.forEach((button) => {
   button.addEventListener('click', () => {
-    showModeNotice(button.dataset.mode);
+    setGlobalMode(button.dataset.mode);
   });
 });
 
@@ -214,12 +204,13 @@ function ensureAudioContext() {
 async function startMultiPlayback() {
   try {
     multiPlaybackRequested = true;
-    if (pendingNoticeMode) setGlobalMode(pendingNoticeMode, { deferStart: true });
+    globalPaused = false;
+    players.forEach((player) => { player.paused = false; });
     if (multiStartOverlay) multiStartOverlay.hidden = true;
     await startSelectedGlobalMode();
   } catch {
     multiPlaybackRequested = false;
-    if (multiStartOverlay) multiStartOverlay.hidden = false;
+    updateHeader();
   }
 }
 
@@ -291,44 +282,6 @@ function setGlobalMode(mode, options = {}) {
   }
 }
 
-function showModeNotice(mode) {
-  if (!['raw', 'opus'].includes(mode)) return;
-  pendingNoticeMode = mode;
-  setGlobalMode(mode, { deferStart: true });
-  if (hasAcceptedNotice(modeNoticeKeyForMode(mode))) {
-    if (multiPlaybackRequested) startSelectedGlobalMode().catch(() => {});
-    return;
-  }
-  if (multiNoticeTitle) multiNoticeTitle.textContent = t(mode === 'opus' ? 'compatibleNoticeTitle' : 'realTimeNoticeTitle');
-  if (multiNoticeBody) multiNoticeBody.textContent = t(noticeBodyKey(mode));
-  if (multiStartButton) multiStartButton.textContent = t('accept');
-  if (multiStartOverlay) multiStartOverlay.hidden = false;
-}
-
-function updateModeNotice() {
-  if (!pendingNoticeMode) return;
-  if (multiNoticeTitle) multiNoticeTitle.textContent = t(pendingNoticeMode === 'opus' ? 'compatibleNoticeTitle' : 'realTimeNoticeTitle');
-  if (multiNoticeBody) multiNoticeBody.textContent = t(noticeBodyKey(pendingNoticeMode));
-  if (multiStartButton) multiStartButton.textContent = t('accept');
-}
-
-function noticeBodyKey(mode) {
-  if (mode === 'opus') return 'compatibleNoticeBody';
-  return isMobileDevice() ? 'realTimeNoticeBody' : 'realTimeDesktopNoticeBody';
-}
-
-function modeNoticeKeyForMode(mode) {
-  return mode === 'opus' ? 'multi-opus-worklet-v1' : 'multi-raw-worklet-v1';
-}
-
-function hasAcceptedNotice(key) {
-  return sessionStorage.getItem(`${acceptedNoticeStoragePrefix}${key}`) === 'true';
-}
-
-function rememberNoticeAccepted(key) {
-  sessionStorage.setItem(`${acceptedNoticeStoragePrefix}${key}`, 'true');
-}
-
 function updateModeControls() {
   modeButtons.forEach((button) => {
     button.textContent = t(button.dataset.mode === 'opus' ? 'compatibleMode' : 'realTimeMode');
@@ -337,6 +290,8 @@ function updateModeControls() {
 }
 
 function updateHeader() {
+  multiPlayButton.hidden = players.some((player) => player.started);
+  multiPlayButton.textContent = t('startAudio');
   activeUsersEl.textContent = String(players.reduce((max, player) => Math.max(max, player.activeListeners || 0), 0));
   const totalBps = players.reduce((total, player) => total + player.bandwidth, 0);
   totalBandwidthEl.textContent = globalPaused || totalBps <= 0 ? 'Idle' : formatBandwidth(totalBps);
@@ -451,7 +406,6 @@ function applyLanguage() {
   languageOptions.forEach((option) => option.classList.toggle('active', option.dataset.lang === language));
   players.forEach((player) => player.updateLabels());
   updateModeControls();
-  updateModeNotice();
   if (serverNoticeEl && !serverNoticeEl.hidden) {
     const textEl = serverNoticeEl.querySelector('[data-role="server-notice-text"]');
     const reloadButton = serverNoticeEl.querySelector('[data-role="server-notice-reload"]');
@@ -588,7 +542,6 @@ class MultiStreamPlayer {
         showStreamsUnavailable();
       } else if (message.type === 'stats') {
         this.activeListeners = message.activeListeners || 0;
-        this.bandwidth = message.listenerBitsPerSecond || this.bandwidth || 0;
         this.lastHeardAt = message.lastHeardAt || 0;
         this.lastHeardLabel = message.lastHeardLabel || 'never';
         if (message.hasUdp) this.confirmed = true;
@@ -643,6 +596,8 @@ class MultiStreamPlayer {
       this.worklet.connect(this.gainNode);
       this.currentMode = this.mode;
       this.started = true;
+      this.lastBandwidthBytes = this.receivedBytes;
+      this.lastBandwidthAt = Date.now();
       this.paused = false;
       if (module) {
         this.decoder = new module.OpusWebCodecsDecoder({
@@ -762,9 +717,11 @@ class MultiStreamPlayer {
   updateMeter() {
     const now = Date.now();
     const elapsed = Math.max(0.001, (now - this.lastBandwidthAt) / 1000);
-    this.bandwidth = this.paused ? 0 : Math.max(0, (this.receivedBytes - this.lastBandwidthBytes) * 8 / elapsed);
-    this.lastBandwidthBytes = this.receivedBytes;
-    this.lastBandwidthAt = now;
+    if (elapsed >= 1) {
+      this.bandwidth = this.paused ? 0 : Math.max(0, (this.receivedBytes - this.lastBandwidthBytes) * 8 / elapsed);
+      this.lastBandwidthBytes = this.receivedBytes;
+      this.lastBandwidthAt = now;
+    }
     if (!this.lastAudioAt || now - this.lastAudioAt > 400 || globalPaused) {
       this.peak = 0;
     } else {
@@ -781,7 +738,9 @@ class MultiStreamPlayer {
     this.updateCompactLabel();
     this.modeButton.textContent = this.mode === 'opus' ? t('compatibleMode') : t('realTimeMode');
     this.startButton.textContent = this.started ? (this.muted ? t('unmute') : t('mute')) : t('startAudio');
+    this.startButton.classList.toggle('audio-start-prompt', !this.started);
     this.startButton.title = this.playbackError;
+    updateHeader();
     this.startButton.textContent = this.playbackError ? this.playbackError : this.startButton.textContent;
     this.updateCardModeState();
   }
@@ -857,7 +816,6 @@ function init() {
   connectPlayers();
   updateHeader();
   updateClocks();
-  showModeNotice(globalMode);
   setInterval(updateClocks, 1000);
   setInterval(updateMeters, 250);
 }

@@ -45,8 +45,6 @@ const multiTranslations = vm.runInNewContext(multiSource.match(/const translatio
 for (const language of ['en', 'es']) {
   assert.equal(multiTranslations[language].realTimeMode, 'RAW Audio');
   assert.equal(multiTranslations[language].compatibleMode, 'Normal Mode');
-  assert.equal(multiTranslations[language].realTimeNoticeTitle, 'RAW Audio');
-  assert.equal(multiTranslations[language].compatibleNoticeTitle, 'Normal Mode');
 }
 const multiRouteSetup = multiSource.match(/const configuredBasePath = [\s\S]*?(?=const allStreams =)/)?.[0];
 assert.ok(multiRouteSetup, 'multistream route setup must exist');

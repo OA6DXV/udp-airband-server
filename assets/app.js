@@ -32,12 +32,6 @@ const translations = {
   en: {
     users: 'Users', gain: 'Gain', startAudio: 'Start Audio', mute: 'Mute', unmute: 'Unmute', buffered: 'Buffered', bandwidth: 'Bandwidth', lastHeardTime: 'Last Heard Time', mode: 'Mode', level: 'Level', localTime: 'Local Time', disconnected: 'Disconnected', waitingUdp: 'Waiting for UDP', connected: 'Connected', idle: 'Push to Reconnect', pushDisconnect: 'Push to disconnect', stopStream: 'Stop stream', returnHome: 'Click to return home', opusUnavailable: 'Compressed unavailable', compressed: 'Compressed', uncompressed: 'Uncompressed', switchMode: 'Switch audio mode', opusNeedsFfmpeg: 'Compressed mode is unavailable on the server', never: 'never', now: 'Now',
     opusLive: 'Opus Realtime', opusLiveUnavailable: 'Realtime Opus unavailable', modeUnavailable: 'Mode unavailable',
-    opusLiveNoticeTitle: 'Opus Realtime Background Profile',
-    opusLiveNoticeBody: 'This profile uses 20 ms Opus packets and AudioWorklet playback for low delay and low bandwidth. Background playback depends on the browser and device; tap Accept to start audio.',
-    uncompressedNoticeTitle: 'Uncompressed Realtime Mode',
-    uncompressedNoticeBody: 'This mode uses raw realtime audio with AudioWorklet playback. Background playback depends on the browser and device.',
-    compressedNoticeTitle: 'Compressed Realtime Mode',
-    compressedNoticeBody: 'This mode uses realtime compressed audio with AudioWorklet playback. Background playback depends on the browser and device.',
     serverDisconnected: 'Connection to the server was lost. Reconnecting...',
     serverRestarted: 'The server restarted. This page reconnected; refresh if audio does not resume.',
     streamUnavailableTitle: 'Stream updated',
@@ -49,12 +43,6 @@ const translations = {
   es: {
     users: 'Usuarios', gain: 'Ganancia', startAudio: 'Iniciar audio', mute: 'Silenciar', unmute: 'Activar audio', buffered: 'Buffer', bandwidth: 'Ancho de banda', lastHeardTime: 'Ultima transmision', mode: 'Modo', level: 'Nivel', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP', connected: 'Conectado', idle: 'Presiona para reconectar', pushDisconnect: 'Presiona para desconectar', stopStream: 'Detener stream', returnHome: 'Click para volver a la pagina principal', opusUnavailable: 'Comprimido no disponible', compressed: 'Comprimido', uncompressed: 'Sin comprimir', switchMode: 'Cambiar modo de audio', opusNeedsFfmpeg: 'El modo comprimido no esta disponible en el servidor', never: 'nunca', now: 'Ahora',
     opusLive: 'Opus Realtime', opusLiveUnavailable: 'Opus Realtime no disponible', modeUnavailable: 'Modo no disponible',
-    opusLiveNoticeTitle: 'Perfil Opus Realtime para background',
-    opusLiveNoticeBody: 'Este perfil usa paquetes Opus de 20 ms y AudioWorklet para baja latencia y consumo de datos. El audio en segundo plano depende del navegador y del dispositivo; pulsa Aceptar para iniciar.',
-    uncompressedNoticeTitle: 'Modo Realtime sin comprimir',
-    uncompressedNoticeBody: 'Este modo usa audio realtime crudo con AudioWorklet. La reproduccion en segundo plano depende del navegador y dispositivo.',
-    compressedNoticeTitle: 'Modo Realtime comprimido',
-    compressedNoticeBody: 'Este modo usa audio realtime comprimido con AudioWorklet. La reproduccion en segundo plano depende del navegador y dispositivo.',
     serverDisconnected: 'Se perdio la conexion con el servidor. Reconectando...',
     serverRestarted: 'El servidor se reinicio. Esta pagina se reconecto; actualiza si el audio no vuelve.',
     streamUnavailableTitle: 'Stream actualizado',
@@ -67,7 +55,6 @@ const translations = {
 
 let language = localStorage.getItem('udp-airband-language') || 'en';
 if (!translations[language]) language = 'en';
-const acceptedNoticeStoragePrefix = 'udp-airband-single-notice-accepted:';
 let currentStatusKey = 'disconnected';
 let lastHeardLabel = 'never';
 
@@ -230,26 +217,7 @@ modeOptions.forEach((option) => {
 
 if (modeNoticeAccept) {
   modeNoticeAccept.addEventListener('click', () => {
-    if (modeNoticeOverlay?.dataset.notice === 'stream-unavailable') {
-      location.href = appPath('');
-      return;
-    }
-    if (modeNoticeOverlay?.dataset.notice === 'startup-mode') {
-      const startupMode = modeNoticeOverlay.dataset.mode || preferredMode;
-      rememberNoticeAccepted(modeNoticeKeyForMode(startupMode));
-      applySelectedMode(startupMode);
-      delete modeNoticeOverlay.dataset.notice;
-      if (modeNoticeOverlay) modeNoticeOverlay.hidden = true;
-      startAudioPlayback().catch(() => {});
-      return;
-    }
-    const mode = modeNoticeOverlay ? modeNoticeOverlay.dataset.mode : '';
-    if (mode) {
-      rememberNoticeAccepted(modeNoticeKeyForMode(mode));
-      applySelectedMode(mode);
-      if (!audioStarted) startAudioPlayback().catch(() => {});
-    }
-    if (modeNoticeOverlay) modeNoticeOverlay.hidden = true;
+    if (modeNoticeOverlay?.dataset.notice === 'stream-unavailable') location.href = appPath('');
   });
 }
 
@@ -382,7 +350,6 @@ function connectControlWebSocket() {
           startSelectedMode();
         }
         updateModeButton();
-        showStartupNoticeIfNeeded();
         updateConnectionState();
         if (opusRealtimeServerAvailable) {
           probeOpusRealtimeSupport().then((supported) => {
@@ -390,8 +357,7 @@ function connectControlWebSocket() {
             opusRealtimeProbeComplete = true;
             if (!supported) normalizeUnavailablePreferredMode();
             updateModeButton();
-            showStartupNoticeIfNeeded();
-            if (supported && audioStarted && currentMode !== preferredMode) startSelectedMode(preferredMode);
+                if (supported && audioStarted && currentMode !== preferredMode) startSelectedMode(preferredMode);
             if (!supported && currentMode === 'opus-live') {
               stopOpusRealtime();
               startSelectedMode(preferredMode);
@@ -404,7 +370,7 @@ function connectControlWebSocket() {
       } else if (message.type === 'streamUnavailable') {
         showStreamUnavailable();
       } else if (message.type === 'stats') {
-        if (!streamPaused) {
+        if (!streamPaused && currentMode === 'compatible') {
           updateServerMeasuredBandwidth(message.listenerBitsPerSecond || 0);
         }
         activeUsersEl.textContent = String(message.activeListeners || message.clients || 0);
@@ -1417,6 +1383,7 @@ function updateBrowserBandwidth() {
   }
   const now = Date.now();
   const elapsedSeconds = Math.max(0.001, (now - lastBandwidthAt) / 1000);
+  if (elapsedSeconds < 1) return;
   const bitsPerSecond = Math.max(0, (receivedBytes - lastBandwidthBytes) * 8 / elapsedSeconds);
   lastBandwidthBytes = receivedBytes;
   lastBandwidthAt = now;
@@ -1475,13 +1442,7 @@ function applyLanguage() {
   });
   updateAudioButton();
   updateModeButton();
-  if (modeNoticeOverlay && !modeNoticeOverlay.hidden && modeNoticeOverlay.dataset.notice === 'startup-mode') {
-    showStartupModeNotice(modeNoticeOverlay.dataset.mode || preferredMode);
-  } else if (modeNoticeOverlay && !modeNoticeOverlay.hidden && modeNoticeOverlay.dataset.notice === 'stream-unavailable') {
-    showStreamUnavailable();
-  } else if (modeNoticeOverlay && !modeNoticeOverlay.hidden && modeNoticeOverlay.dataset.mode) {
-    showModeNotice(modeNoticeOverlay.dataset.mode);
-  }
+  if (modeNoticeOverlay && !modeNoticeOverlay.hidden && modeNoticeOverlay.dataset.notice === 'stream-unavailable') showStreamUnavailable();
   titleLink.title = t('returnHome');
   if (serverNoticeEl && !serverNoticeEl.hidden) {
     const textEl = serverNoticeEl.querySelector('[data-role="server-notice-text"]');
@@ -1528,14 +1489,13 @@ function selectMode(mode) {
   if (!['raw', 'opus', 'opus-live'].includes(mode) || !getAvailableModes().includes(mode)) return;
   closeModeMenu();
   if (mode === preferredMode && (!audioStarted || currentMode === mode)) return;
-  if (mode === 'opus-live' || mode === 'opus') {
-    showModeNotice(mode);
-    return;
-  }
   applySelectedMode(mode);
 }
 
 function applySelectedMode(mode) {
+  lastBandwidthBytes = receivedBytes;
+  lastBandwidthAt = Date.now();
+  browserBandwidthEl.textContent = 'Idle';
   setPreferredMode(mode);
   if (audioStarted) startSelectedMode();
   updateModeButton();
@@ -1561,75 +1521,6 @@ function closeModeMenu() {
   if (!modeMenu) return;
   modeMenu.hidden = true;
   modeButton.setAttribute('aria-expanded', 'false');
-}
-
-function showModeNotice(mode) {
-  if (hasAcceptedNotice(modeNoticeKeyForMode(mode))) {
-    applySelectedMode(mode);
-    if (!audioStarted) startAudioPlayback().catch(() => {});
-    return;
-  }
-  if (!modeNoticeOverlay) {
-    applySelectedMode(mode);
-    if (!audioStarted) startAudioPlayback().catch(() => {});
-    return;
-  }
-  delete modeNoticeOverlay.dataset.notice;
-  modeNoticeOverlay.dataset.mode = mode;
-  if (modeNoticeTitle) modeNoticeTitle.textContent = t(modeNoticeTitleKey(mode));
-  if (modeNoticeBody) modeNoticeBody.textContent = t(modeNoticeBodyKey(mode));
-  if (modeNoticeAccept) modeNoticeAccept.textContent = t('accept');
-  modeNoticeOverlay.hidden = false;
-}
-
-function showStartupNoticeIfNeeded() {
-  if (audioStarted) return;
-  if (isMobileDevice()) {
-    if (!opusRealtimeProbeComplete) return;
-    if (getAvailableModes().includes(preferredMode) && !hasAcceptedNotice(modeNoticeKeyForMode(preferredMode))) {
-      showStartupModeNotice(preferredMode);
-    }
-    return;
-  }
-  if (preferredMode !== 'raw' || !getAvailableModes().includes('raw') || hasAcceptedNotice(modeNoticeKeyForMode('raw'))) return;
-  showStartupModeNotice('raw');
-}
-
-function showStartupModeNotice(mode) {
-  if (!modeNoticeOverlay) return;
-  delete modeNoticeOverlay.dataset.notice;
-  modeNoticeOverlay.dataset.notice = 'startup-mode';
-  modeNoticeOverlay.dataset.mode = mode;
-  if (modeNoticeTitle) modeNoticeTitle.textContent = t(modeNoticeTitleKey(mode));
-  if (modeNoticeBody) modeNoticeBody.textContent = t(modeNoticeBodyKey(mode));
-  if (modeNoticeAccept) modeNoticeAccept.textContent = t('accept');
-  modeNoticeOverlay.hidden = false;
-}
-
-function modeNoticeTitleKey(mode) {
-  if (mode === 'opus-live') return 'opusLiveNoticeTitle';
-  if (mode === 'opus') return 'compressedNoticeTitle';
-  return 'uncompressedNoticeTitle';
-}
-
-function modeNoticeBodyKey(mode) {
-  if (mode === 'opus-live') return 'opusLiveNoticeBody';
-  if (mode === 'opus') return 'compressedNoticeBody';
-  return 'uncompressedNoticeBody';
-}
-
-function modeNoticeKeyForMode(mode) {
-  if (mode === 'opus-live') return 'opus-live';
-  if (mode === 'opus') return 'compressed-realtime-mode';
-  return 'uncompressed-realtime-mode';
-}
-
-function hasAcceptedNotice(key) {
-  return sessionStorage.getItem(`${acceptedNoticeStoragePrefix}${key}`) === 'true';
-}
-
-function rememberNoticeAccepted(key) {
-  sessionStorage.setItem(`${acceptedNoticeStoragePrefix}${key}`, 'true');
 }
 
 function getCompressedTransport() {
