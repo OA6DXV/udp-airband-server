@@ -503,6 +503,9 @@ function ensureServerNotice() {
 
 function startSelectedMode(mode = preferredMode) {
   if (streamPaused) return;
+  lastBandwidthBytes = receivedBytes;
+  lastBandwidthAt = Date.now();
+  browserBandwidthEl.textContent = 'Idle';
   if (mode === 'opus-live' && isOpusRealtimeAvailable()) {
     startOpusRealtime();
     updateModeButton();
