@@ -230,6 +230,50 @@ async function main() {
   assert.deepStrictEqual(delivered.map((entry) => entry.at), [1000, 1020]);
   pacer.reset(pacedStream);
 
+  // Feed 100 ms UDP batches while the server checks for silence every 20 ms.
+  // Timer callbacks deliberately run 1 ms late to exercise clock drift too.
+  for (const [sampleRate, channels] of [[8000, 1], [16000, 2]]) {
+    let time = 1000;
+    const pending = [];
+    const encoded = [];
+    let dropped = 0;
+    const testStream = { name: 'batched', sampleRate, channels };
+    const transport = createSharedOpus({
+      now: () => time,
+      setTimer: (callback, delay) => {
+        const timer = { callback, at: time + delay + 1, cancelled: false };
+        pending.push(timer);
+        return timer;
+      },
+      clearTimer: (timer) => { timer.cancelled = true; },
+      logger: { info: () => {}, warn: (event, data) => { dropped += data.frames; } },
+      createEncoder: () => ({
+        encode: (frame) => { encoded.push(frame.readFloatLE(0)); return Buffer.from([0xf8]); },
+        close: () => {},
+      }),
+      sendWsBinary: () => true,
+    });
+    transport.attach(testStream, client('batched'));
+    const input = Buffer.alloc(sampleRate / 10 * channels * 4);
+    for (let offset = 0; offset < input.length; offset += 4) input.writeFloatLE(0.25, offset);
+    for (; time < 11000; time += 1) {
+      for (const timer of pending.filter((item) => !item.cancelled && item.at <= time)) {
+        timer.cancelled = true;
+        timer.callback();
+      }
+      // Check silence first, including at the instant the next batch arrives.
+      if (time > 1000 && time % 20 === 0) transport.writeSilence([testStream]);
+      if (time % 100 === 0) transport.writeInput(testStream, input);
+    }
+    assert.strictEqual(dropped, 0, 'regular UDP batches must not overflow the queue');
+    assert.strictEqual(encoded.filter((value) => value === 0.25).length, 500, 'timer jitter must not accumulate media-clock drift');
+    assert(encoded.slice(1).every((value) => value === 0.25), 'silence must not interrupt queued real audio');
+    time = 11140;
+    transport.writeSilence([testStream]);
+    assert.strictEqual(encoded.at(-1), 0, 'silence must resume when UDP really stops');
+    transport.closeStream(testStream);
+  }
+
   const { MonoPcmRingBuffer } = await import('../assets/audio-ring-buffer.mjs');
   const ring = new MonoPcmRingBuffer({ inputSampleRate: 8000, channels: 2, targetLatencyMs: 20, highWaterMs: 100 });
   const stereo = new Float32Array(160 * 2);
