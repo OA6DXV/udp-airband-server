@@ -199,6 +199,90 @@ main {
   color: var(--text);
 }
 
+.section-manager {
+  padding: 16px 20px;
+  border-bottom: 1px solid #2b343f;
+}
+
+.section-manager-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.section-manager-heading h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.section-manager-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.section-rows {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.managed-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  background: #141920;
+}
+
+.section-name-control {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.section-name-control input {
+  max-width: 520px;
+}
+
+.section-actions,
+.order-controls {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.drag-handle {
+  cursor: grab;
+  touch-action: none;
+}
+
+.dragging {
+  opacity: 0.45;
+}
+
+.move-stream,
+.move-section,
+.remove-section {
+  font-size: 16px;
+}
+
+.order-cell {
+  width: 118px;
+  text-align: center;
+}
+
+.order-cell .icon-button:disabled,
+.section-actions .icon-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .chart-wrap {
   position: relative;
   height: 220px;
@@ -666,6 +750,24 @@ dialog::backdrop {
   .danger-panel .button,
   .server-actions {
     width: 100%;
+  }
+
+  .section-manager {
+    padding: 14px;
+  }
+
+  .section-manager-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .section-manager-heading .button {
+    width: 100%;
+  }
+
+  .managed-section {
+    align-items: center;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .server-actions {

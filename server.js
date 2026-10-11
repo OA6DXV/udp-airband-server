@@ -199,6 +199,7 @@ if (webAdminEnabled) {
 }
 const userHistory = storage.createUserHistory();
 const geoCache = storage.createGeoCache();
+const streamLayoutStore = storage.createStreamLayoutStore();
 const geoService = createGeoService({
   cache: geoCache,
   enabled: geoEnabled,
@@ -385,11 +386,17 @@ function handleHttpRequest(req, res) {
   }
 
   if (pathname === '/') {
-    sendHtml(res, renderStreamList(streams, { softwareVersion: SOFTWARE_VERSION, basePath: appBasePath }));
+    const layout = streamLayoutStore.apply(streams);
+    sendHtml(res, renderStreamList(layout.streams, {
+      basePath: appBasePath,
+      sections: layout.sections,
+      softwareVersion: SOFTWARE_VERSION,
+    }));
     return;
   }
   if (pathname === '/multi') {
-    sendHtml(res, renderMultiStreamPage(streams, { softwareVersion: SOFTWARE_VERSION, basePath: appBasePath }));
+    const layout = streamLayoutStore.apply(streams);
+    sendHtml(res, renderMultiStreamPage(layout.streams, { softwareVersion: SOFTWARE_VERSION, basePath: appBasePath }));
     return;
   }
   if (pathname === '/favicon.ico') {
@@ -622,7 +629,10 @@ async function startWebServers() {
       getAdminSetupRequired: () => !hasWebAdminUser(),
       getGeoStats: () => aggregateGeoStats(geoCache.entries()),
       getState: getWebAdminState,
-      getStreamConfigSnapshot: () => ({ streams: streams.map(streamFileEntry) }),
+      getStreamConfigSnapshot: () => ({
+        sections: streamLayoutStore.snapshot().sections,
+        streams: getAdminStreams().map((stream) => ({ ...streamFileEntry(stream), sectionId: stream.sectionId })),
+      }),
       host: webAdminHost,
       serverModule: adminTlsOptions ? https : http,
       tlsOptions: adminTlsOptions,
@@ -700,7 +710,7 @@ async function startWebServers() {
 let streamUpdateQueue = Promise.resolve();
 
 function replaceStreamsFromAdmin(payload) {
-  const operation = streamUpdateQueue.then(() => applyStreamReplacement(payload));
+  const operation = streamUpdateQueue.then(() => applyStreamReplacement(payload, { persistLayout: true }));
   streamUpdateQueue = operation.catch(() => {});
   return operation;
 }
@@ -721,7 +731,7 @@ function reloadStreamsFromDisk() {
   return operation;
 }
 
-async function applyStreamReplacement(payload) {
+async function applyStreamReplacement(payload, options = {}) {
   let candidateStreams;
   try {
     candidateStreams = loadStreamsFromConfig(payload, {
@@ -735,10 +745,63 @@ async function applyStreamReplacement(payload) {
     throw validationError;
   }
 
-  const changeScope = canUpdateStreamsInPlace(streams, candidateStreams) ? 'label' : 'structural';
+  let previousLayout = null;
+  if (options.persistLayout) {
+    previousLayout = streamLayoutStore.snapshot();
+    const rawStreams = Array.isArray(payload && payload.streams) ? payload.streams : [];
+    const requestedByName = new Map(rawStreams.map((stream) => [String(stream && stream.name || '').trim(), stream]));
+    const previousByName = new Map(previousLayout.streams.map((stream) => [stream.streamName, stream]));
+    const sections = Array.isArray(payload && payload.sections) ? payload.sections : previousLayout.sections;
+    const layout = candidateStreams.map((stream) => {
+      const requested = requestedByName.get(stream.name);
+      const previous = previousByName.get(stream.name);
+      return {
+        streamName: stream.name,
+        sectionId: requested && requested.sectionId !== undefined
+          ? requested.sectionId
+          : previous ? previous.sectionId : '',
+      };
+    });
+    try {
+      streamLayoutStore.replace(sections, layout);
+    } catch (err) {
+      const validationError = new Error(err.message);
+      validationError.statusCode = 400;
+      throw validationError;
+    }
+  }
+
+  try {
+    return await applyValidatedStreamReplacement(candidateStreams);
+  } catch (err) {
+    if (previousLayout) {
+      try {
+        streamLayoutStore.restore(previousLayout);
+      } catch (rollbackError) {
+        logger.error('stream_layout_rollback_failed', { error: rollbackError.message });
+      }
+    }
+    throw err;
+  }
+}
+
+async function applyValidatedStreamReplacement(candidateStreams) {
+  const changeScope = classifyStreamChanges(streams, candidateStreams);
+  if (changeScope === 'none') {
+    const layout = streamLayoutStore.apply(streams);
+    return {
+      ok: true,
+      changeScope,
+      message: 'Stream order and sections saved.',
+      streams: layout.streams.map(adminStreamState),
+      sections: layout.sections,
+    };
+  }
+
   const resolvedConfigPath = path.resolve(configPath);
   const temporaryConfigPath = `${resolvedConfigPath}.${process.pid}.tmp`;
-  const serializedConfig = `${JSON.stringify({ streams: candidateStreams.map(streamFileEntry) }, null, 2)}\n`;
+  const serializedStreams = preserveConfigOrder(candidateStreams, streams);
+  const serializedConfig = `${JSON.stringify({ streams: serializedStreams.map(streamFileEntry) }, null, 2)}\n`;
   try {
     fs.mkdirSync(path.dirname(resolvedConfigPath), { recursive: true });
     fs.writeFileSync(temporaryConfigPath, serializedConfig, { mode: 0o600 });
@@ -749,7 +812,7 @@ async function applyStreamReplacement(payload) {
   }
 
   const previousStreams = streams;
-  if (canUpdateStreamsInPlace(previousStreams, candidateStreams)) {
+  if (changeScope !== 'structural') {
     try {
       fs.renameSync(temporaryConfigPath, resolvedConfigPath);
     } catch (err) {
@@ -758,11 +821,13 @@ async function applyStreamReplacement(payload) {
       saveError.statusCode = 500;
       throw saveError;
     }
-    for (let index = 0; index < previousStreams.length; index += 1) {
-      previousStreams[index].label = candidateStreams[index].label;
-      broadcastControlEvent(previousStreams[index], {
+    const currentByName = new Map(previousStreams.map((stream) => [stream.name, stream]));
+    for (const candidate of candidateStreams) {
+      const current = currentByName.get(candidate.name);
+      current.label = candidate.label;
+      broadcastControlEvent(current, {
         type: 'streamUpdated',
-        stream: publicStreamState(previousStreams[index]),
+        stream: publicStreamState(current),
       });
     }
     logger.info('streams_reloaded', {
@@ -774,7 +839,8 @@ async function applyStreamReplacement(payload) {
       ok: true,
       changeScope,
       message: `${streams.length} stream${streams.length === 1 ? '' : 's'} updated without interrupting listeners.`,
-      streams: streams.map(adminStreamState),
+      streams: getAdminStreams(),
+      sections: streamLayoutStore.snapshot().sections,
     };
   }
 
@@ -822,16 +888,32 @@ async function applyStreamReplacement(payload) {
     ok: true,
     changeScope,
     message: `${streams.length} stream${streams.length === 1 ? '' : 's'} applied without restarting the server.`,
-    streams: streams.map(adminStreamState),
+    streams: getAdminStreams(),
+    sections: streamLayoutStore.snapshot().sections,
   };
 }
 
-function canUpdateStreamsInPlace(currentStreams, candidateStreams) {
-  if (currentStreams.length !== candidateStreams.length) return false;
-  return currentStreams.every((stream, index) => {
-    const candidate = candidateStreams[index];
-    return hasSameStreamTransport(stream, candidate);
-  });
+function classifyStreamChanges(currentStreams, candidateStreams) {
+  if (currentStreams.length !== candidateStreams.length) return 'structural';
+  const currentByName = new Map(currentStreams.map((stream) => [stream.name, stream]));
+  let labelsChanged = false;
+  for (const candidate of candidateStreams) {
+    const current = currentByName.get(candidate.name);
+    if (!current || !hasSameStreamTransport(current, candidate)) return 'structural';
+    if (current.label !== candidate.label) labelsChanged = true;
+  }
+  return labelsChanged ? 'label' : 'none';
+}
+
+function preserveConfigOrder(candidateStreams, currentStreams) {
+  const currentOrder = new Map(currentStreams.map((stream, index) => [stream.name, index]));
+  return candidateStreams.map((stream, index) => ({ stream, index }))
+    .sort((left, right) => {
+      const leftOrder = currentOrder.has(left.stream.name) ? currentOrder.get(left.stream.name) : Number.MAX_SAFE_INTEGER;
+      const rightOrder = currentOrder.has(right.stream.name) ? currentOrder.get(right.stream.name) : Number.MAX_SAFE_INTEGER;
+      return leftOrder - rightOrder || left.index - right.index;
+    })
+    .map((entry) => entry.stream);
 }
 
 function closeUdpServers(items) {
@@ -933,20 +1015,27 @@ function streamFileEntry(stream) {
 function adminStreamState(stream) {
   return {
     ...streamFileEntry(stream),
+    sectionId: stream.sectionId || '',
     activeListeners: getActiveListeners(stream).length,
     hasUdp: stream.packetCount > 0,
     lastUdpAt: stream.lastUdpAt,
   };
 }
 
+function getAdminStreams() {
+  return streamLayoutStore.apply(streams).streams.map(adminStreamState);
+}
+
 function getWebAdminState() {
+  const layout = streamLayoutStore.apply(streams);
   return {
     version: SOFTWARE_VERSION,
     uptimeSeconds: Math.floor(process.uptime()),
     activeUsers: clientLifecycleLog.activeCount(),
     configPath,
     runtimeMode,
-    streams: streams.map(adminStreamState),
+    streams: layout.streams.map(adminStreamState),
+    sections: layout.sections,
     userHistory: userHistory.snapshot(),
   };
 }

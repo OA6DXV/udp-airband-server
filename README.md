@@ -111,7 +111,7 @@ Important fields:
 - `[logging].colors`: set to `true` to color terminal logs. Keep it `false` for normal `systemd` service logs.
 - `[ssl]`: optional HTTPS mode for the same `[web]` host and port. Enable it and provide valid `key` and `cert` paths when you want Node.js to serve TLS directly. If SSL is enabled but the certificate paths are missing or invalid, the server logs a warning and falls back to HTTP on the same port.
 
-Runtime metrics, Last Heard values, geolocation data, and Web Admin authentication are stored exclusively in SQLite at `data/localdb.sqlite` by default. On Node.js 22.13+ (including Node 24), the built-in `node:sqlite` module is used automatically with no warning or extra package. Older Node.js installations must install the compatibility driver with `npm install better-sqlite3`.
+Runtime metrics, Last Heard values, geolocation data, Web Admin authentication, and the stream-list order/section layout are stored in SQLite at `data/localdb.sqlite` by default. Feed definitions remain in `streams.json`. On Node.js 22.13+ (including Node 24), the built-in `node:sqlite` module is used automatically with no warning or extra package. Older Node.js installations must install the compatibility driver with `npm install better-sqlite3`.
 
 If an upgrade detects legacy `data/user-history.json`, `data/last-heard.json`, or `data/geo-cache.json` files, startup prints a migration warning. Stop the server and run:
 
@@ -381,7 +381,7 @@ ssh -L 8584:127.0.0.1:8584 user@SERVER_IP
 
 Then open `http://127.0.0.1:8584/` in the local browser. Do not expose this port directly to the internet: the page can add, edit, and remove feeds, change UDP hosts, ports, sample rates, and channel counts, and request a server restart.
 
-Applying stream changes validates the complete configuration, updates `streams.json`, and rebinds UDP inputs without restarting Node. The yellow **Reload streams** button rereads changes made directly to `streams.json` and applies them through the same validation and rollback path. Display-name-only changes preserve current listeners. Changes to routes or audio inputs reconnect affected browser audio sessions. If a new UDP port cannot be bound, the previous runtime configuration and file are restored.
+The stream editor lets you drag streams to reorder them, assign them to named receiver sections, and change the section order. These layout preferences are saved in SQLite and appear on the public stream list; feed definitions remain in `streams.json`. Layout-only changes do not reload streams. Applying feed changes validates the complete configuration and updates `streams.json` without restarting Node. The yellow **Reload streams** button rereads direct edits to `streams.json` through the same validation and rollback path. Display-name-only changes preserve current listeners. Changes to routes or audio inputs reconnect affected browser audio sessions. If a new UDP port cannot be bound, the previous runtime configuration and file are restored.
 
 The connected-user chart uses the server's internal unique client counter instead of parsing logs. One-minute samples are retained for 12 hours in SQLite.
 

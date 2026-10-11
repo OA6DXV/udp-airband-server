@@ -3,7 +3,10 @@
 const form = document.getElementById('streamsForm');
 const rowsEl = document.getElementById('streamRows');
 const rowTemplate = document.getElementById('streamRowTemplate');
+const sectionsEl = document.getElementById('sectionRows');
+const sectionTemplate = document.getElementById('sectionRowTemplate');
 const addButton = document.getElementById('addStream');
+const addSectionButton = document.getElementById('addSection');
 const saveButton = document.getElementById('saveStreams');
 const discardButton = document.getElementById('discardStreams');
 const revertButton = document.getElementById('revertStreams');
@@ -49,7 +52,20 @@ const translations = {
     twelveHoursAgo: '12 hours ago',
     now: 'Now',
     streams: 'Streams',
-    streamsDescription: 'Changes are applied live and saved to streams.json.',
+    streamsDescription: 'Stream settings are saved to streams.json; order and sections are saved in the database.',
+    sections: 'Receiver sections',
+    sectionsDescription: 'Group streams on the public list.',
+    addSection: '+ Add section',
+    sectionName: 'Section name',
+    section: 'Section',
+    noSection: 'No section',
+    order: 'Order',
+    dragToReorder: 'Drag to reorder',
+    moveUp: 'Move up',
+    moveDown: 'Move down',
+    moveSectionUp: 'Move section up',
+    moveSectionDown: 'Move section down',
+    removeSection: 'Remove section',
     addStream: '+ Add stream',
     routeName: 'Route name',
     displayName: 'Display name',
@@ -66,6 +82,8 @@ const translations = {
     structuralChanges: 'Structural stream changes detected. Affected listeners will be notified.',
     labelChangesApplied: 'Display name changes were saved and applied live. Reload is not needed.',
     structuralChangesApplied: 'Structural changes were saved. Reload streams to confirm the runtime configuration; affected listeners were notified.',
+    layoutOnlyChanges: 'Only order or grouping changed. No stream reload is needed.',
+    layoutChangesApplied: 'Stream order and sections were saved. No stream reload was needed.',
     discardChanges: 'Discard changes',
     revertConfiguration: 'Revert configuration',
     applyChanges: 'Apply changes',
@@ -121,7 +139,20 @@ const translations = {
     twelveHoursAgo: 'Hace 12 horas',
     now: 'Ahora',
     streams: 'Streams',
-    streamsDescription: 'Los cambios se aplican en vivo y se guardan en streams.json.',
+    streamsDescription: 'La configuración se guarda en streams.json; el orden y las secciones se guardan en la base de datos.',
+    sections: 'Secciones de receptores',
+    sectionsDescription: 'Agrupa los streams en la página pública.',
+    addSection: '+ Agregar sección',
+    sectionName: 'Nombre de la sección',
+    section: 'Sección',
+    noSection: 'Sin sección',
+    order: 'Orden',
+    dragToReorder: 'Arrastrar para reordenar',
+    moveUp: 'Subir',
+    moveDown: 'Bajar',
+    moveSectionUp: 'Subir sección',
+    moveSectionDown: 'Bajar sección',
+    removeSection: 'Eliminar sección',
     addStream: '+ Agregar stream',
     routeName: 'Nombre de ruta',
     displayName: 'Nombre visible',
@@ -138,6 +169,8 @@ const translations = {
     structuralChanges: 'Se detectaron cambios estructurales. Los oyentes afectados serán notificados.',
     labelChangesApplied: 'Los nombres visibles se guardaron y actualizaron en vivo. No es necesario recargar.',
     structuralChangesApplied: 'Los cambios estructurales se guardaron. Recarga los streams para confirmar la configuración activa; los oyentes afectados fueron notificados.',
+    layoutOnlyChanges: 'Solo cambió el orden o la agrupación. No es necesario recargar los streams.',
+    layoutChangesApplied: 'Se guardaron el orden y las secciones. No fue necesario recargar los streams.',
     discardChanges: 'Descartar cambios',
     revertConfiguration: 'Revertir configuración',
     applyChanges: 'Aplicar cambios',
@@ -187,12 +220,15 @@ let stateRequestInFlight = false;
 let operationBusy = false;
 let lastUserHistory = [];
 let savedStreams = [];
+let savedSections = [];
 let softwareVersion = '';
 let changeScope = 'none';
 let postSaveNotice = null;
 let reloadPending = false;
-let previousAppliedStreams = null;
+let previousAppliedConfiguration = null;
 let pendingRemoveRow = null;
+let draggingRow = null;
+let sectionIdSequence = 0;
 let csrfToken = '';
 let language = localStorage.getItem(LANGUAGE_STORAGE_KEY);
 if (!translations[language]) language = 'en';
@@ -209,9 +245,27 @@ addButton.addEventListener('click', () => {
     udpPort: nextPort(),
     sampleRate: 8000,
     channels: 1,
-  }, { position: 'start' });
+  });
   row.querySelector('[name="name"]').focus();
   markDirty();
+});
+addSectionButton.addEventListener('click', () => {
+  const row = appendSection({ id: createSectionId(), name: '' });
+  refreshSectionOptions();
+  row.querySelector('[name="sectionName"]').focus();
+  markDirty();
+});
+rowsEl.addEventListener('click', handleStreamOrderClick);
+rowsEl.addEventListener('dragstart', handleStreamDragStart);
+rowsEl.addEventListener('dragover', handleStreamDragOver);
+rowsEl.addEventListener('drop', (event) => {
+  if (!draggingRow) return;
+  event.preventDefault();
+});
+rowsEl.addEventListener('dragend', handleStreamDragEnd);
+sectionsEl.addEventListener('click', handleSectionAction);
+sectionsEl.addEventListener('input', (event) => {
+  if (event.target.matches('[name="sectionName"]')) refreshSectionOptions();
 });
 reloadButton.addEventListener('click', requestReload);
 confirmReloadButton.addEventListener('click', reloadStreams);
@@ -269,8 +323,9 @@ async function loadState(renderStreams) {
     setServerState('online');
     clearRestartTimeout();
     savedStreams = state.streams.map((stream) => ({ ...stream }));
+    savedSections = (state.sections || []).map((section) => ({ ...section }));
     if (renderStreams && !dirty) {
-      renderStreamsFrom(savedStreams);
+      renderStreamsFrom(savedStreams, savedSections);
     }
     updateDirtyState();
     lastUserHistory = state.userHistory || [];
@@ -297,6 +352,12 @@ function appendRow(stream, options = {}) {
     const input = row.querySelector(`[name="${key}"]`);
     input.value = stream[key];
   }
+  const sectionSelect = row.querySelector('[name="sectionId"]');
+  sectionSelect.append(new Option(translate('noSection'), ''));
+  for (const section of collectFormSections()) {
+    sectionSelect.append(new Option(section.name, section.id));
+  }
+  sectionSelect.value = stream.sectionId || '';
   row.querySelector('.remove-stream').addEventListener('click', () => {
     if (rowsEl.children.length <= 1) {
       showMessage(translate('atLeastOneStream'), 'error');
@@ -308,7 +369,127 @@ function appendRow(stream, options = {}) {
   applyTranslations(row);
   if (options.position === 'start') rowsEl.prepend(row);
   else rowsEl.appendChild(row);
+  updateStreamOrderControls();
   return row;
+}
+
+function createSectionId() {
+  sectionIdSequence += 1;
+  return `section-${Date.now().toString(36)}-${sectionIdSequence.toString(36)}`;
+}
+
+function appendSection(section) {
+  const row = sectionTemplate.content.firstElementChild.cloneNode(true);
+  row.dataset.sectionId = section.id || createSectionId();
+  row.querySelector('[name="sectionName"]').value = section.name || '';
+  applyTranslations(row);
+  sectionsEl.appendChild(row);
+  updateSectionOrderControls();
+  return row;
+}
+
+function renderSections(sections) {
+  sectionsEl.replaceChildren();
+  sections.forEach(appendSection);
+  refreshSectionOptions();
+}
+
+function collectFormSections() {
+  return Array.from(sectionsEl.children).map((row) => ({
+    id: row.dataset.sectionId,
+    name: row.querySelector('[name="sectionName"]').value.trim(),
+  }));
+}
+
+function refreshSectionOptions() {
+  const sections = collectFormSections();
+  for (const select of rowsEl.querySelectorAll('[name="sectionId"]')) {
+    const selected = select.value;
+    select.replaceChildren(new Option(translate('noSection'), ''));
+    for (const section of sections) select.append(new Option(section.name, section.id));
+    select.value = sections.some((section) => section.id === selected) ? selected : '';
+  }
+}
+
+function handleSectionAction(event) {
+  const button = event.target.closest('button');
+  const row = button && button.closest('.managed-section');
+  if (!row) return;
+  const direction = Number(button.dataset.moveSection);
+  if (Number.isInteger(direction) && direction) {
+    const sibling = direction < 0 ? row.previousElementSibling : row.nextElementSibling;
+    if (!sibling) return;
+    sectionsEl.insertBefore(direction < 0 ? row : sibling, direction < 0 ? sibling : row);
+    updateSectionOrderControls();
+    markDirty();
+    return;
+  }
+  if (button.classList.contains('remove-section')) {
+    const removedId = row.dataset.sectionId;
+    for (const select of rowsEl.querySelectorAll('[name="sectionId"]')) {
+      if (select.value === removedId) select.value = '';
+    }
+    row.remove();
+    refreshSectionOptions();
+    updateSectionOrderControls();
+    markDirty();
+  }
+}
+
+function updateSectionOrderControls() {
+  const rows = Array.from(sectionsEl.children);
+  rows.forEach((row, index) => {
+    row.querySelector('[data-move-section="-1"]').disabled = index === 0;
+    row.querySelector('[data-move-section="1"]').disabled = index === rows.length - 1;
+  });
+}
+
+function handleStreamOrderClick(event) {
+  const button = event.target.closest('[data-move-stream]');
+  if (!button) return;
+  const row = button.closest('tr');
+  const direction = Number(button.dataset.moveStream);
+  const sibling = direction < 0 ? row.previousElementSibling : row.nextElementSibling;
+  if (!sibling) return;
+  rowsEl.insertBefore(direction < 0 ? row : sibling, direction < 0 ? sibling : row);
+  updateStreamOrderControls();
+  markDirty();
+}
+
+function handleStreamDragStart(event) {
+  if (!event.target.closest('.drag-handle')) {
+    event.preventDefault();
+    return;
+  }
+  draggingRow = event.target.closest('tr');
+  draggingRow.classList.add('dragging');
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', draggingRow.querySelector('[name="name"]').value);
+}
+
+function handleStreamDragOver(event) {
+  if (!draggingRow) return;
+  const targetRow = event.target.closest('tr');
+  if (!targetRow || targetRow === draggingRow) return;
+  event.preventDefault();
+  const afterTarget = event.clientY > targetRow.getBoundingClientRect().top + targetRow.offsetHeight / 2;
+  rowsEl.insertBefore(draggingRow, afterTarget ? targetRow.nextElementSibling : targetRow);
+}
+
+function handleStreamDragEnd() {
+  if (!draggingRow) return;
+  draggingRow.classList.remove('dragging');
+  draggingRow = null;
+  updateStreamOrderControls();
+  markDirty();
+}
+
+function updateStreamOrderControls() {
+  const rows = Array.from(rowsEl.children);
+  rows.forEach((row, index) => {
+    row.querySelector('[data-move-stream="-1"]').disabled = index === 0;
+    row.querySelector('[data-move-stream="1"]').disabled = index === rows.length - 1;
+  });
 }
 
 function removePendingStream(event) {
@@ -326,16 +507,21 @@ async function saveStreams(event) {
   if (!form.reportValidity()) return;
 
   const streams = collectFormStreams();
-  await applyStreamConfiguration(streams, {
+  await applyStreamConfiguration({ streams, sections: collectFormSections() }, {
     previousStreams: savedStreams,
+    previousSections: savedSections,
     successKey: null,
     updateRevert: true,
   });
 }
 
-async function applyStreamConfiguration(streams, { previousStreams, successKey, updateRevert }) {
+async function applyStreamConfiguration(configuration, { previousStreams, previousSections, successKey, updateRevert }) {
+  const { streams, sections } = configuration;
   const appliedScope = classifyStreamChanges(streams, savedStreams);
-  const revertCandidate = previousStreams.map((stream) => ({ ...stream }));
+  const revertCandidate = {
+    streams: previousStreams.map((stream) => ({ ...stream })),
+    sections: previousSections.map((section) => ({ ...section })),
+  };
 
   setBusy(true);
   try {
@@ -345,18 +531,18 @@ async function applyStreamConfiguration(streams, { previousStreams, successKey, 
         'content-type': 'application/json',
         'x-admin-request': '1',
       },
-      body: JSON.stringify({ streams }),
+      body: JSON.stringify({ streams, sections }),
     });
     dirty = false;
     changeScope = 'none';
     postSaveNotice = successKey || (appliedScope === 'none'
-      ? 'streamsUpdated'
+      ? 'layoutChangesApplied'
       : appliedScope === 'label'
         ? 'labelChangesApplied'
         : 'structuralChangesApplied');
     reloadPending = appliedScope === 'structural';
     reloadButton.classList.toggle('reload-pending', reloadPending);
-    previousAppliedStreams = updateRevert ? revertCandidate : null;
+    previousAppliedConfiguration = updateRevert ? revertCandidate : null;
     updateDirtyState();
     showMessage(translate(postSaveNotice || 'streamsUpdated'), 'success');
     await loadState(true);
@@ -368,10 +554,11 @@ async function applyStreamConfiguration(streams, { previousStreams, successKey, 
 }
 
 async function revertConfiguration() {
-  if (!previousAppliedStreams || !previousAppliedStreams.length) return;
+  if (!previousAppliedConfiguration) return;
   clearMessage();
-  await applyStreamConfiguration(previousAppliedStreams, {
+  await applyStreamConfiguration(previousAppliedConfiguration, {
     previousStreams: savedStreams,
+    previousSections: savedSections,
     successKey: 'streamsReverted',
     updateRevert: false,
   });
@@ -390,7 +577,7 @@ async function reloadStreams() {
     changeScope = 'none';
     postSaveNotice = null;
     reloadPending = false;
-    previousAppliedStreams = null;
+    previousAppliedConfiguration = null;
     updateDirtyState();
     reloadButton.classList.remove('reload-pending');
     showMessage(translate('streamsReloaded'), 'success');
@@ -525,13 +712,15 @@ async function request(url, options = {}) {
 
 function markDirty() {
   changeScope = classifyStreamChanges(collectFormStreams(), savedStreams);
-  dirty = changeScope !== 'none';
+  dirty = changeScope !== 'none'
+    || !streamLayoutEqual(collectFormStreams(), savedStreams)
+    || !sectionsEqual(collectFormSections(), savedSections);
   if (dirty) postSaveNotice = null;
   updateDirtyState();
 }
 
 function discardChanges() {
-  renderStreamsFrom(savedStreams);
+  renderStreamsFrom(savedStreams, savedSections);
   dirty = false;
   changeScope = 'none';
   postSaveNotice = null;
@@ -539,18 +728,23 @@ function discardChanges() {
   clearMessage();
 }
 
-function renderStreamsFrom(streams) {
+function renderStreamsFrom(streams, sections = savedSections) {
+  renderSections(sections);
   rowsEl.replaceChildren();
   streams.forEach(appendRow);
   changeScope = classifyStreamChanges(collectFormStreams(), savedStreams);
-  dirty = changeScope !== 'none';
+  dirty = changeScope !== 'none'
+    || !streamLayoutEqual(collectFormStreams(), savedStreams)
+    || !sectionsEqual(collectFormSections(), savedSections);
   updateDirtyState();
 }
 
 function updateDirtyState() {
   let key = 'noUnsavedChanges';
   if (dirty) {
-    key = changeScope === 'label' ? 'labelOnlyChanges' : 'structuralChanges';
+    key = changeScope === 'label'
+      ? 'labelOnlyChanges'
+      : changeScope === 'structural' ? 'structuralChanges' : 'layoutOnlyChanges';
   } else if (reloadPending) {
     key = 'structuralChangesApplied';
   } else if (postSaveNotice) {
@@ -569,9 +763,10 @@ function updateControls() {
   const unavailable = operationBusy || serverState !== 'online';
   saveButton.disabled = unavailable || !dirty;
   discardButton.disabled = unavailable || !dirty;
-  revertButton.hidden = !previousAppliedStreams;
-  revertButton.disabled = unavailable || !previousAppliedStreams;
+  revertButton.hidden = !previousAppliedConfiguration;
+  revertButton.disabled = unavailable || !previousAppliedConfiguration;
   addButton.disabled = unavailable;
+  addSectionButton.disabled = unavailable;
   reloadButton.disabled = unavailable;
   restartButton.disabled = unavailable;
 }
@@ -584,33 +779,40 @@ function collectFormStreams() {
     udpPort: Number(row.querySelector('[name="udpPort"]').value),
     sampleRate: Number(row.querySelector('[name="sampleRate"]').value),
     channels: Number(row.querySelector('[name="channels"]').value),
+    sectionId: row.querySelector('[name="sectionId"]').value,
   }));
 }
 
-function streamsEqual(left, right) {
-  const a = left.map(normalizeStreamForCompare);
-  const b = right.map(normalizeStreamForCompare);
+function streamLayoutEqual(left, right) {
+  const a = left.map((stream) => ({ name: stream.name, sectionId: stream.sectionId || '' }));
+  const b = right.map((stream) => ({ name: stream.name, sectionId: stream.sectionId || '' }));
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-function classifyStreamChanges(currentStreams, savedStreamList) {
-  const current = currentStreams.map(normalizeStreamForCompare);
-  const saved = savedStreamList.map(normalizeStreamForCompare);
-  if (JSON.stringify(current) === JSON.stringify(saved)) return 'none';
-  if (JSON.stringify(current.map(withoutDisplayLabel)) === JSON.stringify(saved.map(withoutDisplayLabel))) {
-    return 'label';
-  }
-  return 'structural';
+function sectionsEqual(left, right) {
+  return JSON.stringify(left.map((section) => ({ id: section.id, name: section.name.trim() })))
+    === JSON.stringify(right.map((section) => ({ id: section.id, name: section.name.trim() })));
 }
 
-function withoutDisplayLabel(stream) {
-  return {
-    name: stream.name,
-    udpHost: stream.udpHost,
-    udpPort: stream.udpPort,
-    sampleRate: stream.sampleRate,
-    channels: stream.channels,
-  };
+function classifyStreamChanges(currentStreams, savedStreamList) {
+  if (currentStreams.length !== savedStreamList.length) return 'structural';
+  const savedByName = new Map(savedStreamList.map((stream) => [String(stream.name || '').trim(), normalizeStreamForCompare(stream)]));
+  let labelsChanged = false;
+  for (const stream of currentStreams) {
+    const current = normalizeStreamForCompare(stream);
+    const saved = savedByName.get(current.name);
+    if (!saved || !sameStreamTransport(current, saved)) return 'structural';
+    if (current.label !== saved.label) labelsChanged = true;
+  }
+  return labelsChanged ? 'label' : 'none';
+}
+
+function sameStreamTransport(left, right) {
+  return left.name === right.name
+    && left.udpHost === right.udpHost
+    && left.udpPort === right.udpPort
+    && left.sampleRate === right.sampleRate
+    && left.channels === right.channels;
 }
 
 function normalizeStreamForCompare(stream) {
@@ -640,6 +842,7 @@ function applyLanguage() {
   languageSelect.setAttribute('aria-label', translate('language'));
   if (!softwareVersion) versionEl.textContent = translate('loading');
   applyTranslations(document);
+  refreshSectionOptions();
   updateDirtyState();
   updateRuntimeSummary();
   setServerState(serverState);
