@@ -160,7 +160,8 @@ const adpcmStepTable = [
   15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767,
 ];
 const clientId = getClientId();
-const appBasePath = new URL(document.baseURI).pathname;
+const configuredBasePath = document.querySelector('base')?.getAttribute('href') || '/';
+const appBasePath = new URL(configuredBasePath, location.origin).pathname.replace(/\/?$/, '/');
 function appPath(path) {
   return `${appBasePath}${String(path).replace(/^\/+/, '')}`;
 }
