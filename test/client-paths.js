@@ -65,10 +65,8 @@ function resolveMultiRoutes(baseHref, pathname, protocol = 'https:') {
       appBasePath,
       control: appWebSocketUrl('testing/control'),
       audio: appWebSocketUrl('testing/audio'),
-      adpcm: appWebSocketUrl('testing/adpcm'),
+      opus: appWebSocketUrl('testing/opus-live'),
       secondControl: appWebSocketUrl('aqp-twr/control'),
-      nativeAudio: appPath('multi/native.aac'),
-      nativeGain: appPath('/multi/native-gain'),
       home: appPath(''),
     })`,
     { URL, document, location },
@@ -80,10 +78,8 @@ function expectedMultiRoutes(basePath, wsProtocol = 'wss') {
     appBasePath: basePath,
     control: `${wsProtocol}://liveatc.example${basePath}testing/control`,
     audio: `${wsProtocol}://liveatc.example${basePath}testing/audio`,
-    adpcm: `${wsProtocol}://liveatc.example${basePath}testing/adpcm`,
+    opus: `${wsProtocol}://liveatc.example${basePath}testing/opus-live`,
     secondControl: `${wsProtocol}://liveatc.example${basePath}aqp-twr/control`,
-    nativeAudio: `${basePath}multi/native.aac`,
-    nativeGain: `${basePath}multi/native-gain`,
     home: basePath,
   };
 }

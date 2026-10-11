@@ -489,7 +489,7 @@ adpcm_frame_ms = 40
 
 The single-stream player uses ADPCM for its `Compressed` profile and direct libopus for `Opus Realtime`. The older `compressed.codec` setting remains for legacy AAC/HLS routes.
 
-The Opus profile does not require FFmpeg. The legacy AAC/HLS and multi-stream native AAC routes still require it.
+The Opus profile does not require FFmpeg. Multistream uses independent RAW or native Opus WebSockets, AudioWorklet playback, and local volume/mute controls for each stream. Both modes use the same interface; there is no server-side AAC mix or volume-command endpoint. Native Opus encoders are shared between listeners of the same stream and remain alive for 10 seconds after the last listener leaves. Background playback still depends on the browser and device. Only the legacy single-stream AAC/HLS routes require FFmpeg.
 
 Install `ffmpeg` only if you use those AAC/HLS routes:
 

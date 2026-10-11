@@ -591,81 +591,6 @@ canvas {
   padding: 16px;
 }
 
-.native-mute-button {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 34px;
-  height: 34px;
-  min-width: 0;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #202733;
-  color: var(--text);
-  padding: 0;
-}
-
-.native-mute-button svg {
-  width: 19px;
-  height: 19px;
-  fill: currentColor;
-}
-
-.native-mute-button path {
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.native-mute-button .speaker-wave,
-.native-mute-button .mute-slash {
-  fill: none;
-}
-
-.native-mute-button .mute-slash {
-  display: none;
-}
-
-.native-mute-button.muted .speaker-wave {
-  display: none;
-}
-
-.native-mute-button.muted .mute-slash {
-  display: block;
-}
-
-.multi-stream-card.compressed-mode .native-mute-button {
-  display: inline-flex;
-}
-
-.multi-stream-card.compressed-mode .compact-stream-header {
-  display: block;
-  margin-bottom: 16px;
-  padding-right: 44px;
-}
-
-.multi-stream-card.compressed-mode .multi-meters {
-  display: none;
-}
-
-.multi-stream-card.compressed-mode .gain-level {
-  grid-template-columns: minmax(220px, 2fr) auto;
-  margin-top: 0;
-}
-
-.multi-stream-card.compressed-mode .level-label {
-  display: none;
-}
-
-.multi-stream-card.compressed-mode .gain-level-track,
-.multi-stream-card.compressed-mode [data-role="level-db"] {
-  grid-column: auto;
-}
-
 .multi-meters {
   border: 0;
   padding: 0;
@@ -720,10 +645,6 @@ canvas {
 
 .multi-stream-card.expanded .compact-chevron {
   transform: translateY(0.1em) rotate(225deg);
-}
-
-.multi-stream-card.compressed-mode .compact-chevron {
-  display: none;
 }
 
 .gain-level-track {
@@ -970,21 +891,14 @@ canvas {
     margin-bottom: 16px;
   }
 
-  .multi-stream-card.raw-mode .multi-meters {
+  .multi-stream-card .multi-meters {
     display: none;
   }
 
-  .multi-stream-card.raw-mode.expanded .multi-meters {
+  .multi-stream-card.expanded .multi-meters {
     display: grid;
   }
 
-  .multi-stream-card.compressed-mode .multi-meters {
-    display: none;
-  }
-
-  .multi-stream-card.compressed-mode .gain-level {
-    grid-template-columns: 1fr;
-  }
 
   .multi-stream-card .gain-level-track,
   .multi-stream-card [data-role="level-db"] {

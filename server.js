@@ -37,7 +37,6 @@ const { acceptWebSocket, sendWsBinary, sendWsJson } = require('./lib/websocket')
 const { createCompressedManager } = require('./lib/compressed');
 const { createGeoService } = require('./lib/geo-service');
 const { aggregateGeoStats } = require('./lib/geo-stats');
-const { createNativeMultiAac } = require('./lib/native-multi-aac');
 const { detectRuntimeMode } = require('./lib/runtime');
 const { createStorage } = require('./lib/storage');
 const { archiveLegacyJsonFiles, inspectLegacyJsonRuntimeStorage, migrateStorage, verifySqliteIntegrity } = require('./lib/storage-migration');
@@ -347,18 +346,6 @@ try {
 const streamsByName = new Map(streams.map((stream) => [stream.name, stream]));
 const lastHeardStore = storage.createLastHeardStore();
 lastHeardStore.apply(streams);
-const nativeMultiAac = createNativeMultiAac({
-  aacBitrate,
-  addListenerBytes,
-  addListenerMode,
-  ffmpegPath,
-  logger,
-  onClientConnected: (clientId, remote) => recordClientActivity('connected', 'multi', 'native-aac', clientId, remote),
-  onClientDisconnected: (clientId, remote) => recordClientActivity('disconnected', 'multi', 'native-aac', clientId, remote),
-  removeListenerMode,
-  spawn,
-  streamsByName,
-});
 
 const webProtocol = tlsEnabled ? 'https' : 'http';
 const webServer = tlsEnabled
@@ -417,7 +404,6 @@ function handleUdpMessage(stream, msg) {
   lastHeardStore.record(stream.name, stream.lastUdpAt);
   stream.levelPeak = Math.max(stream.levelPeak * 0.75, peakOfFloatPcm(msg));
   stream.levelPeakAt = stream.lastUdpAt;
-  nativeMultiAac.pushPcm(stream, msg);
 
   for (const [client, clientId] of stream.rawClients) {
     if (client.destroyed || client.writableLength > MAX_SOCKET_BUFFER_BYTES) {
@@ -447,21 +433,6 @@ function handleHttpRequest(req, res) {
   }
   if (pathname === '/multi') {
     sendHtml(res, renderMultiStreamPage(streams, { softwareVersion: SOFTWARE_VERSION, basePath: appBasePath }));
-    return;
-  }
-  if (pathname === '/multi/native.aac') {
-    if (!compressed.ffmpegAvailable) {
-      res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' });
-      res.end('Native AAC unavailable: ffmpeg not found\n');
-      return;
-    }
-    nativeMultiAac.serve(requestUrl, res, (value) => normalizeClientId(value, crypto), getRemoteAddress(req, req.socket));
-    return;
-  }
-  if (pathname === '/multi/native-gain') {
-    const clientId = normalizeClientId(requestUrl.searchParams.get('clientId'), crypto);
-    const ok = nativeMultiAac.setGain(clientId, requestUrl.searchParams.get('stream'), requestUrl.searchParams.get('gain'));
-    sendJsonResponse(res, { ok });
     return;
   }
   if (pathname === '/favicon.ico') {
@@ -900,7 +871,6 @@ async function applyStreamReplacement(payload) {
   streamsByName.clear();
   for (const stream of streams) streamsByName.set(stream.name, stream);
 
-  nativeMultiAac.cleanupAll();
   for (const stream of previousStreams) closeStreamClients(stream);
 
   logger.info('streams_reloaded', {

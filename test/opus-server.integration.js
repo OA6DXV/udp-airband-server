@@ -72,6 +72,11 @@ async function main() {
   let udp;
   try {
     await waitForHttp(httpPort, child);
+    for (const endpoint of ['/multi/native.aac?streams=test', '/multi/native-gain?stream=test&gain=0.5']) {
+      const response = await fetch(`http://127.0.0.1:${httpPort}${endpoint}`);
+      assert.strictEqual(response.status, 404, 'Legacy multistream AAC and gain routes must be removed');
+      await response.text();
+    }
     const frames = [];
     socket = new WebSocket(`ws://127.0.0.1:${httpPort}/test/opus-live?clientId=integration`);
     socket.binaryType = 'arraybuffer';

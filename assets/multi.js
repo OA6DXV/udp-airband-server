@@ -29,7 +29,6 @@ const multiStartOverlay = document.getElementById('multiStartOverlay');
 const multiStartButton = document.getElementById('multiStartButton');
 const multiNoticeTitle = document.getElementById('multiNoticeTitle');
 const multiNoticeBody = document.getElementById('multiNoticeBody');
-const nativeMultiAudio = document.getElementById('nativeMultiAudio');
 const modeButtons = Array.from(document.querySelectorAll('.multi-mode-button'));
 
 const translations = {
@@ -79,13 +78,9 @@ let globalPaused = false;
 let statusHovering = false;
 let players = [];
 let multiPlaybackRequested = false;
-let globalMode = isMobileDevice() ? 'opus' : 'raw';
-let nativeAudioStarted = false;
-let nativeStopExpected = false;
-let nativePreloadActive = false;
-let nativeStartPromise = null;
-let nativeReconnectTimer = null;
-let nativeReconnectInFlight = false;
+let globalMode = 'opus';
+let workletModulePromise;
+let opusModulePromise;
 let pendingNoticeMode = globalMode;
 let serverInstanceId = '';
 let serverNoticeEl;
@@ -118,11 +113,9 @@ document.addEventListener('click', (event) => {
 statusEl.addEventListener('click', () => {
   if (globalPaused) {
     globalPaused = false;
-    if (globalMode === 'opus') startNativeMultiAudio().catch(() => {});
-    else players.forEach((player) => player.resume());
+    players.forEach((player) => player.resume());
   } else if (players.some((player) => player.confirmed)) {
     globalPaused = true;
-    if (globalMode === 'opus') stopNativeMultiAudio();
     players.forEach((player) => player.pause());
   }
   updateHeader();
@@ -153,41 +146,22 @@ modeButtons.forEach((button) => {
   });
 });
 
-if (nativeMultiAudio) {
-  ['abort', 'emptied', 'ended', 'error', 'pause', 'stalled'].forEach((eventName) => {
-    nativeMultiAudio.addEventListener(eventName, () => handleNativePlaybackInterrupted(eventName));
-  });
-  nativeMultiAudio.addEventListener('playing', () => {
-    nativeAudioStarted = true;
-    nativeStopExpected = false;
-    if (multiStartOverlay) multiStartOverlay.hidden = true;
-    updateHeader();
-  });
+async function recoverPlayback() {
+  if (!multiPlaybackRequested || globalPaused || streamsUnavailable) return;
+  try {
+    const context = ensureAudioContext();
+    if (context.state !== 'running') await context.resume();
+    await Promise.all(players.map((player) => player.startIfReady()));
+  } catch (error) {
+    console.warn('Multistream recovery requires user interaction:', error.message);
+  }
 }
 
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') {
-    players.forEach((player) => player.resetNativeLevelSync());
-    updateMeters();
-    return;
-  }
-  players.forEach((player) => player.resetNativeLevelSync());
-  if (nativeNeedsReconnect()) {
-    scheduleNativeReconnect(0);
-  }
+  if (document.visibilityState === 'visible') recoverPlayback();
 });
-
-window.addEventListener('pageshow', () => {
-  if (nativeNeedsReconnect()) {
-    scheduleNativeReconnect(0);
-  }
-});
-
-window.addEventListener('focus', () => {
-  if (nativeNeedsReconnect()) {
-    scheduleNativeReconnect(0);
-  }
-});
+window.addEventListener('pageshow', recoverPlayback);
+window.addEventListener('focus', recoverPlayback);
 
 function renderPlayers() {
   container.textContent = '';
@@ -195,6 +169,7 @@ function renderPlayers() {
     const card = document.createElement('article');
     card.className = 'multi-stream-card';
     card.dataset.stream = player.stream.name;
+    card.classList.add('expanded');
     card.innerHTML = `
       <section class="meters multi-meters">
         <div class="meter stream-name-meter"><span data-i18n="streamName">Stream</span><strong data-role="name"></strong></div>
@@ -208,14 +183,6 @@ function renderPlayers() {
           <span class="compact-chevron" aria-hidden="true"></span>
         </button>
       </div>
-      <button class="native-mute-button" data-role="native-mute" type="button" aria-label="Mute">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M4 9v6h4l5 4V5L8 9H4z"></path>
-          <path class="speaker-wave" d="M16 9.5c.9 1.4.9 3.6 0 5"></path>
-          <path class="speaker-wave" d="M18.5 7c1.9 2.8 1.9 7.2 0 10"></path>
-          <path class="mute-slash" d="M4 4l16 16"></path>
-        </svg>
-      </button>
       <div class="level gain-level">
         <span class="level-label" data-i18n="level">Level</span>
         <div class="level-track gain-level-track">
@@ -236,6 +203,9 @@ function connectPlayers() {
 }
 
 function ensureAudioContext() {
+  try {
+    if (navigator.audioSession) navigator.audioSession.type = 'playback';
+  } catch { /* Not every browser exposes the audio session API. */ }
   const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
   if (!audioContext) audioContext = new AudioContextConstructor();
   return audioContext;
@@ -254,107 +224,32 @@ async function startMultiPlayback() {
 }
 
 async function startSelectedGlobalMode() {
-  if (globalMode === 'opus') {
-    players.forEach((player) => player.stopRealtimeAudio());
-    await startNativeMultiAudio();
-    return;
-  }
-  stopNativeMultiAudio();
+  if (globalPaused || streamsUnavailable) return;
   const context = ensureAudioContext();
   if (context.state !== 'running') await context.resume();
   if (context.state !== 'running') throw new Error('AudioContext is not running');
+  updateMediaSessionMetadata();
   await Promise.all(players.map((player) => player.startIfReady()));
 }
 
-async function startNativeMultiAudio() {
-  if (nativeStartPromise) return nativeStartPromise;
-  nativeStartPromise = startNativeMultiAudioOnce().finally(() => {
-    nativeStartPromise = null;
-  });
-  return nativeStartPromise;
-}
-
-async function startNativeMultiAudioOnce() {
-  if (!nativeMultiAudio) throw new Error('native audio element missing');
-  nativeStopExpected = true;
-  if (!nativePreloadActive || !nativeMultiAudio.getAttribute('src')) {
-    nativeMultiAudio.preload = 'auto';
-    nativeMultiAudio.src = buildNativeMultiAudioUrl();
-    nativeMultiAudio.load();
+async function loadWorkletModule() {
+  const context = ensureAudioContext();
+  if (!window.isSecureContext || !context.audioWorklet) {
+    throw new Error('AudioWorklet requires HTTPS and browser support');
   }
-  updateMediaSessionMetadata();
-  const seekOnCanPlay = () => {
-    jumpNativeAudioToLiveEdge(nativeMultiAudio);
-  };
-  nativeMultiAudio.addEventListener('canplay', seekOnCanPlay, { once: true });
-  jumpNativeAudioToLiveEdge(nativeMultiAudio);
-  try {
-    await nativeMultiAudio.play();
-  } catch (err) {
-    nativeMultiAudio.removeEventListener('canplay', seekOnCanPlay);
-    nativeStopExpected = false;
-    throw err;
+  if (!workletModulePromise) {
+    workletModulePromise = context.audioWorklet.addModule(appPath('assets/audio-worklet.mjs'))
+      .catch((error) => { workletModulePromise = null; throw error; });
   }
-  setTimeout(() => {
-    if (nativeAudioStarted && nativeMultiAudio?.src) jumpNativeAudioToLiveEdge(nativeMultiAudio);
-  }, 100);
-  nativeAudioStarted = true;
-  nativeStopExpected = false;
-  nativePreloadActive = false;
-  players.forEach((player) => {
-    player.started = true;
-    player.paused = false;
-    player.resetNativeLevelSync();
-  });
-  players.forEach((player) => player.sendNativeGain({ immediate: true }));
-  updateHeader();
+  return workletModulePromise;
 }
 
-function jumpNativeAudioToLiveEdge(audio, targetBufferSeconds = 0.5) {
-  const delay = getNativeBufferedDelay(audio);
-  if (delay === null || delay <= targetBufferSeconds + 0.25) return false;
-
-  try {
-    const liveEdge = audio.buffered.end(audio.buffered.length - 1);
-    const target = Math.max(0, liveEdge - targetBufferSeconds);
-    if (!Number.isFinite(target) || target <= audio.currentTime) return false;
-    audio.currentTime = target;
-    return true;
-  } catch {
-    return false;
+function loadOpusModule() {
+  if (!opusModulePromise) {
+    opusModulePromise = import(appPath('assets/opus-webcodecs.mjs'))
+      .catch((error) => { opusModulePromise = null; throw error; });
   }
-}
-
-function getNativeBufferedDelay(audio) {
-  if (!audio || audio.buffered.length === 0) return null;
-
-  try {
-    const liveEdge = audio.buffered.end(audio.buffered.length - 1);
-    const delay = liveEdge - audio.currentTime;
-    return Number.isFinite(delay) ? delay : null;
-  } catch {
-    return null;
-  }
-}
-
-function preloadNativeMultiAudio() {
-  if (!nativeMultiAudio || multiPlaybackRequested || nativePreloadActive) return;
-  nativeStopExpected = true;
-  nativeMultiAudio.preload = 'auto';
-  nativeMultiAudio.src = buildNativeMultiAudioUrl();
-  nativeMultiAudio.load();
-  updateMediaSessionMetadata();
-  nativePreloadActive = true;
-  nativeStopExpected = false;
-}
-
-function buildNativeMultiAudioUrl() {
-  const query = new URLSearchParams({
-    streams: streams.map((stream) => stream.name).join(','),
-    clientId: getClientId(),
-    t: String(Date.now()),
-  });
-  return `${appPath('multi/native.aac')}?${query.toString()}`;
+  return opusModulePromise;
 }
 
 function updateMediaSessionMetadata() {
@@ -364,19 +259,18 @@ function updateMediaSessionMetadata() {
     artist: streams.map((stream) => stream.label).join(', '),
     album: 'UDP Airband Server',
   });
-}
-
-function stopNativeMultiAudio() {
-  if (!nativeMultiAudio) return;
-  nativeStopExpected = true;
-  clearTimeout(nativeReconnectTimer);
-  nativeMultiAudio.pause();
-  nativeMultiAudio.removeAttribute('src');
-  nativeMultiAudio.load();
-  nativeAudioStarted = false;
-  nativePreloadActive = false;
-  nativeStartPromise = null;
-  players.forEach((player) => player.resetNativeLevelSync());
+  try {
+    navigator.mediaSession.setActionHandler('pause', () => {
+      globalPaused = true;
+      players.forEach((player) => player.pause());
+      updateHeader();
+    });
+    navigator.mediaSession.setActionHandler('play', () => {
+      globalPaused = false;
+      players.forEach((player) => player.resume());
+      updateHeader();
+    });
+  } catch { /* Media Session actions are optional. */ }
 }
 
 function setGlobalMode(mode, options = {}) {
@@ -384,13 +278,16 @@ function setGlobalMode(mode, options = {}) {
   const changed = globalMode !== mode;
   globalMode = mode;
   players.forEach((player) => {
-    if (changed) player.started = false;
-    player.resetNativeLevelSync();
+    if (changed) {
+      player.stopRealtimeAudio();
+      player.started = false;
+    }
+    player.mode = mode;
     player.updateLabels();
   });
   updateModeControls();
   if (changed && multiPlaybackRequested && !options.deferStart) {
-    startSelectedGlobalMode().catch(() => {});
+    startSelectedGlobalMode().catch((error) => console.warn(error));
   }
 }
 
@@ -399,8 +296,6 @@ function showModeNotice(mode) {
   pendingNoticeMode = mode;
   setGlobalMode(mode, { deferStart: true });
   if (hasAcceptedNotice(modeNoticeKeyForMode(mode))) {
-    if (mode === 'opus') preloadNativeMultiAudio();
-    else stopNativeMultiAudio();
     if (multiPlaybackRequested) startSelectedGlobalMode().catch(() => {});
     return;
   }
@@ -408,8 +303,6 @@ function showModeNotice(mode) {
   if (multiNoticeBody) multiNoticeBody.textContent = t(noticeBodyKey(mode));
   if (multiStartButton) multiStartButton.textContent = t('accept');
   if (multiStartOverlay) multiStartOverlay.hidden = false;
-  if (mode === 'opus') preloadNativeMultiAudio();
-  else stopNativeMultiAudio();
 }
 
 function updateModeNotice() {
@@ -425,7 +318,7 @@ function noticeBodyKey(mode) {
 }
 
 function modeNoticeKeyForMode(mode) {
-  return mode === 'opus' ? 'multi-compatible-mode' : 'multi-realtime-mode';
+  return mode === 'opus' ? 'multi-opus-worklet-v1' : 'multi-raw-worklet-v1';
 }
 
 function hasAcceptedNotice(key) {
@@ -434,51 +327,6 @@ function hasAcceptedNotice(key) {
 
 function rememberNoticeAccepted(key) {
   sessionStorage.setItem(`${acceptedNoticeStoragePrefix}${key}`, 'true');
-}
-
-function shouldRecoverNativeAudio() {
-  return globalMode === 'opus' && multiPlaybackRequested && !globalPaused;
-}
-
-function nativeNeedsReconnect() {
-  return shouldRecoverNativeAudio()
-    && nativeMultiAudio
-    && !nativeStartPromise
-    && (!nativeAudioStarted || nativeMultiAudio.paused || nativeMultiAudio.error);
-}
-
-function handleNativePlaybackInterrupted(eventName) {
-  if (nativeStopExpected || !shouldRecoverNativeAudio()) return;
-  if (nativeStartPromise) return;
-  if (eventName === 'stalled' && nativeMultiAudio && !nativeMultiAudio.paused && !nativeMultiAudio.error) return;
-  nativeAudioStarted = false;
-  players.forEach((player) => player.resetNativeLevelSync());
-  updateHeader();
-  if (document.visibilityState === 'visible') {
-    scheduleNativeReconnect(500);
-  }
-}
-
-function scheduleNativeReconnect(delayMs) {
-  if (!shouldRecoverNativeAudio() || document.visibilityState === 'hidden') return;
-  clearTimeout(nativeReconnectTimer);
-  nativeReconnectTimer = setTimeout(() => {
-    recoverNativeAudio().catch(() => {});
-  }, delayMs);
-}
-
-async function recoverNativeAudio() {
-  if (!shouldRecoverNativeAudio() || nativeReconnectInFlight) return;
-  nativeReconnectInFlight = true;
-  try {
-    await startNativeMultiAudio();
-    if (multiStartOverlay) multiStartOverlay.hidden = true;
-  } catch {
-    nativeAudioStarted = false;
-    if (multiStartOverlay) multiStartOverlay.hidden = false;
-  } finally {
-    nativeReconnectInFlight = false;
-  }
 }
 
 function updateModeControls() {
@@ -566,7 +414,6 @@ function showStreamsUnavailable() {
   if (!streamsUnavailable) {
     streamsUnavailable = true;
     globalPaused = true;
-    stopNativeMultiAudio();
     players.forEach((player) => player.pause());
     hideServerNotice();
   }
@@ -618,9 +465,9 @@ function applyLanguage() {
 class MultiStreamPlayer {
   constructor(stream) {
     this.stream = stream;
-    this.config = { ...stream, compressedCodec: 'adpcm', compressedAvailable: false };
+    this.config = { ...stream };
     this.clientId = getClientId(stream.name);
-    this.mode = 'raw';
+    this.mode = globalMode;
     this.currentMode = '';
     this.controlOpen = false;
     this.confirmed = false;
@@ -638,10 +485,17 @@ class MultiStreamPlayer {
     this.receivedBytes = 0;
     this.lastBandwidthBytes = 0;
     this.lastBandwidthAt = Date.now();
-    this.nextPlayTime = 0;
     this.socketGeneration = 0;
-    this.scheduledSources = new Set();
-    this.nativeGainTimer = null;
+    this.starting = false;
+    this.audioWs = null;
+    this.reconnectTimer = null;
+    this.worklet = null;
+    this.workletConfiguration = '';
+    this.workletDiagnostics = null;
+    this.decoder = null;
+    this.playbackError = '';
+    this.deliveredFrames = 0;
+
   }
 
   bind(card) {
@@ -652,7 +506,6 @@ class MultiStreamPlayer {
     this.lastEl = card.querySelector('[data-role="last"]');
     this.modeButton = card.querySelector('[data-role="mode"]');
     this.startButton = card.querySelector('[data-role="start"]');
-    this.nativeMuteButton = card.querySelector('[data-role="native-mute"]');
     this.gainInput = card.querySelector('[data-role="gain"]');
     this.gainValue = card.querySelector('[data-role="gain-value"]');
     this.levelDb = card.querySelector('[data-role="level-db"]');
@@ -660,35 +513,28 @@ class MultiStreamPlayer {
     this.nameEl.textContent = this.stream.label;
     this.updateCompactLabel();
     this.compactToggle.addEventListener('click', () => {
-      if (globalMode !== 'raw') return;
       this.card.classList.toggle('expanded');
       this.compactToggle.setAttribute('aria-expanded', String(this.card.classList.contains('expanded')));
     });
     this.modeButton.addEventListener('click', () => {
       this.mode = this.mode === 'raw' ? 'opus' : 'raw';
-      if (this.started && !this.paused) this.startAudio();
+      if (multiPlaybackRequested && !this.paused && !globalPaused) this.startAudio().catch((error) => this.handlePlaybackError(error));
       this.updateLabels();
     });
     this.startButton.addEventListener('click', async () => {
       if (!this.started) {
-        await this.startAudio();
+        multiPlaybackRequested = true;
+        try { await this.startAudio(); } catch (error) { this.handlePlaybackError(error); }
       } else {
         this.muted = !this.muted;
         this.applyGain();
       }
       this.updateLabels();
     });
-    this.nativeMuteButton.addEventListener('click', () => {
-      this.muted = !this.muted;
-      this.applyGain();
-      this.sendNativeGain({ immediate: true });
-      this.updateLabels();
-    });
     this.gainInput.addEventListener('input', () => {
       this.gain = Number(this.gainInput.value);
       this.gainValue.textContent = `${Math.round(this.gain * 100)}%`;
       this.applyGain();
-      this.sendNativeGain();
       this.showGainValue();
     });
     this.gainInput.addEventListener('pointerdown', () => this.showGainValue());
@@ -743,10 +589,6 @@ class MultiStreamPlayer {
       } else if (message.type === 'stats') {
         this.activeListeners = message.activeListeners || 0;
         this.bandwidth = message.listenerBitsPerSecond || this.bandwidth || 0;
-        if (globalMode === 'opus') {
-          this.peak = Number(message.levelPeak) || 0;
-          this.lastAudioAt = this.peak > 0 ? Date.now() : 0;
-        }
         this.lastHeardAt = message.lastHeardAt || 0;
         this.lastHeardLabel = message.lastHeardLabel || 'never';
         if (message.hasUdp) this.confirmed = true;
@@ -766,156 +608,164 @@ class MultiStreamPlayer {
   }
 
   async startAudio() {
-    const context = ensureAudioContext();
-    if (context.state !== 'running') await context.resume();
-    if (!this.gainNode) {
-      this.gainNode = context.createGain();
-      this.gainNode.connect(context.destination);
+    this.stopRealtimeAudio();
+    this.started = false;
+    this.starting = true;
+    this.playbackError = '';
+    const generation = this.socketGeneration;
+    try {
+      const context = ensureAudioContext();
+      if (context.state !== 'running') await context.resume();
+      await loadWorkletModule();
+      let module;
+      if (this.mode === 'opus') {
+        module = await loadOpusModule();
+        if (!this.config.opusRealtimeAvailable || !await module.supportsOpusAudioDecoder(window.AudioDecoder)) {
+          throw new Error('Opus unavailable for this stream or browser; select RAW Audio');
+        }
+      }
+      if (generation !== this.socketGeneration || globalPaused || streamsUnavailable) return;
+      if (!this.gainNode) {
+        this.gainNode = context.createGain();
+        this.gainNode.connect(context.destination);
+      }
+      this.worklet = new AudioWorkletNode(context, 'opus-pcm', {
+        numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1],
+      });
+      this.worklet.port.onmessage = ({ data }) => {
+        if (generation !== this.socketGeneration) return;
+        if (data?.type === 'worklet-diagnostics') this.workletDiagnostics = data;
+        if (data?.type === 'worklet-error') this.handlePlaybackError(new Error(data.message));
+      };
+      this.worklet.addEventListener('processorerror', () => {
+        if (generation === this.socketGeneration) this.handlePlaybackError(new Error('AudioWorklet processor failed'));
+      });
+      this.worklet.connect(this.gainNode);
+      this.currentMode = this.mode;
+      this.started = true;
+      this.paused = false;
+      if (module) {
+        this.decoder = new module.OpusWebCodecsDecoder({
+          onPcm: (samples, frames, rate, channels) => {
+            if (generation === this.socketGeneration) this.deliverPcm(samples, frames, rate, channels);
+          },
+          onError: (error) => {
+            if (generation === this.socketGeneration) this.handlePlaybackError(error);
+          },
+        });
+      }
+      this.applyGain();
+      const endpoint = this.mode === 'opus' ? 'opus-live' : 'audio';
+      const socket = new WebSocket(`${appWebSocketUrl(`${encodeURIComponent(this.stream.name)}/${endpoint}`)}?clientId=${encodeURIComponent(this.clientId)}`);
+      this.audioWs = socket;
+      socket.binaryType = 'arraybuffer';
+      socket.addEventListener('message', (event) => {
+        if (generation !== this.socketGeneration || !(event.data instanceof ArrayBuffer)) return;
+        this.receivedBytes += event.data.byteLength;
+        this.confirmed = true;
+        if (this.currentMode === 'opus') {
+          this.decoder?.push(event.data).catch(() => {});
+        } else {
+          const samples = new Float32Array(event.data);
+          const frames = samples.length / this.config.channels;
+          if (Number.isInteger(frames) && frames > 0) this.deliverPcm(samples, frames, this.config.sampleRate, this.config.channels);
+        }
+      });
+      socket.addEventListener('close', () => {
+        if (generation !== this.socketGeneration || !this.started || this.paused || globalPaused || streamsUnavailable) return;
+        this.stopRealtimeAudio();
+        this.started = false;
+        this.reconnectTimer = setTimeout(() => {
+          this.reconnectTimer = null;
+          this.startIfReady();
+        }, 1000);
+      });
+      this.updateLabels();
+    } catch (error) {
+      if (generation === this.socketGeneration) this.handlePlaybackError(error);
+      throw error;
+    } finally {
+      if (generation === this.socketGeneration) this.starting = false;
     }
-    this.nextPlayTime = context.currentTime + 0.25;
-    this.started = true;
-    this.paused = false;
-    this.stopAudioSockets();
-    if (this.mode === 'opus' && this.config.compressedAvailable && this.config.compressedCodec === 'adpcm') {
-      this.startAdpcm();
-    } else {
-      this.startRaw();
-    }
-    this.applyGain();
-    this.updateLabels();
   }
 
   async startIfReady() {
-    if (globalMode !== 'raw' || !multiPlaybackRequested || this.started || !this.configReady) return;
-    try {
-      await this.startAudio();
-    } catch {
-      this.started = false;
-      this.updateLabels();
+    if (!multiPlaybackRequested || globalPaused || this.paused || this.started || this.starting || !this.configReady || streamsUnavailable) return;
+    try { await this.startAudio(); } catch { /* The error is shown on this stream's controls. */ }
+  }
+
+  deliverPcm(samples, frames, rate, channels) {
+    if (!this.worklet || !this.started || this.paused) return;
+    const targetLatencyMs = Number(this.config.opusWorkletTargetLatencyMs) || 100;
+    const highWaterMs = Math.max(targetLatencyMs + 40, targetLatencyMs * 3.2);
+    const key = `${rate}:${channels}:${targetLatencyMs}`;
+    if (key !== this.workletConfiguration) {
+      this.worklet.port.postMessage({
+        type: 'configure', inputSampleRate: rate, channels, targetLatencyMs,
+        highWaterMs, capacitySeconds: 2, maxDrift: 0.004,
+      });
+      this.workletConfiguration = key;
     }
+    this.peak = Math.max(this.peak * 0.55, peakOf(samples));
+    this.lastAudioAt = Date.now();
+    this.worklet.port.postMessage({ type: 'samples', buffer: samples.buffer, frames, channels }, [samples.buffer]);
+    this.deliveredFrames += frames;
   }
 
-  startRaw() {
-    const generation = this.socketGeneration;
-    this.currentMode = 'raw';
-    this.rawWs = new WebSocket(`${appWebSocketUrl(`${encodeURIComponent(this.stream.name)}/audio`)}?clientId=${encodeURIComponent(this.clientId)}`);
-    this.rawWs.binaryType = 'arraybuffer';
-    this.rawWs.addEventListener('message', (event) => {
-      if (generation !== this.socketGeneration) return;
-      const samples = new Float32Array(event.data);
-      const frames = samples.length / this.config.channels;
-      if (!Number.isInteger(frames)) return;
-      this.receivedBytes += event.data.byteLength || 0;
-      this.confirmed = true;
-      this.lastAudioAt = Date.now();
-      this.peak = Math.max(this.peak * 0.55, peakOf(samples));
-      this.schedule(samples, frames);
-    });
-    this.rawWs.addEventListener('close', () => {
-      if (generation === this.socketGeneration && this.started && !this.paused && this.currentMode === 'raw') setTimeout(() => this.startRaw(), 1000);
-    });
-  }
-
-  startAdpcm() {
-    const generation = this.socketGeneration;
-    this.currentMode = 'opus';
-    this.adpcmWs = new WebSocket(`${appWebSocketUrl(`${encodeURIComponent(this.stream.name)}/adpcm`)}?clientId=${encodeURIComponent(this.clientId)}`);
-    this.adpcmWs.binaryType = 'arraybuffer';
-    this.adpcmWs.addEventListener('message', (event) => {
-      if (generation !== this.socketGeneration) return;
-      const decoded = decodeAdpcmFrame(event.data);
-      if (!decoded) return;
-      this.config.sampleRate = decoded.sampleRate;
-      this.config.channels = decoded.channels;
-      this.receivedBytes += event.data.byteLength || 0;
-      this.confirmed = true;
-      this.lastAudioAt = Date.now();
-      this.peak = Math.max(this.peak * 0.55, peakOf(decoded.samples));
-      this.schedule(decoded.samples, decoded.frames);
-    });
-    this.adpcmWs.addEventListener('close', () => {
-      if (generation === this.socketGeneration && this.started && !this.paused && this.currentMode === 'opus') setTimeout(() => this.startAdpcm(), 1000);
-    });
-  }
-
-  schedule(samples, frames) {
-    const context = ensureAudioContext();
-    const now = context.currentTime;
-    if (this.nextPlayTime < now + 0.05 || this.nextPlayTime > now + 1.0) this.nextPlayTime = now + 0.25;
-    const buffer = context.createBuffer(this.config.channels, frames, this.config.sampleRate);
-    for (let channel = 0; channel < this.config.channels; channel += 1) {
-      const data = buffer.getChannelData(channel);
-      for (let i = 0; i < frames; i += 1) data[i] = samples[i * this.config.channels + channel];
-    }
-    const source = context.createBufferSource();
-    source.buffer = buffer;
-    source.connect(this.gainNode);
-    this.scheduledSources.add(source);
-    source.addEventListener('ended', () => this.scheduledSources.delete(source));
-    source.start(this.nextPlayTime);
-    this.nextPlayTime += buffer.duration;
+  handlePlaybackError(error) {
+    this.stopRealtimeAudio();
+    this.started = false;
+    this.playbackError = error?.message || String(error);
+    console.warn(`Multistream ${this.stream.name}:`, this.playbackError);
+    this.updateLabels();
   }
 
   pause() {
     this.paused = true;
     this.stopRealtimeAudio();
+    this.started = false;
     this.updateLabels();
   }
 
   resume() {
     this.paused = false;
-    if (this.started) this.startAudio();
-  }
-
-  stopAudioSockets() {
-    this.socketGeneration += 1;
-    if (this.rawWs) this.rawWs.close();
-    if (this.adpcmWs) this.adpcmWs.close();
-    this.rawWs = null;
-    this.adpcmWs = null;
+    this.startIfReady();
   }
 
   stopRealtimeAudio() {
-    this.stopAudioSockets();
-    this.stopScheduledSources();
+    this.socketGeneration += 1;
+    this.starting = false;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    if (this.audioWs) this.audioWs.close();
+    this.audioWs = null;
+    if (this.decoder) this.decoder.close();
+    this.decoder = null;
+    if (this.worklet) {
+      this.worklet.disconnect();
+      this.worklet.port.close();
+    }
+    this.worklet = null;
+    this.workletConfiguration = '';
+    this.workletDiagnostics = null;
     this.bandwidth = 0;
     this.peak = 0;
-    this.resetNativeLevelSync();
     this.lastAudioAt = 0;
-  }
-
-  stopScheduledSources() {
-    for (const source of this.scheduledSources) {
-      try {
-        source.stop();
-      } catch {
-        // The source may already have ended.
-      }
-    }
-    this.scheduledSources.clear();
-    this.nextPlayTime = 0;
   }
 
   applyGain() {
     if (this.gainNode) this.gainNode.gain.value = this.muted ? 0 : this.gain;
   }
 
-  resetNativeLevelSync() {
-    this.peak = 0;
-    this.lastAudioAt = 0;
-  }
-
   updateMeter() {
     const now = Date.now();
     const elapsed = Math.max(0.001, (now - this.lastBandwidthAt) / 1000);
-    if (globalMode !== 'opus') {
-      this.bandwidth = this.paused ? 0 : Math.max(0, (this.receivedBytes - this.lastBandwidthBytes) * 8 / elapsed);
-    }
+    this.bandwidth = this.paused ? 0 : Math.max(0, (this.receivedBytes - this.lastBandwidthBytes) * 8 / elapsed);
     this.lastBandwidthBytes = this.receivedBytes;
     this.lastBandwidthAt = now;
     if (!this.lastAudioAt || now - this.lastAudioAt > 400 || globalPaused) {
       this.peak = 0;
-    } else if (globalMode !== 'opus') {
+    } else {
       this.peak *= 0.985;
     }
     const db = this.peak * this.gain > 0 ? 20 * Math.log10(this.peak * this.gain) : -60;
@@ -927,10 +777,10 @@ class MultiStreamPlayer {
   updateLabels() {
     this.lastEl.textContent = localizeLastHeard(this.lastHeardLabel);
     this.updateCompactLabel();
-    this.modeButton.textContent = this.mode === 'opus' ? t('compressed') : t('uncompressed');
+    this.modeButton.textContent = this.mode === 'opus' ? t('compatibleMode') : t('realTimeMode');
     this.startButton.textContent = this.started ? (this.muted ? t('unmute') : t('mute')) : t('startAudio');
-    this.nativeMuteButton.classList.toggle('muted', this.muted);
-    this.nativeMuteButton.setAttribute('aria-label', this.muted ? t('unmute') : t('mute'));
+    this.startButton.title = this.playbackError;
+    this.startButton.textContent = this.playbackError ? this.playbackError : this.startButton.textContent;
     this.updateCardModeState();
   }
 
@@ -941,80 +791,12 @@ class MultiStreamPlayer {
 
   updateCardModeState() {
     if (!this.card) return;
-    const isRaw = globalMode === 'raw';
-    this.card.classList.toggle('raw-mode', isRaw);
-    this.card.classList.toggle('compressed-mode', !isRaw);
-    if (!isRaw) this.card.classList.remove('expanded');
+    this.card.dataset.audioMode = this.mode;
     if (this.compactToggle) {
-      this.compactToggle.disabled = !isRaw;
-      this.compactToggle.setAttribute('aria-expanded', String(isRaw && this.card.classList.contains('expanded')));
+      this.compactToggle.disabled = false;
+      this.compactToggle.setAttribute('aria-expanded', String(this.card.classList.contains('expanded')));
     }
   }
-
-  sendNativeGain(options = {}) {
-    if (globalMode !== 'opus' || !multiPlaybackRequested) return;
-    const send = () => {
-      const query = new URLSearchParams({
-        clientId: getClientId(),
-        stream: this.stream.name,
-        gain: String(this.muted ? 0 : this.gain),
-      });
-      fetch(`${appPath('multi/native-gain')}?${query.toString()}`).catch(() => {});
-    };
-    if (options.immediate) {
-      clearTimeout(this.nativeGainTimer);
-      this.nativeGainTimer = null;
-      send();
-      return;
-    }
-    if (this.nativeGainTimer) return;
-    this.nativeGainTimer = setTimeout(() => {
-      this.nativeGainTimer = null;
-      send();
-    }, 500);
-  }
-}
-
-function decodeAdpcmFrame(arrayBuffer) {
-  const view = new DataView(arrayBuffer);
-  if (view.byteLength < 24 || view.getUint8(0) !== 0x41 || view.getUint8(1) !== 0x44 || view.getUint8(2) !== 0x50 || view.getUint8(3) !== 0x31) return null;
-  const channels = view.getUint8(4);
-  const headerBytes = view.getUint16(6, true);
-  const sampleRate = view.getUint32(8, true);
-  const frames = view.getUint16(16, true);
-  const payloadBytes = view.getUint16(18, true);
-  if (![1, 2].includes(channels) || headerBytes !== 20 + channels * 4 || frames < 1 || view.byteLength < headerBytes + payloadBytes) return null;
-  const states = [];
-  const samples = new Float32Array(frames * channels);
-  for (let channel = 0; channel < channels; channel += 1) {
-    const offset = 20 + channel * 4;
-    states.push({ predictor: view.getInt16(offset, true), index: view.getUint8(offset + 2) });
-    samples[channel] = states[channel].predictor / 32768;
-  }
-  let nibbleIndex = 0;
-  for (let frame = 1; frame < frames; frame += 1) {
-    for (let channel = 0; channel < channels; channel += 1) {
-      const byteValue = view.getUint8(headerBytes + Math.floor(nibbleIndex / 2));
-      const code = nibbleIndex % 2 === 0 ? byteValue & 0x0f : byteValue >> 4;
-      samples[frame * channels + channel] = decodeAdpcmNibble(code, states[channel]) / 32768;
-      nibbleIndex += 1;
-    }
-  }
-  return { samples, frames, channels, sampleRate };
-}
-
-const adpcmIndexTable = [-1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8];
-const adpcmStepTable = [7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767];
-
-function decodeAdpcmNibble(code, state) {
-  const step = adpcmStepTable[state.index] || 7;
-  let delta = step >> 3;
-  if (code & 4) delta += step;
-  if (code & 2) delta += step >> 1;
-  if (code & 1) delta += step >> 2;
-  state.predictor = clamp(state.predictor + ((code & 8) ? -delta : delta), -32768, 32767);
-  state.index = clamp(state.index + adpcmIndexTable[code], 0, adpcmStepTable.length - 1);
-  return state.predictor;
 }
 
 function peakOf(samples) {
@@ -1079,3 +861,14 @@ function init() {
 }
 
 init();
+
+window.getMultiAudioDiagnostics = () => ({
+  mode: globalMode, audioContextState: audioContext?.state || 'not-created',
+  streams: players.map((player) => ({
+    name: player.stream.name, mode: player.currentMode, started: player.started,
+    gain: player.gain, muted: player.muted, error: player.playbackError,
+    deliveredFrames: player.deliveredFrames,
+    decoder: player.decoder?.diagnostics() || null,
+    playback: player.workletDiagnostics,
+  })),
+});
