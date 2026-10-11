@@ -557,30 +557,41 @@ canvas {
 }
 
 .multi-mode-controls {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-.multi-mode-button {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
-  color: var(--text);
   padding: 12px 14px;
-  font-size: 15px;
+  margin-bottom: 16px;
+}
+
+.multi-mode-controls h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 10px;
+}
+
+.multi-mode-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.multi-mode-button {
+  width: auto;
+  border: 1px solid var(--wave);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  padding: 7px 12px;
+  font-size: 13px;
   font-weight: 750;
 }
 
-.multi-mode-button:not(.active) {
+.multi-mode-button:hover,
+.multi-mode-button:active,
+.multi-mode-button:focus-visible {
   border-color: var(--wave);
-}
-
-.multi-mode-button.active {
-  border-color: var(--wave);
-  background: var(--wave);
-  color: #160500;
+  background: transparent;
 }
 
 .multi-stream-card {

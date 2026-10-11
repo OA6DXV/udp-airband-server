@@ -27,7 +27,6 @@ const languageMenu = document.getElementById('languageMenu');
 const languageOptions = Array.from(document.querySelectorAll('.language-option'));
 const multiStartOverlay = document.getElementById('multiStartOverlay');
 const multiStartButton = document.getElementById('multiStartButton');
-const multiPlayButton = document.getElementById('multiPlayButton');
 const multiNoticeTitle = document.getElementById('multiNoticeTitle');
 const multiNoticeBody = document.getElementById('multiNoticeBody');
 const modeButtons = Array.from(document.querySelectorAll('.multi-mode-button'));
@@ -39,6 +38,10 @@ const translations = {
     mode: 'Mode', audio: 'Audio', startAudio: 'Start', mute: 'Mute', unmute: 'Unmute', compressed: 'Compressed',
     uncompressed: 'Uncompressed', streamName: 'Stream', level: 'Level', never: 'never', now: 'Now',
     realTimeMode: 'RAW Audio', compatibleMode: 'Normal Mode', accept: 'Accept',
+    globalModeTitle: 'Change mode for all streams:',
+    welcomeTitle: 'Welcome to multistream mode',
+    welcomeBody: 'Normal Mode is used by default. You can change the audio mode for all streams using the global buttons, or choose it independently for each stream. Press Start Audio to begin playback.',
+    beginAudio: 'Start Audio',
     serverDisconnected: 'Connection to the server was lost. Reconnecting...',
     serverRestarted: 'The server restarted. This page reconnected; refresh if audio does not resume.',
     streamsUnavailableTitle: 'Streams updated',
@@ -52,6 +55,10 @@ const translations = {
     mode: 'Modo', audio: 'Audio', startAudio: 'Iniciar', mute: 'Silenciar', unmute: 'Activar', compressed: 'Comprimido',
     uncompressed: 'Sin comprimir', streamName: 'Stream', level: 'Nivel', never: 'nunca', now: 'Ahora',
     realTimeMode: 'RAW Audio', compatibleMode: 'Normal Mode', accept: 'Aceptar',
+    globalModeTitle: 'Cambiar modo a todos los streams:',
+    welcomeTitle: 'Bienvenido al modo multistream',
+    welcomeBody: 'Por defecto se utilizará Normal Mode. Puedes cambiar el modo de audio con los botones globales o configurarlo de forma independiente para cada stream. Pulsa Iniciar audio para comenzar la reproducción.',
+    beginAudio: 'Iniciar audio',
     serverDisconnected: 'Se perdio la conexion con el servidor. Reconectando...',
     serverRestarted: 'El servidor se reinicio. Esta pagina se reconecto; actualiza si el audio no vuelve.',
     streamsUnavailableTitle: 'Streams actualizados',
@@ -124,11 +131,9 @@ if (multiStartButton) {
       location.href = appPath('');
       return;
     }
-
+    startMultiPlayback();
   });
 }
-
-multiPlayButton.addEventListener('click', startMultiPlayback);
 
 modeButtons.forEach((button) => {
   button.addEventListener('click', () => {
@@ -266,10 +271,9 @@ function updateMediaSessionMetadata() {
 
 function setGlobalMode(mode, options = {}) {
   if (!['raw', 'opus'].includes(mode)) return;
-  const changed = globalMode !== mode;
   globalMode = mode;
   players.forEach((player) => {
-    if (changed) {
+    if (player.mode !== mode) {
       player.stopRealtimeAudio();
       player.started = false;
     }
@@ -277,7 +281,7 @@ function setGlobalMode(mode, options = {}) {
     player.updateLabels();
   });
   updateModeControls();
-  if (changed && multiPlaybackRequested && !options.deferStart) {
+  if (multiPlaybackRequested && !options.deferStart) {
     startSelectedGlobalMode().catch((error) => console.warn(error));
   }
 }
@@ -285,13 +289,10 @@ function setGlobalMode(mode, options = {}) {
 function updateModeControls() {
   modeButtons.forEach((button) => {
     button.textContent = t(button.dataset.mode === 'opus' ? 'compatibleMode' : 'realTimeMode');
-    button.classList.toggle('active', button.dataset.mode === globalMode);
   });
 }
 
 function updateHeader() {
-  multiPlayButton.hidden = players.some((player) => player.started);
-  multiPlayButton.textContent = t('startAudio');
   activeUsersEl.textContent = String(players.reduce((max, player) => Math.max(max, player.activeListeners || 0), 0));
   const totalBps = players.reduce((total, player) => total + player.bandwidth, 0);
   totalBandwidthEl.textContent = globalPaused || totalBps <= 0 ? 'Idle' : formatBandwidth(totalBps);
@@ -406,6 +407,11 @@ function applyLanguage() {
   languageOptions.forEach((option) => option.classList.toggle('active', option.dataset.lang === language));
   players.forEach((player) => player.updateLabels());
   updateModeControls();
+  if (!multiPlaybackRequested && !streamsUnavailable) {
+    multiNoticeTitle.textContent = t('welcomeTitle');
+    multiNoticeBody.textContent = t('welcomeBody');
+    multiStartButton.textContent = t('beginAudio');
+  }
   if (serverNoticeEl && !serverNoticeEl.hidden) {
     const textEl = serverNoticeEl.querySelector('[data-role="server-notice-text"]');
     const reloadButton = serverNoticeEl.querySelector('[data-role="server-notice-reload"]');
