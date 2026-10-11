@@ -5,6 +5,7 @@
 ### English
 
 - Removed server-side realtime Opus pacing and its 200 ms discard queue; complete input frames are encoded and sent on arrival, with incomplete samples preserved across UDP gaps.
+- Anchored idle Opus silence to absolute deadlines so timer rounding does not starve the AudioWorklet between transmissions; catch-up is limited to two synthetic frames.
 - Added server and browser audio accounting to distinguish source encoding, client packet drops, decoder queue losses, and AudioWorklet underruns/overflows.
 - Added configurable UDP test chunk duration (20 ms by default) and monotonic pacing without accumulated sleep drift.
 - Added direct libopus encoding of 20 ms float PCM frames for 8 kHz and 16 kHz single streams, with no FFmpeg dependency for Opus.
@@ -16,6 +17,7 @@
 ### Espanol
 
 - Se elimino la temporizacion Opus del servidor y su cola de descarte de 200 ms; los frames completos se codifican y envian al llegar y las muestras incompletas se conservan entre pausas UDP.
+- Se anclo el silencio Opus a plazos absolutos para que el redondeo de temporizadores no deje vacio el AudioWorklet entre transmisiones; la recuperacion se limita a dos frames sinteticos.
 - Se agregaron contadores de audio en servidor y navegador para distinguir codificacion, descartes para clientes, perdida en la cola del decoder y underruns/overflows del AudioWorklet.
 - Se agrego duracion configurable de bloques UDP de prueba (20 ms por defecto) y temporizacion monotonica sin deriva acumulada entre esperas.
 - Se agrego codificacion directa con libopus de frames PCM float de 20 ms para streams individuales de 8 kHz y 16 kHz, sin depender de FFmpeg para Opus.

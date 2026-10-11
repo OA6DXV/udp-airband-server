@@ -348,7 +348,30 @@ async function main() {
     assert.strictEqual(diagnostics.pendingInputSamples, 0);
     assert.strictEqual(diagnostics.encodedInputSamples, sampleRate + sampleRate / 50);
     assert.strictEqual(diagnostics.unaccountedInputSamples, 0);
-    assert.strictEqual(diagnostics.silenceFrames, 1);
+    assert.strictEqual(diagnostics.silenceFrames, 2);
+    assert(diagnostics.skippedSilenceFrames > 0, 'a long stall must not create a backlog of synthetic silence');
+    transport.closeStream(testStream);
+  }
+
+  // Alternating 19/21 ms timer intervals must still generate 50 silence
+  // frames per second, so the browser remains primed between transmissions.
+  {
+    let time = 1000;
+    let encodes = 0;
+    const testStream = { name: 'silent', sampleRate: 8000, channels: 1 };
+    const transport = createSharedOpus({
+      now: () => time,
+      createEncoder: () => ({ encode: () => { encodes += 1; return packet; }, close: () => {} }),
+      sendWsBinary: () => true,
+    });
+    transport.attach(testStream, client('silent'));
+    transport.writeSilence([testStream]);
+    for (let tick = 1; tick <= 500; tick += 1) {
+      time = 1000 + tick * 20 + tick % 2;
+      transport.writeSilence([testStream]);
+    }
+    assert.strictEqual(encodes, 501, 'timer rounding must not slow down silence delivery');
+    assert.strictEqual(transport.getDiagnostics(testStream).skippedSilenceFrames, 0);
     transport.closeStream(testStream);
   }
 
