@@ -27,7 +27,7 @@ The useful part of this approach is latency and simplicity. RTLSDR-Airband can k
 
 Clone the repository and install the Node.js dependencies:
 
-For the 1.9 preview on Debian/Ubuntu, install the libopus runtime and native build tools first:
+For the 2.0 preview on Debian/Ubuntu, install the libopus runtime and native build tools first:
 
 ```bash
 sudo apt install build-essential python3 node-gyp libopus0
@@ -68,9 +68,6 @@ cert =
 [streams]
 file = streams.json
 
-[audio]
-opus_worklet_target_latency_ms = 100
-
 [storage]
 sqlite_file = localdb.sqlite
 
@@ -93,15 +90,6 @@ enabled = false
 key =
 cert =
 
-[compressed]
-enabled = true
-codec = adpcm
-adpcm_frame_ms = 40
-ffmpeg = ffmpeg
-opus_realtime_bitrate_8k = 12k
-opus_realtime_bitrate_16k = 32k
-aac_bitrate = 32k
-keepalive_ms = 1000
 ```
 
 Important fields:
@@ -122,8 +110,6 @@ Important fields:
 - `[logging].timestamps`: set to `true` to prepend ISO timestamps. With `systemd`, this can usually stay `false` because `journalctl` already adds timestamps.
 - `[logging].colors`: set to `true` to color terminal logs. Keep it `false` for normal `systemd` service logs.
 - `[ssl]`: optional HTTPS mode for the same `[web]` host and port. Enable it and provide valid `key` and `cert` paths when you want Node.js to serve TLS directly. If SSL is enabled but the certificate paths are missing or invalid, the server logs a warning and falls back to HTTP on the same port.
-- `[compressed].enabled`: set to `false` to disable all compressed modes and their transcoding/framing logic.
-- `[compressed].codec`: legacy server codec setting. The single-stream browser offers ADPCM and direct Opus independently of this value.
 
 Runtime metrics, Last Heard values, geolocation data, and Web Admin authentication are stored exclusively in SQLite at `data/localdb.sqlite` by default. On Node.js 22.13+ (including Node 24), the built-in `node:sqlite` module is used automatically with no warning or extra package. Older Node.js installations must install the compatibility driver with `npm install better-sqlite3`.
 
@@ -246,7 +232,7 @@ npm start -- \
   --config /etc/udp-airband-server/streams.json
 ```
 
-For manual troubleshooting, start with `-D` to enable full debug output from the server and ffmpeg-backed encoders:
+For manual troubleshooting, start with `-D` to enable full debug output from the server and native Opus encoders:
 
 ```bash
 node server.js -D \
@@ -254,13 +240,13 @@ node server.js -D \
   --config /etc/udp-airband-server/streams.json
 ```
 
-Use `-D` only when running the server directly in a terminal. It forces debug logging, enables timestamps for terminal output, and can produce a lot of ffmpeg output. It is not recommended for the normal `systemd` service command.
+Use `-D` only when running the server directly in a terminal. It forces debug logging, enables timestamps for terminal output, and can produce many audio diagnostics. It is not recommended for the normal `systemd` service command.
 
 ## Logging
 
 The server logs to stdout/stderr, so `systemd` automatically stores the output in `journalctl`.
 
-The default `info` level is intentionally soft enough for service use. It shows startup lines, stream binds, player URLs, connection/disconnection events, warnings, and errors. It does not print full ffmpeg encoder debug output.
+The default `info` level is intentionally soft enough for service use. It shows startup lines, stream binds, player URLs, connection/disconnection events, warnings, and errors. It does not print all audio diagnostics.
 
 `server.conf` is local and ignored by Git, so production edits are not overwritten by `git pull`. If the file is missing, startup writes a new `server.conf` from the built-in default template and prints a visible warning block. When new settings are added in later versions, the server writes that internal template to `server.conf.tmp`, appends only missing keys to the local `server.conf`, and removes the temporary file afterwards. Existing local values are preserved. If `streams.json` is missing, the server logs a warning and starts a built-in `test` stream on UDP port `8690`, mono, `8000 Hz`.
 
@@ -286,7 +272,7 @@ Use `debug` in the config only if you really want persistent debug logs in `jour
 node server.js -D --server-config server.conf --config streams.json
 ```
 
-When `-D` is active, the server logs native Opus encoder lifecycle events and detailed diagnostics. Legacy AAC/HLS FFmpeg output is also printed when those routes are used. `-D` enables timestamps and colors for manual terminal runs.
+When `-D` is active, the server logs native Opus encoder lifecycle events and detailed diagnostics. `-D` enables timestamps and colors for manual terminal runs.
 
 ## Web Admin
 
@@ -460,49 +446,25 @@ When SSL is active, the player switches from HTTP to HTTPS on `[web].port`; it d
 
 Browsers will warn about self-signed certificates because they are not trusted by default. This is acceptable for local testing, but a trusted certificate, such as Let's Encrypt, is recommended for public access.
 
-## Uncompressed And Compressed Modes
+## Audio Profiles
 
-The single-stream browser offers three profiles:
+Single-stream and multistream players offer three permanent profiles:
 
-- `Uncompressed`: original float32 PCM over WebSocket. This is the default on desktop browsers.
-- `Compressed`: low-latency IMA ADPCM over WebSocket.
-- `Opus Realtime`: 20 ms mono Opus packets over WebSocket, encoded directly with libopus. It targets 12 kb/s at 8 kHz and 32 kb/s at 16 kHz and is preferred on supported mobile browsers.
+| Profile | Format | Fixed parameters |
+| --- | --- | --- |
+| RAW | Original float32 PCM | UDP input sample rate and channel count |
+| Normal (default) | IMA ADPCM | Frames up to 40 ms; audio sent only when UDP arrives |
+| low data | Mono Opus encoded directly with libopus | 20 ms; 20 kb/s at 8 kHz and 32 kb/s at 16 kHz |
 
-Each profile delivers decoded PCM to an AudioWorklet when the browser supports it. Opus Realtime also requires WebCodecs Opus decoding and a secure browser context (HTTPS or localhost). Background playback still depends on the browser and device and must be checked on the target iPhone.
+All profiles require AudioWorklet and HTTPS or localhost. low data also requires compatible WebCodecs Opus decoding. Missing browser support is reported without automatically switching codecs. Volume and mute controls are local, with the same interface for every profile.
 
-One native Opus encoder is shared by all listeners of a stream. After the last listener leaves, it remains available for 10 seconds so a quick reconnect reuses it.
+Audio requires no server.conf or command-line settings. Old [compressed] and [audio] sections are ignored; startup does not add or modify their parameters. AAC, HLS, Ogg, and their playback fallbacks have been removed. The server requires the native module and libopus to provide all three profiles.
 
-Complete 20 ms frames are encoded and sent immediately on UDP arrival, including when a receiver batches several frames into one datagram. Only an incomplete frame is retained on the server; the AudioWorklet controls playback timing. The browser's existing prebuffer is unchanged.
+One Opus encoder is shared by all listeners of a frequency and remains alive for 10 seconds after the last listener leaves. Complete 20 ms frames are encoded and sent immediately on UDP arrival; the AudioWorklet controls playback timing. The startup buffer remains 100 ms.
 
-For diagnostics, run `server.js -D`: `opus_audio_diagnostics` reports received and encoded input samples, pending samples, inserted silence, encoding time, and client packet drops. `unaccountedInputSamples` should be zero. The same counters are logged when an encoder stops. In the browser console, `getAudioDiagnostics()` reports decoder packet loss, decoded samples, delivery drops, and AudioWorklet underruns/overflows. These are local diagnostics, not an iOS background-playback guarantee.
+Normal broadcasts identical ADPCM frames to its listeners and sends no audio during UDP gaps. Each frame includes decoder state so playback can resume after silence.
 
-ADPCM is designed for intermittent radio audio. The server sends compressed frames only when UDP audio arrives, so idle squelch periods do not consume audio bandwidth. Each ADPCM frame includes enough decoder state for new clients, or clients after a silence gap, to resynchronize quickly.
-
-Compressed mode defaults to:
-
-```conf
-[compressed]
-enabled = true
-codec = adpcm
-adpcm_frame_ms = 40
-```
-
-The single-stream player uses ADPCM for its `Compressed` profile and direct libopus for `Opus Realtime`. The older `compressed.codec` setting remains for legacy AAC/HLS routes.
-
-The Opus profile does not require FFmpeg. Multistream uses independent RAW or native Opus WebSockets, AudioWorklet playback, and local volume/mute controls for each stream. Both modes use the same interface; there is no server-side AAC mix or volume-command endpoint. Native Opus encoders are shared between listeners of the same stream and remain alive for 10 seconds after the last listener leaves. Background playback still depends on the browser and device. Only the legacy single-stream AAC/HLS routes require FFmpeg.
-
-Install `ffmpeg` only if you use those AAC/HLS routes:
-
-```bash
-sudo apt install ffmpeg
-```
-
-To disable compressed audio completely:
-
-```conf
-[compressed]
-enabled = false
-```
+For diagnostics, run server.js -D and inspect opus_audio_diagnostics. In the browser, getAudioDiagnostics() reports decoder and AudioWorklet diagnostics. Background playback should be checked on the target device.
 
 ## Player Controls
 

@@ -6,9 +6,8 @@ const dgram = require('dgram');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
-const os = require('os');
 const path = require('path');
-const { spawn, spawnSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 const { ensureAdminSecrets } = require('./lib/admin-secrets');
 const { createProxyTrust, resolveRequestContext } = require('./lib/proxy-trust');
@@ -35,6 +34,7 @@ const { createLogger } = require('./lib/logger');
 const { DEFAULT_STREAMS, loadStreams, loadStreamsFromConfig, renderMultiStreamPage, renderStreamList, validateStreams } = require('./lib/streams');
 const { acceptWebSocket, sendWsBinary, sendWsJson } = require('./lib/websocket');
 const { createCompressedManager } = require('./lib/compressed');
+const { ADPCM_FRAME_MS, OPUS_FRAME_MS, OPUS_BITRATE_8K, OPUS_BITRATE_16K, WORKLET_TARGET_LATENCY_MS } = require('./lib/audio-profiles');
 const { createGeoService } = require('./lib/geo-service');
 const { aggregateGeoStats } = require('./lib/geo-stats');
 const { detectRuntimeMode } = require('./lib/runtime');
@@ -43,9 +43,7 @@ const { archiveLegacyJsonFiles, inspectLegacyJsonRuntimeStorage, migrateStorage,
 const { createWebAdmin } = require('./lib/web-admin-secure');
 
 const MAX_SOCKET_BUFFER_BYTES = 1024 * 1024;
-const MAX_OPUS_STDIN_BUFFER_BYTES = 512 * 1024;
-const SOFTWARE_VERSION = '1.9-preview';
-const COMPRESSED_CODECS = new Set(['adpcm', 'opus', 'aac', 'hls']);
+const SOFTWARE_VERSION = '2.0-preview';
 const serverInstanceId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
 
 const args = parseArgs(process.argv.slice(2));
@@ -105,16 +103,6 @@ const geoCacheTtlDays = Number(getSetting(serverConfig, 'geo.cacheTtlDays', 30))
 const geoTimeoutMs = Number(getSetting(serverConfig, 'geo.timeoutMs', 1500));
 const geoIpv4Anonymize = String(getSetting(serverConfig, 'geo.ipv4Anonymize', '/24')).trim();
 const geoIpv6Anonymize = String(getSetting(serverConfig, 'geo.ipv6Anonymize', '/48')).trim();
-const compressedEnabled = parseBoolean(args.compressedEnabled !== undefined ? args.compressedEnabled : getSetting(serverConfig, 'compressed.enabled', true));
-const compressedCodec = String(args.compressedCodec || args.codec || getSetting(serverConfig, 'compressed.codec', 'adpcm')).trim().toLowerCase();
-const adpcmFrameMs = Number(args.adpcmFrameMs || getSetting(serverConfig, 'compressed.adpcmFrameMs', 40));
-const opusRealtimeBitrate8k = args.opusRealtimeBitrate8k || getSetting(serverConfig, 'compressed.opusRealtimeBitrate8k', '12k');
-const opusRealtimeBitrate16k = args.opusRealtimeBitrate16k || getSetting(serverConfig, 'compressed.opusRealtimeBitrate16k', '32k');
-const opusRealtimeFrameMs = Number(args.opusRealtimeFrameMs || getSetting(serverConfig, 'compressed.opusRealtimeFrameMs', 20));
-const opusWorkletTargetLatencyMs = Number(args.opusWorkletTargetLatencyMs || getSetting(serverConfig, 'audio.opusWorkletTargetLatencyMs', 100));
-const aacBitrate = args.aacBitrate || getSetting(serverConfig, 'compressed.aacBitrate', '32k');
-const opusKeepaliveMs = Number(args.opusKeepaliveMs || getSetting(serverConfig, 'compressed.keepaliveMs', 1000));
-const ffmpegPath = args.ffmpeg || getSetting(serverConfig, 'compressed.ffmpeg', 'ffmpeg');
 const logLevel = args.logLevel || getSetting(serverConfig, 'logging.level', 'info');
 const tlsKeyPath = args.tlsKey || args.httpsKey || getSetting(serverConfig, 'ssl.key', '');
 const tlsCertPath = args.tlsCert || args.httpsCert || getSetting(serverConfig, 'ssl.cert', '');
@@ -248,25 +236,11 @@ if (webAdminEnabled && (!Number.isInteger(webAdminPort) || webAdminPort < 1 || w
 if (webAdminEnabled && webAdminPort === httpPort && isOverlappingHost(webAdminHost, httpHost)) {
   fatal('Web Admin must use a different port from the public web player');
 }
-if (!Number.isInteger(opusKeepaliveMs) || opusKeepaliveMs < 20 || opusKeepaliveMs > 1000) {
-  fatal('--opus-keepalive-ms must be between 20 and 1000');
-}
-if (!COMPRESSED_CODECS.has(compressedCodec)) {
-  fatal('--compressed-codec must be one of: adpcm, opus, aac, hls');
-}
-if (!Number.isInteger(adpcmFrameMs) || adpcmFrameMs < 10 || adpcmFrameMs > 100) {
-  fatal('--adpcm-frame-ms must be between 10 and 100');
-}
-if (opusRealtimeFrameMs !== 20) {
-  fatal('--opus-realtime-frame-ms must be 20 for the realtime Opus transport');
-}
-if (!Number.isInteger(opusWorkletTargetLatencyMs) || opusWorkletTargetLatencyMs < 20 || opusWorkletTargetLatencyMs > 500) {
-  fatal('--opus-worklet-target-latency-ms must be between 20 and 500');
-}
 const publicDir = __dirname;
 const indexHtml = fs.readFileSync(path.join(publicDir, 'index.html'));
 const appJs = fs.readFileSync(path.join(publicDir, 'assets', 'app.js'));
 const opusWebCodecsJs = fs.readFileSync(path.join(publicDir, 'assets', 'opus-webcodecs.mjs'));
+const adpcmDecoderJs = fs.readFileSync(path.join(publicDir, 'assets', 'adpcm-decoder.mjs'));
 const opusAudioRingBufferJs = fs.readFileSync(path.join(publicDir, 'assets', 'audio-ring-buffer.mjs'));
 const opusAudioWorkletJs = fs.readFileSync(path.join(publicDir, 'assets', 'audio-worklet.mjs'));
 const styleCss = fs.readFileSync(path.join(publicDir, 'assets', 'style.css'));
@@ -290,32 +264,15 @@ const adminAssets = webAdminEnabled ? {
 const tlsOptions = sslRequested ? loadTlsOptions() : null;
 const tlsEnabled = Boolean(tlsOptions);
 const adminTlsOptions = webAdminEnabled && adminSecure ? loadAdminTlsOptions() : null;
-const hlsRoot = compressedEnabled ? fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-hls-')) : '';
 const compressed = createCompressedManager({
-  aacBitrate,
-  adpcmFrameMs,
   addListenerBytes,
   addListenerMode,
-  ensureListenerStats,
-  ffmpegPath,
-  fs,
-  hlsRoot,
   maxSocketBufferBytes: MAX_SOCKET_BUFFER_BYTES,
-  maxStdinBufferBytes: MAX_OPUS_STDIN_BUFFER_BYTES,
-  normalizeClientId: (value) => normalizeClientId(value, crypto),
-  path,
   removeListenerMode,
   sendWsBinary,
-  spawn,
-  spawnSync,
-  opusRealtimeBitrate8k,
-  opusRealtimeBitrate16k,
-  opusRealtimeFrameMs,
   logger,
   debugEnabled,
 });
-const compressedAvailable = compressedEnabled && compressed.isCodecAvailable(compressedCodec);
-const opusAvailable = compressedEnabled && compressed.opusRealtimeAvailable;
 if (serverConfigUpdate.created) {
   logGeneratedServerConfig(serverConfigPath);
 } else if (!serverConfigExists) {
@@ -338,7 +295,7 @@ if (!streamsConfigExists) {
 
 let streams;
 try {
-  streams = loadStreams({ configPath, defaultUdpHost, fs, opusKeepaliveMs, path });
+  streams = loadStreams({ configPath, defaultUdpHost, fs, path });
   validateStreams(streams);
 } catch (err) {
   fatal(err.message);
@@ -455,6 +412,10 @@ function handleHttpRequest(req, res) {
     sendAsset(res, opusWebCodecsJs, 'application/javascript; charset=utf-8');
     return;
   }
+  if (pathname === '/assets/adpcm-decoder.mjs') {
+    sendAsset(res, adpcmDecoderJs, 'application/javascript; charset=utf-8');
+    return;
+  }
   if (pathname === '/assets/audio-ring-buffer.mjs') {
     sendAsset(res, opusAudioRingBufferJs, 'application/javascript; charset=utf-8');
     return;
@@ -465,17 +426,6 @@ function handleHttpRequest(req, res) {
   }
   if (pathname === '/assets/multi.js') {
     sendAsset(res, multiJs, 'application/javascript; charset=utf-8');
-    return;
-  }
-
-  const hlsMatch = pathname.match(/^\/([^/]+)\/hls\/([^/]+)\/([^/]+)$/);
-  if (hlsMatch) {
-    const stream = streamsByName.get(hlsMatch[1]);
-    if (!stream) {
-      sendNotFound(res);
-      return;
-    }
-    compressed.serveHls(stream, hlsMatch[2], hlsMatch[3], res);
     return;
   }
 
@@ -498,7 +448,7 @@ function attachUpgradeHandler(server) {
       socket.destroy();
       return;
     }
-    const match = pathname.match(/^\/([^/]+)\/(audio|control|adpcm|aac|opus-live)$/);
+    const match = pathname.match(/^\/([^/]+)\/(audio|control|adpcm|opus-live)$/);
     if (!match) {
       logger.warn('websocket_rejected', {
         path: requestUrl.pathname,
@@ -531,7 +481,7 @@ function attachUpgradeHandler(server) {
       if (!monitorOnly) addListenerMode(stream, clientId, 'control');
       sendWsJson(socket, streamConfig(stream));
       recordClientActivity('connected', stream.name, connectionLogMode, clientId, remoteAddress);
-    } else if (socketType === 'adpcm' || socketType === 'aac' || socketType === 'opus-live') {
+    } else if (socketType === 'adpcm' || socketType === 'opus-live') {
       compressed.serveWebSocket(stream, clientId, socket, socketType);
       recordClientActivity('connected', stream.name, socketType, clientId, remoteAddress);
     } else {
@@ -698,10 +648,7 @@ async function startWebServers() {
   const adminStart = webAdmin ? webAdmin.start() : Promise.resolve();
 
   Promise.all([publicStart, adminStart]).then(() => {
-    logger.plain('info', `Compressed: ${compressedEnabled ? formatCompressedStatus() : 'disabled by config'}`);
-    if (compressedEnabled && !compressedAvailable) {
-      logger.warn('compressed_unavailable', { codec: compressedCodec, ffmpeg: ffmpegPath });
-    }
+    logger.plain('info', 'Audio profiles: RAW / Normal (ADPCM) / low data (Opus), via AudioWorklet');
     if (webAdmin) {
       if (webAdminConfigOverridden) {
         logger.info('webadmin_config_override', {
@@ -746,13 +693,8 @@ async function startWebServers() {
 
   setInterval(() => userHistory.record(clientLifecycleLog.activeCount()), 60 * 1000);
   setInterval(broadcastStreamStats, 250);
-  if (compressedEnabled) {
-    setInterval(() => compressed.writeSilenceKeepalive(streams, opusKeepaliveMs), opusKeepaliveMs);
-    if (compressed.opusRealtimeAvailable) {
-      const opusRealtimeInterval = setInterval(() => compressed.writeOpusRealtimeSilence(streams), opusRealtimeFrameMs);
-      if (typeof opusRealtimeInterval.unref === 'function') opusRealtimeInterval.unref();
-    }
-  }
+  const opusSilenceInterval = setInterval(() => compressed.writeOpusRealtimeSilence(streams), OPUS_FRAME_MS);
+  if (typeof opusSilenceInterval.unref === 'function') opusSilenceInterval.unref();
 }
 
 let streamUpdateQueue = Promise.resolve();
@@ -785,7 +727,6 @@ async function applyStreamReplacement(payload) {
     candidateStreams = loadStreamsFromConfig(payload, {
       configPath,
       defaultUdpHost,
-      opusKeepaliveMs,
     });
     validateStreams(candidateStreams);
   } catch (err) {
@@ -1026,20 +967,13 @@ function streamConfig(stream) {
     sampleRate: stream.sampleRate,
     channels: stream.channels,
     format: 'f32le',
-    compressedEnabled,
-    compressedAvailable,
-    compressedCodec,
-    adpcmAvailable: compressedEnabled,
-    adpcmFrameMs,
-    opusAvailable,
-    opusRealtimeAvailable: compressedEnabled && compressed.opusRealtimeAvailable && compressed.isRealtimeStreamSupported(stream),
+    adpcmAvailable: true,
+    adpcmFrameMs: ADPCM_FRAME_MS,
+    opusRealtimeAvailable: compressed.isRealtimeStreamSupported(stream),
     opusRealtimeInputSampleRate: stream.sampleRate <= 8000 ? 8000 : 16000,
-    opusRealtimeBitrate: stream.sampleRate <= 8000 ? opusRealtimeBitrate8k : opusRealtimeBitrate16k,
-    opusRealtimeFrameMs,
-    opusWorkletTargetLatencyMs,
-    aacAvailable: compressed.ffmpegAvailable && compressedCodec === 'aac',
-    aacBitrate,
-    hlsAvailable: compressed.ffmpegAvailable && compressedCodec === 'hls',
+    opusRealtimeBitrate: stream.sampleRate <= 8000 ? OPUS_BITRATE_8K : OPUS_BITRATE_16K,
+    opusRealtimeFrameMs: OPUS_FRAME_MS,
+    opusWorkletTargetLatencyMs: WORKLET_TARGET_LATENCY_MS,
     tlsEnabled,
     softwareVersion: SOFTWARE_VERSION,
     serverInstanceId,
@@ -1050,7 +984,6 @@ function broadcastStreamStats() {
   const now = Date.now();
   for (const stream of streams) {
     pruneInactiveListeners(stream, now);
-    compressed.pruneInactiveHlsClients(stream, now);
     const lastHeard = getLastHeard(stream, now);
     const elapsedSeconds = Math.max(0.001, (now - stream.lastStatsAt) / 1000);
     stream.lastStatsByteCount = stream.byteCount;
@@ -1075,7 +1008,6 @@ function broadcastStreamStats() {
         levelPeak: now - stream.levelPeakAt > 400 ? 0 : stream.levelPeak,
         hasUdp: stream.packetCount > 0,
         activeListeners: getActiveListeners(stream).length,
-        compressedCodec,
         softwareVersion: SOFTWARE_VERSION,
         serverInstanceId,
       });
@@ -1090,17 +1022,6 @@ function peakOfFloatPcm(buffer) {
     if (Number.isFinite(value) && value > peak) peak = value;
   }
   return Math.min(1, peak);
-}
-
-function formatCompressedStatus() {
-  if (!compressedAvailable) {
-    return `${compressedCodec} unavailable`;
-  }
-  if (compressedCodec === 'adpcm') {
-    return `enabled via ADPCM (${adpcmFrameMs} ms frames)`;
-  }
-  if (compressedCodec === 'opus') return 'enabled via direct libopus (20 ms frames)';
-  return `enabled via ${ffmpegPath} (${compressedCodec})`;
 }
 
 function sendHtml(res, body) {
@@ -1600,22 +1521,11 @@ TLS / HTTPS:
   --tls-cert PATH               TLS certificate path. Overrides [ssl].cert.
   --https-cert PATH             Alias for --tls-cert.
 
-Compressed audio:
-  --compressed-enabled true|false
-                                Enable or disable compressed audio modes.
-  --compressed-codec CODEC      Compressed codec: adpcm, opus, aac, or hls.
-  --codec CODEC                 Alias for --compressed-codec.
-  --adpcm-frame-ms MS           ADPCM frame duration, 10-100 ms. Default: 40.
-  --ffmpeg PATH                 ffmpeg executable path.
-  --opus-realtime-bitrate-8k RATE
-                                Realtime Opus target bitrate for 8 kHz streams. Default: 12k.
-  --opus-realtime-bitrate-16k RATE
-                                Realtime Opus target bitrate for 16 kHz streams. Default: 32k.
-  --opus-realtime-frame-ms MS   Realtime Opus packet duration. Fixed to 20 ms.
-  --opus-worklet-target-latency-ms MS
-                                AudioWorklet prebuffer target, 20-500 ms. Default: 100.
-  --aac-bitrate RATE            AAC bitrate for legacy and multi-stream modes. Default: 32k.
-  --opus-keepalive-ms MS        Silence keepalive interval, 20-1000 ms.
+Audio profiles:
+  RAW                          Original float32 PCM.
+  Normal                       IMA ADPCM (default), 40 ms frames.
+  low data                     Native Opus, 20 ms frames, 20/32 kb/s at 8/16 kHz.
+  All profiles use AudioWorklet. Audio settings are fixed; no configuration is required.
 
 Logging:
   --log-level LEVEL             off, error, warn, info, or debug.

@@ -11,7 +11,6 @@ for (const source of [single, multi]) {
   assert(!source.includes('showStartupNoticeIfNeeded('));
   assert(!source.includes('rememberNoticeAccepted('));
 }
-assert(single.includes("!streamPaused && currentMode === 'compatible'"));
 assert(single.includes("startButton.classList.toggle('audio-start-prompt', !audioStarted)"));
 assert(multi.includes("this.startButton.classList.toggle('audio-start-prompt', !this.started)"));
 const html = renderMultiStreamPage([]);
@@ -19,6 +18,11 @@ assert(!html.includes('multiPlayButton'));
 assert(html.includes('id="multiStartOverlay" class="multi-start-overlay">'));
 assert(html.includes('id="multiStartButton" class="multi-start-button" type="button">Start Audio'));
 assert(html.includes('data-i18n="globalModeTitle"'));
+assert(html.includes('data-mode="raw">RAW</button>'));
+assert(html.includes('data-mode="adpcm">Normal</button>'));
+assert(html.includes('data-mode="opus">low data</button>'));
+assert(multi.includes("let globalMode = 'adpcm';"), 'multistream should default to Normal/ADPCM');
+assert(fs.readFileSync(path.join(__dirname, '../assets/app.js'), 'utf8').includes("let preferredMode = 'adpcm';"), 'single stream should default to Normal/ADPCM');
 assert(!multi.includes("button.classList.toggle('active'"));
 assert(multi.includes("if (player.mode !== mode)"));
 const globalModeSetup = multi.match(/function setGlobalMode\(mode, options = \{\}\) \{[\s\S]*?\n\}/)[0];
@@ -39,7 +43,7 @@ const setup = single.match(/function updateBrowserBandwidth\(\) \{[\s\S]*?\n\}/)
 let now = 1000;
 const context = vm.createContext({
   Date: { now: () => now }, Math,
-  streamPaused: false, currentMode: 'raw', compatibleBandwidthReady: false,
+  streamPaused: false, currentMode: 'raw',
   browserBandwidthEl: { textContent: 'Idle' },
   receivedBytes: 0, lastBandwidthBytes: 0, lastBandwidthAt: now,
   formatBandwidth: bps => String(bps),

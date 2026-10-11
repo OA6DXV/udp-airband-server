@@ -30,8 +30,8 @@ const ctx = canvas.getContext('2d');
 
 const translations = {
   en: {
-    users: 'Users', gain: 'Gain', startAudio: 'Start Audio', mute: 'Mute', unmute: 'Unmute', buffered: 'Buffered', bandwidth: 'Bandwidth', lastHeardTime: 'Last Heard Time', mode: 'Mode', level: 'Level', localTime: 'Local Time', disconnected: 'Disconnected', waitingUdp: 'Waiting for UDP', connected: 'Connected', idle: 'Push to Reconnect', pushDisconnect: 'Push to disconnect', stopStream: 'Stop stream', returnHome: 'Click to return home', opusUnavailable: 'Compressed unavailable', compressed: 'Compressed', uncompressed: 'Uncompressed', switchMode: 'Switch audio mode', opusNeedsFfmpeg: 'Compressed mode is unavailable on the server', never: 'never', now: 'Now',
-    opusLive: 'Opus Realtime', opusLiveUnavailable: 'Realtime Opus unavailable', modeUnavailable: 'Mode unavailable',
+    users: 'Users', gain: 'Gain', startAudio: 'Start Audio', mute: 'Mute', unmute: 'Unmute', buffered: 'Buffered', bandwidth: 'Bandwidth', lastHeardTime: 'Last Heard Time', mode: 'Mode', level: 'Level', localTime: 'Local Time', disconnected: 'Disconnected', waitingUdp: 'Waiting for UDP', connected: 'Connected', idle: 'Push to Reconnect', pushDisconnect: 'Push to disconnect', stopStream: 'Stop stream', returnHome: 'Click to return home', normalUnavailable: 'Normal unavailable', compressed: 'Normal', uncompressed: 'RAW', switchMode: 'Switch audio mode', never: 'never', now: 'Now',
+    audioUnavailable: 'Audio unavailable. Use HTTPS and a browser with AudioWorklet support.', opusLive: 'low data', opusLiveUnavailable: 'low data unavailable', modeUnavailable: 'Mode unavailable',
     serverDisconnected: 'Connection to the server was lost. Reconnecting...',
     serverRestarted: 'The server restarted. This page reconnected; refresh if audio does not resume.',
     streamUnavailableTitle: 'Stream updated',
@@ -41,8 +41,8 @@ const translations = {
     accept: 'Accept',
   },
   es: {
-    users: 'Usuarios', gain: 'Ganancia', startAudio: 'Iniciar audio', mute: 'Silenciar', unmute: 'Activar audio', buffered: 'Buffer', bandwidth: 'Ancho de banda', lastHeardTime: 'Ultima transmision', mode: 'Modo', level: 'Nivel', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP', connected: 'Conectado', idle: 'Presiona para reconectar', pushDisconnect: 'Presiona para desconectar', stopStream: 'Detener stream', returnHome: 'Click para volver a la pagina principal', opusUnavailable: 'Comprimido no disponible', compressed: 'Comprimido', uncompressed: 'Sin comprimir', switchMode: 'Cambiar modo de audio', opusNeedsFfmpeg: 'El modo comprimido no esta disponible en el servidor', never: 'nunca', now: 'Ahora',
-    opusLive: 'Opus Realtime', opusLiveUnavailable: 'Opus Realtime no disponible', modeUnavailable: 'Modo no disponible',
+    users: 'Usuarios', gain: 'Ganancia', startAudio: 'Iniciar audio', mute: 'Silenciar', unmute: 'Activar audio', buffered: 'Buffer', bandwidth: 'Ancho de banda', lastHeardTime: 'Ultima transmision', mode: 'Modo', level: 'Nivel', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP', connected: 'Conectado', idle: 'Presiona para reconectar', pushDisconnect: 'Presiona para desconectar', stopStream: 'Detener stream', returnHome: 'Click para volver a la pagina principal', normalUnavailable: 'Normal no disponible', compressed: 'Normal', uncompressed: 'RAW', switchMode: 'Cambiar modo de audio', never: 'nunca', now: 'Ahora',
+    audioUnavailable: 'Audio no disponible. Usa HTTPS y un navegador compatible con AudioWorklet.', opusLive: 'low data', opusLiveUnavailable: 'low data no disponible', modeUnavailable: 'Modo no disponible',
     serverDisconnected: 'Se perdio la conexion con el servidor. Reconectando...',
     serverRestarted: 'El servidor se reinicio. Esta pagina se reconecto; actualiza si el audio no vuelve.',
     streamUnavailableTitle: 'Stream actualizado',
@@ -61,9 +61,6 @@ let lastHeardLabel = 'never';
 let audioContext;
 let gainNode;
 let config = { sampleRate: 8000, channels: 1 };
-let queuedFrames = 0;
-const targetLatencySeconds = 0.05;
-let nextPlayTime = 0;
 let gain = Number(gainInput.value);
 let lastPeak = 0;
 let latestWave = new Float32Array(0);
@@ -77,44 +74,17 @@ let serverNoticeEl;
 let serverNoticeKind = '';
 let streamUnavailable = false;
 let rawWs;
-let suppressRawReconnect = false;
 let adpcmWs;
-let suppressAdpcmReconnect = false;
-let opusAudio;
-let opusSourceNode;
-let opusAnalyser;
-let opusAnalyserBuffer;
-let opusWs;
-let suppressOpusReconnect = false;
-let compatibleAudio;
-let compatibleSourceNode;
-let compatibleAnalyser;
-let compatibleAnalyserBuffer;
-let compatibleAudioReady = false;
-let compatibleBandwidthReady = false;
-let opusMediaSource;
-let opusSourceBuffer;
-let opusObjectUrl;
-let opusQueue = [];
-const opusMimeType = 'audio/webm; codecs="opus"';
-const aacMimeType = 'audio/mp4; codecs="mp4a.40.2"';
-let compressedTransport = null;
-let activeCompressedKind = null;
-let usingNativeHls = false;
 let currentMode = 'raw';
-let preferredMode = isMobileDevice() ? 'opus-live' : 'raw';
-let opusAvailable = false;
-let compressedAvailable = false;
+let preferredMode = 'adpcm';
 let opusRealtimeServerAvailable = false;
 let opusRealtimeSupported = false;
-let opusRealtimeProbeComplete = false;
 let opusRealtimeModulePromise;
 let opusRealtimeWebSocket;
 let opusRealtimeDecoder;
 let opusRealtimeWorkletNode;
 let opusRealtimeWorkletPromise;
 let opusRealtimeWorkletConnected = false;
-let pcmWorkletFailed = false;
 let opusRealtimeWorkletConfiguration = '';
 let opusRealtimeWorkletDiagnostics = null;
 let opusRealtimeGeneration = 0;
@@ -139,8 +109,6 @@ let statusHovering = false;
 let receivedBytes = 0;
 let lastBandwidthBytes = 0;
 let lastBandwidthAt = Date.now();
-const maxOpusLiveBufferSeconds = 1.25;
-const targetOpusLiveBufferSeconds = 0.35;
 const waveformBarWidth = 6;
 const waveformBarGap = 6;
 const waveformMinBarHeight = 4;
@@ -240,7 +208,7 @@ statusEl.addEventListener('mouseleave', () => {
 });
 
 startButton.addEventListener('click', () => {
-  startAudioPlayback().catch(() => {});
+  startAudioPlayback().catch(handlePlaybackError);
 });
 
 async function startAudioPlayback() {
@@ -261,21 +229,16 @@ async function startAudioPlayback() {
     gainNode = audioContext.createGain();
     applyOutputGain();
     gainNode.connect(audioContext.destination);
-    nextPlayTime = audioContext.currentTime + targetLatencySeconds;
   }
 
   requestBackgroundPlaybackSession();
   const resumePromise = audioContext.resume();
   await resumePromise;
-  try {
-    await ensurePcmWorkletConnected();
-  } catch (error) {
-    console.warn('AudioWorklet unavailable; using legacy audio scheduling:', error?.message || error);
-  }
+  await ensurePcmWorkletConnected();
   connectControlWebSocket();
   streamPaused = false;
-  startSelectedMode();
   audioStarted = true;
+  startSelectedMode();
   updateAudioButton();
   updateGainControl();
   updateConnectionState();
@@ -293,11 +256,6 @@ function requestBackgroundPlaybackSession() {
 
 function applyOutputGain() {
   if (gainNode) gainNode.gain.value = muted ? 0 : gain;
-  if (opusAudio) opusAudio.muted = muted && !opusSourceNode;
-  if (compatibleAudio) {
-    compatibleAudio.muted = muted && !compatibleSourceNode;
-    compatibleAudio.volume = compatibleSourceNode ? 1 : clamp(gain, 0, 1);
-  }
 }
 
 function updateAudioButton() {
@@ -335,14 +293,9 @@ function connectControlWebSocket() {
       const message = JSON.parse(event.data);
       if (message.type === 'config') {
         config = message;
-        opusAvailable = Boolean(message.opusAvailable);
-        compressedAvailable = Boolean(message.adpcmAvailable);
         opusRealtimeServerAvailable = Boolean(message.opusRealtimeAvailable);
-        opusRealtimeProbeComplete = !opusRealtimeServerAvailable;
         opusRealtimeSupported = false;
-        compressedTransport = getCompressedTransport();
         updateServerInstance(message.serverInstanceId);
-        if (!opusRealtimeServerAvailable) normalizeUnavailablePreferredMode();
         document.title = `${message.label} - UDP Airband Monitor`;
         titleLink.textContent = message.label;
         titleLink.title = t('returnHome');
@@ -354,15 +307,9 @@ function connectControlWebSocket() {
         if (opusRealtimeServerAvailable) {
           probeOpusRealtimeSupport().then((supported) => {
             opusRealtimeSupported = supported;
-            opusRealtimeProbeComplete = true;
-            if (!supported) normalizeUnavailablePreferredMode();
             updateModeButton();
-                if (supported && audioStarted && currentMode !== preferredMode) startSelectedMode(preferredMode);
-            if (!supported && currentMode === 'opus-live') {
-              stopOpusRealtime();
-              startSelectedMode(preferredMode);
-              setStatus('', 'opusLiveUnavailable');
-            }
+            if (supported && audioStarted && currentMode !== preferredMode) startSelectedMode(preferredMode);
+            if (!supported && currentMode === 'opus-live') handlePlaybackError(new Error('low data unavailable'));
           });
         }
       } else if (message.type === 'streamUpdated') {
@@ -370,9 +317,6 @@ function connectControlWebSocket() {
       } else if (message.type === 'streamUnavailable') {
         showStreamUnavailable();
       } else if (message.type === 'stats') {
-        if (!streamPaused && currentMode === 'compatible') {
-          updateServerMeasuredBandwidth(message.listenerBitsPerSecond || 0);
-        }
         activeUsersEl.textContent = String(message.activeListeners || message.clients || 0);
         lastUdpAt = message.lastHeardAt || message.lastUdpAt || 0;
         lastHeardLabel = message.lastHeardLabel || 'never';
@@ -386,14 +330,8 @@ function connectControlWebSocket() {
   });
 }
 
-function normalizeUnavailablePreferredMode() {
-  if (getAvailableModes().includes(preferredMode)) return;
-  setPreferredMode(isMobileDevice() && isCompressedAvailable() ? 'opus' : 'raw');
-}
-
 async function probeOpusRealtimeSupport() {
-  if (pcmWorkletFailed
-    || !window.isSecureContext
+  if (!window.isSecureContext
     || !window.AudioWorkletNode
     || !window.AudioDecoder
     || !window.EncodedAudioChunk) return false;
@@ -407,7 +345,7 @@ async function probeOpusRealtimeSupport() {
 
 function loadOpusRealtimeModule() {
   if (!opusRealtimeModulePromise) {
-    const version = encodeURIComponent(config.softwareVersion || '1.9-preview');
+    const version = encodeURIComponent(config.softwareVersion || '2.0-preview');
     opusRealtimeModulePromise = import(`${appPath('assets/opus-webcodecs.mjs')}?v=${version}`)
       .catch((error) => {
         opusRealtimeModulePromise = null;
@@ -431,8 +369,7 @@ function showStreamUnavailable() {
     streamUnavailable = true;
     wsGeneration += 1;
     stopRaw();
-    stopOpus();
-    stopCompatible();
+    stopNormal();
     stopOpusRealtime();
     hideServerNotice();
   }
@@ -506,15 +443,22 @@ function startSelectedMode(mode = preferredMode) {
   lastBandwidthBytes = receivedBytes;
   lastBandwidthAt = Date.now();
   browserBandwidthEl.textContent = 'Idle';
-  if (mode === 'opus-live' && isOpusRealtimeAvailable()) {
+  if (mode === 'opus-live') {
+    if (!isOpusRealtimeAvailable()) {
+      handlePlaybackError(new Error('low data unavailable'));
+      return;
+    }
     startOpusRealtime();
     updateModeButton();
     return;
   }
-  if (mode === 'opus' && isCompressedAvailable()) {
-    startOpus();
-  } else {
+  if (mode === 'adpcm') {
+    startNormal();
+  } else if (mode === 'raw') {
     startRaw();
+  } else {
+    handlePlaybackError(new Error('Unknown audio profile'));
+    return;
   }
   updateModeButton();
 }
@@ -523,10 +467,8 @@ function pauseStream() {
   pausedMode = currentMode;
   streamPaused = true;
   stopRaw();
-  stopOpus();
-  stopCompatible();
+  stopNormal();
   stopOpusRealtime();
-  queuedFrames = 0;
   latestWave = new Float32Array(0);
   lastPeak = 0;
   updateConnectionState();
@@ -535,9 +477,6 @@ function pauseStream() {
 
 function resumeStream() {
   streamPaused = false;
-  if (audioContext) {
-    nextPlayTime = audioContext.currentTime + targetLatencySeconds;
-  }
   if (audioStarted) {
     startSelectedMode(pausedMode || currentMode || preferredMode);
   }
@@ -547,20 +486,22 @@ function resumeStream() {
 
 function startRaw() {
   stopOpusRealtime();
-  stopOpus();
-  stopCompatible();
+  stopNormal();
   if (rawWs && rawWs.readyState <= 1) return;
 
-  rawWs = new WebSocket(`${appWebSocketUrl(`${encodeURIComponent(streamName)}/audio`)}?clientId=${encodeURIComponent(clientId)}`);
-  rawWs.binaryType = 'arraybuffer';
-  rawWs.addEventListener('close', () => {
-    if (suppressRawReconnect) {
-      suppressRawReconnect = false;
-      return;
-    }
-    if (currentMode === 'raw') setTimeout(startRaw, 1000);
+  currentMode = 'raw';
+  const socket = new WebSocket(`${appWebSocketUrl(`${encodeURIComponent(streamName)}/audio`)}?clientId=${encodeURIComponent(clientId)}`);
+  rawWs = socket;
+  socket.binaryType = 'arraybuffer';
+  socket.addEventListener('close', () => {
+    if (rawWs !== socket) return;
+    rawWs = null;
+    setTimeout(() => {
+      if (audioStarted && !streamPaused && currentMode === 'raw' && !rawWs) startRaw();
+    }, 1000);
   });
-  rawWs.addEventListener('message', (event) => {
+  socket.addEventListener('message', (event) => {
+    if (rawWs !== socket || !audioStarted || streamPaused || !(event.data instanceof ArrayBuffer)) return;
     receivedBytes += event.data.byteLength || 0;
     const samples = new Float32Array(event.data);
     const frames = samples.length / config.channels;
@@ -576,73 +517,12 @@ function startRaw() {
   currentMode = 'raw';
 }
 
-function startOpus() {
-  stopOpusRealtime();
-  currentMode = 'opus';
+function startNormal() {
   stopRaw();
-  stopCompatible();
-  stopOpus();
-
-  const transport = getCompressedTransport();
-  if (!transport) {
-    currentMode = 'raw';
-    startRaw();
-    return;
-  }
-
-  if (transport.adpcm) {
-    startAdpcmCompressed();
-    return;
-  }
-
-  if (transport.hls) {
-    startHlsCompressed();
-    return;
-  }
-
-  if (transport.httpFallback) {
-    startHttpOpus();
-    return;
-  }
-
-  ensureOpusAudio();
-  setupOpusAudioGraph();
-  opusQueue = [];
-  activeCompressedKind = 'media';
-  const MediaSourceCtor = getMediaSourceConstructor();
-  opusMediaSource = new MediaSourceCtor();
-  opusObjectUrl = URL.createObjectURL(opusMediaSource);
-  opusAudio.src = opusObjectUrl;
-  opusAudio.play().catch(() => setStatus('', 'opusUnavailable'));
-  currentMode = 'opus';
-
-  opusMediaSource.addEventListener('sourceopen', () => {
-    if (!opusMediaSource || opusMediaSource.readyState !== 'open') return;
-
-    opusSourceBuffer = opusMediaSource.addSourceBuffer(transport.mimeType);
-    opusSourceBuffer.mode = 'sequence';
-    opusSourceBuffer.addEventListener('updateend', () => {
-      trimOpusBuffer();
-      drainOpusQueue();
-    });
-
-    opusWs = new WebSocket(`${appWebSocketUrl(`${encodeURIComponent(streamName)}/${transport.endpoint}`)}?clientId=${encodeURIComponent(clientId)}`);
-    opusWs.binaryType = 'arraybuffer';
-    opusWs.addEventListener('message', (event) => {
-      streamConfirmed = true;
-      receivedBytes += event.data.byteLength || 0;
-      enqueueOpusChunk(event.data);
-      updateConnectionState();
-    });
-    opusWs.addEventListener('close', () => {
-      if (suppressOpusReconnect) {
-        suppressOpusReconnect = false;
-        return;
-      }
-      if (currentMode === 'opus' && audioStarted) setTimeout(startOpus, 1000);
-    });
-    opusWs.addEventListener('error', () => setStatus('', 'opusUnavailable'));
-  }, { once: true });
+  stopOpusRealtime();
+  stopNormal();
+  currentMode = 'adpcm';
+  startAdpcm();
 }
 
 function startOpusRealtime() {
@@ -651,11 +531,9 @@ function startOpusRealtime() {
     return;
   }
   stopRaw();
-  stopOpus();
-  stopCompatible();
+  stopNormal();
   stopOpusRealtime();
   currentMode = 'opus-live';
-  activeCompressedKind = 'opus-worklet';
   opusRealtimeErrorReported = false;
   opusRealtimeDeliveredFrames = 0;
   opusRealtimeDeliveryDroppedFrames = 0;
@@ -705,12 +583,12 @@ function startOpusRealtime() {
 }
 
 async function ensureOpusRealtimeWorklet() {
-  if (pcmWorkletFailed || !audioContext || !gainNode || !window.isSecureContext || !audioContext.audioWorklet || !window.AudioWorkletNode) {
+  if (!audioContext || !gainNode || !window.isSecureContext || !audioContext.audioWorklet || !window.AudioWorkletNode) {
     throw new Error('AudioWorklet requires HTTPS and browser support');
   }
   if (opusRealtimeWorkletNode) return opusRealtimeWorkletNode;
   if (!opusRealtimeWorkletPromise) {
-    const version = encodeURIComponent(config.softwareVersion || '1.9-preview');
+    const version = encodeURIComponent(config.softwareVersion || '2.0-preview');
     opusRealtimeWorkletPromise = audioContext.audioWorklet.addModule(`${appPath('assets/audio-worklet.mjs')}?v=${version}`)
       .then(() => {
         if (!audioContext || audioContext.state === 'closed') throw new Error('AudioContext closed during Worklet initialization');
@@ -721,11 +599,12 @@ async function ensureOpusRealtimeWorklet() {
         });
         node.port.onmessage = ({ data }) => {
           if (data?.type === 'worklet-diagnostics') opusRealtimeWorkletDiagnostics = data;
-          if (data?.type === 'worklet-error') console.warn(`Opus AudioWorklet rejected a block: ${data.message}`);
+          if (data?.type === 'worklet-error') handlePlaybackError(new Error(data.message));
         };
         node.addEventListener('processorerror', () => {
-          pcmWorkletFailed = true;
-          handleOpusRealtimeError(new Error('AudioWorklet processor failed'), opusRealtimeGeneration);
+          handlePlaybackError(new Error('AudioWorklet processor failed'));
+          node.port.close();
+          opusRealtimeWorkletNode = null;
         });
         opusRealtimeWorkletNode = node;
         return node;
@@ -814,24 +693,28 @@ function stopOpusRealtime() {
 function handleOpusRealtimeError(error, generation) {
   if (generation !== opusRealtimeGeneration || opusRealtimeErrorReported) return;
   opusRealtimeErrorReported = true;
-  console.warn('Realtime Opus playback failed:', error?.message || error);
-  opusRealtimeSupported = false;
-  stopOpusRealtime();
-  setPreferredMode(isCompressedAvailable() ? 'opus' : 'raw');
-  if (audioStarted && !streamPaused) startSelectedMode();
-  setStatus('', 'opusLiveUnavailable');
+  handlePlaybackError(error);
 }
 
-function startAdpcmCompressed() {
-  currentMode = 'opus';
-  activeCompressedKind = 'adpcm';
-  if (audioContext) {
-    nextPlayTime = audioContext.currentTime + targetLatencySeconds;
-  }
+function handlePlaybackError(error) {
+  console.warn('Audio playback failed:', error?.message || error);
+  stopRaw();
+  stopNormal();
+  stopOpusRealtime();
+  audioStarted = false;
+  setStatus('', 'audioUnavailable');
+  updateAudioButton();
+  updateModeButton();
+}
 
-  adpcmWs = new WebSocket(`${appWebSocketUrl(`${encodeURIComponent(streamName)}/adpcm`)}?clientId=${encodeURIComponent(clientId)}`);
-  adpcmWs.binaryType = 'arraybuffer';
-  adpcmWs.addEventListener('message', (event) => {
+function startAdpcm() {
+  currentMode = 'adpcm';
+
+  const socket = new WebSocket(`${appWebSocketUrl(`${encodeURIComponent(streamName)}/adpcm`)}?clientId=${encodeURIComponent(clientId)}`);
+  adpcmWs = socket;
+  socket.binaryType = 'arraybuffer';
+  socket.addEventListener('message', (event) => {
+    if (adpcmWs !== socket || !audioStarted || streamPaused || !(event.data instanceof ArrayBuffer)) return;
     receivedBytes += event.data.byteLength || 0;
     const decoded = decodeAdpcmFrame(event.data);
     if (!decoded) return;
@@ -845,131 +728,16 @@ function startAdpcmCompressed() {
     lastAudioAt = Date.now();
     updateConnectionState();
   });
-  adpcmWs.addEventListener('close', () => {
-    if (suppressAdpcmReconnect) {
-      suppressAdpcmReconnect = false;
-      return;
-    }
-    if (currentMode === 'opus' && activeCompressedKind === 'adpcm' && audioStarted) {
-      setTimeout(startOpus, 1000);
-    }
+  socket.addEventListener('close', () => {
+    if (adpcmWs !== socket) return;
+    adpcmWs = null;
+    setTimeout(() => {
+      if (audioStarted && !streamPaused && currentMode === 'adpcm' && !adpcmWs) startNormal();
+    }, 1000);
   });
-  adpcmWs.addEventListener('error', () => setStatus('', 'opusUnavailable'));
-}
-
-function startHttpOpus() {
-  if (!opusAudio) {
-    ensureOpusAudio();
-  }
-  activeCompressedKind = 'http';
-  setupOpusAudioGraph();
-  applyOutputGain();
-  opusAudio.src = `${appPath(`${encodeURIComponent(streamName)}/opus`)}?clientId=${encodeURIComponent(clientId)}&t=${Date.now()}`;
-  opusAudio.play().catch(() => setStatus('', 'opusUnavailable'));
-  currentMode = 'opus';
-}
-
-function startHlsCompressed() {
-  if (!opusAudio) {
-    ensureOpusAudio();
-  }
-  usingNativeHls = true;
-  activeCompressedKind = 'hls';
-  latestWave = new Float32Array(0);
-  lastPeak = 0;
-  applyOutputGain();
-  opusAudio.src = `${appPath(`${encodeURIComponent(streamName)}/hls/${encodeURIComponent(clientId)}/playlist.m3u8`)}?t=${Date.now()}`;
-  opusAudio.load();
-  opusAudio.play().catch(() => setStatus('', 'opusUnavailable'));
-  currentMode = 'opus';
-}
-
-function startCompatible() {
-  currentMode = 'compatible';
-  compatibleAudioReady = false;
-  compatibleBandwidthReady = false;
-  browserBandwidthEl.textContent = 'Loading';
-  stopRaw();
-  stopOpus();
-  ensureCompatibleAudio();
-  setupCompatibleAudioGraph();
-  compatibleAudio.src = `${appPath('multi/native.aac')}?streams=${encodeURIComponent(streamName)}&clientId=${encodeURIComponent(clientId)}&t=${Date.now()}`;
-  compatibleAudio.load();
-  const seekOnCanPlay = () => {
-    jumpNativeAudioToLiveEdge(compatibleAudio);
-  };
-  compatibleAudio.addEventListener('canplay', seekOnCanPlay, { once: true });
-  jumpNativeAudioToLiveEdge(compatibleAudio);
-  const playPromise = compatibleAudio.play();
-  if (playPromise && typeof playPromise.then === 'function') {
-    playPromise
-      .then(() => {
-        setTimeout(() => {
-          if (currentMode === 'compatible' && compatibleAudio?.src) jumpNativeAudioToLiveEdge(compatibleAudio);
-        }, 100);
-      })
-      .catch(() => {
-        compatibleAudio.removeEventListener('canplay', seekOnCanPlay);
-        setStatus('', 'compatibleUnavailable');
-      });
-  }
-  updateMediaSessionMetadata();
-}
-
-function jumpNativeAudioToLiveEdge(audio, targetBufferSeconds = 0.5) {
-  const delay = getNativeBufferedDelay(audio);
-  if (delay === null || delay <= targetBufferSeconds + 0.25) return false;
-
-  try {
-    const liveEdge = audio.buffered.end(audio.buffered.length - 1);
-    const target = Math.max(0, liveEdge - targetBufferSeconds);
-    if (!Number.isFinite(target) || target <= audio.currentTime) return false;
-    audio.currentTime = target;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function getNativeBufferedDelay(audio) {
-  if (!audio || audio.buffered.length === 0) return null;
-
-  try {
-    const liveEdge = audio.buffered.end(audio.buffered.length - 1);
-    const delay = liveEdge - audio.currentTime;
-    return Number.isFinite(delay) ? delay : null;
-  } catch {
-    return null;
-  }
-}
-
-function ensureCompatibleAudio() {
-  if (compatibleAudio) return;
-  compatibleAudio = new Audio();
-  compatibleAudio.preload = 'auto';
-  compatibleAudio.addEventListener('playing', () => {
-    compatibleAudioReady = true;
-    streamConfirmed = true;
-    updateBrowserBandwidth();
-    updateConnectionState();
+  socket.addEventListener('error', () => {
+    if (adpcmWs === socket) setStatus('', 'normalUnavailable');
   });
-  compatibleAudio.addEventListener('canplay', () => {
-    compatibleAudioReady = true;
-    updateBrowserBandwidth();
-  });
-  compatibleAudio.addEventListener('waiting', updateConnectionState);
-  compatibleAudio.addEventListener('error', () => setStatus('', 'compatibleUnavailable'));
-}
-
-function stopCompatible() {
-  if (!compatibleAudio) return;
-  compatibleAudio.pause();
-  compatibleAudio.removeAttribute('src');
-  compatibleAudio.load();
-  compatibleAudioReady = false;
-  compatibleBandwidthReady = false;
-  latestWave = new Float32Array(0);
-  lastPeak = 0;
 }
 
 function updateMediaSessionMetadata() {
@@ -981,122 +749,19 @@ function updateMediaSessionMetadata() {
   });
 }
 
-function setupCompatibleAudioGraph() {
-  if (!audioContext || !gainNode || !compatibleAudio || compatibleSourceNode) return;
-  compatibleSourceNode = audioContext.createMediaElementSource(compatibleAudio);
-  compatibleAnalyser = audioContext.createAnalyser();
-  compatibleAnalyser.fftSize = 1024;
-  compatibleAnalyserBuffer = new Float32Array(compatibleAnalyser.fftSize);
-  compatibleSourceNode.connect(compatibleAnalyser);
-  compatibleAnalyser.connect(gainNode);
-  applyOutputGain();
-}
-
-function ensureOpusAudio() {
-  if (opusAudio) return;
-  opusAudio = new Audio();
-  opusAudio.preload = 'none';
-  opusAudio.muted = muted;
-  opusAudio.addEventListener('playing', updateConnectionState);
-  opusAudio.addEventListener('waiting', updateConnectionState);
-  opusAudio.addEventListener('error', () => setStatus('', 'opusUnavailable'));
-}
-
-function setupOpusAudioGraph() {
-  if (usingNativeHls || !audioContext || !gainNode || !opusAudio || opusSourceNode) return;
-  opusSourceNode = audioContext.createMediaElementSource(opusAudio);
-  opusAnalyser = audioContext.createAnalyser();
-  opusAnalyser.fftSize = 1024;
-  opusAnalyserBuffer = new Float32Array(opusAnalyser.fftSize);
-  opusSourceNode.connect(opusAnalyser);
-  opusAnalyser.connect(gainNode);
-  applyOutputGain();
-}
-
-function enqueueOpusChunk(chunk) {
-  opusQueue.push(chunk);
-  if (opusQueue.length > 120) {
-    opusQueue.splice(1, opusQueue.length - 120);
-  }
-  drainOpusQueue();
-}
-
-function drainOpusQueue() {
-  if (!opusSourceBuffer || opusSourceBuffer.updating || !opusQueue.length) return;
-  try {
-    opusSourceBuffer.appendBuffer(opusQueue.shift());
-  } catch {
-    setStatus('', 'opusUnavailable');
-  }
-}
-
-function trimOpusBuffer() {
-  if (!opusAudio || opusAudio.buffered.length === 0) return;
-
-  syncOpusLivePlayback();
-  if (!opusSourceBuffer || opusSourceBuffer.updating) return;
-
-  const liveEdge = opusAudio.buffered.end(opusAudio.buffered.length - 1);
-  const removeEnd = liveEdge - 4;
-  if (removeEnd > 0 && opusAudio.buffered.start(0) < removeEnd) {
-    try {
-      opusSourceBuffer.remove(0, removeEnd);
-    } catch {
-      // Ignore transient MediaSource states while the browser is updating.
-    }
-  }
-}
-
-function syncOpusLivePlayback() {
-  if (usingNativeHls) return;
-  if (!opusAudio || opusAudio.buffered.length === 0) return;
-
-  const liveEdge = opusAudio.buffered.end(opusAudio.buffered.length - 1);
-  const bufferedSeconds = liveEdge - opusAudio.currentTime;
-  if (bufferedSeconds > maxOpusLiveBufferSeconds) {
-    opusAudio.currentTime = Math.max(0, liveEdge - targetOpusLiveBufferSeconds);
-  }
-}
-
 function stopRaw() {
   if (rawWs) {
-    suppressRawReconnect = true;
-    rawWs.close();
+    const socket = rawWs;
     rawWs = null;
+    socket.close();
   }
 }
 
-function stopOpus() {
-  usingNativeHls = false;
-  activeCompressedKind = null;
+function stopNormal() {
   if (adpcmWs) {
-    suppressAdpcmReconnect = true;
-    adpcmWs.close();
+    const socket = adpcmWs;
     adpcmWs = null;
-  }
-  if (opusWs) {
-    suppressOpusReconnect = true;
-    opusWs.close();
-    opusWs = null;
-  }
-  opusQueue = [];
-  if (opusAudio) {
-    opusAudio.pause();
-    opusAudio.removeAttribute('src');
-    opusAudio.load();
-  }
-  opusSourceBuffer = null;
-  if (opusMediaSource && opusMediaSource.readyState === 'open') {
-    try {
-      opusMediaSource.endOfStream();
-    } catch {
-      // The stream may already be closing.
-    }
-  }
-  opusMediaSource = null;
-  if (opusObjectUrl) {
-    URL.revokeObjectURL(opusObjectUrl);
-    opusObjectUrl = null;
+    socket.close();
   }
 }
 
@@ -1110,53 +775,19 @@ function updateModeButton() {
 }
 
 function scheduleAudio(samples, frames) {
-  if (!audioContext || !gainNode) return;
-
-  if (opusRealtimeWorkletNode && !pcmWorkletFailed && audioContext.state === 'running') {
-    if (!opusRealtimeWorkletConnected) {
-      opusRealtimeWorkletNode.connect(gainNode);
-      opusRealtimeWorkletConnected = true;
-    }
-    if (configureOpusRealtimeWorklet(config.sampleRate, config.channels)) {
-      const copy = samples.slice();
-      opusRealtimeWorkletNode.port.postMessage({ type: 'samples', buffer: copy.buffer, frames, channels: config.channels }, [copy.buffer]);
-      return;
-    }
-  }
-
-  const now = audioContext.currentTime;
-  if (nextPlayTime < now + 0.05 || nextPlayTime > now + 1.0) {
-    nextPlayTime = now + targetLatencySeconds;
-  }
-
-  const buffer = audioContext.createBuffer(config.channels, frames, config.sampleRate);
-  for (let channel = 0; channel < config.channels; channel += 1) {
-    const data = buffer.getChannelData(channel);
-    for (let i = 0; i < frames; i += 1) {
-      data[i] = samples[i * config.channels + channel];
-    }
-  }
-
-  const source = audioContext.createBufferSource();
-  const sourceGain = audioContext.createGain();
-  source.buffer = buffer;
-  source.connect(sourceGain);
-  sourceGain.connect(gainNode);
-  applyResumeFade(sourceGain, nextPlayTime);
-  source.start(nextPlayTime);
-  nextPlayTime += buffer.duration;
-  queuedFrames = Math.max(0, Math.round((nextPlayTime - now) * config.sampleRate));
-}
-
-function applyResumeFade(sourceGain, startTime) {
-  const idleMs = Date.now() - lastAudioAt;
-  if (!lastAudioAt || idleMs < 900) {
-    sourceGain.gain.setValueAtTime(1, startTime);
+  if (!audioContext || audioContext.state !== 'running') return;
+  if (!opusRealtimeWorkletNode) {
+    handlePlaybackError(new Error('AudioWorklet is not initialized'));
     return;
   }
-
-  sourceGain.gain.setValueAtTime(0, startTime);
-  sourceGain.gain.linearRampToValueAtTime(1, startTime + 0.08);
+  if (!opusRealtimeWorkletConnected) {
+    opusRealtimeWorkletNode.connect(gainNode);
+    opusRealtimeWorkletConnected = true;
+  }
+  if (!configureOpusRealtimeWorklet(config.sampleRate, config.channels)) return;
+  const copy = samples.slice();
+  opusRealtimeWorkletNode.port.postMessage({ type: 'samples', buffer: copy.buffer, frames, channels: config.channels }, [copy.buffer]);
+  opusRealtimeDeliveredFrames += frames;
 }
 
 function decodeAdpcmFrame(arrayBuffer) {
@@ -1267,15 +898,7 @@ function updateStatusLabel() {
 }
 
 function draw() {
-  if (currentMode === 'opus' && activeCompressedKind === 'media' && opusAnalyser && opusAnalyserBuffer) {
-    opusAnalyser.getFloatTimeDomainData(opusAnalyserBuffer);
-    latestWave = opusAnalyserBuffer;
-    lastPeak = Math.max(lastPeak * 0.92, peakOf(opusAnalyserBuffer));
-  } else if (currentMode === 'compatible' && compatibleAnalyser && compatibleAnalyserBuffer) {
-    compatibleAnalyser.getFloatTimeDomainData(compatibleAnalyserBuffer);
-    latestWave = compatibleAnalyserBuffer;
-    lastPeak = Math.max(lastPeak * 0.92, peakOf(compatibleAnalyserBuffer));
-  } else if ((currentMode === 'raw' || activeCompressedKind === 'adpcm' || currentMode === 'opus-live') && lastAudioAt && Date.now() - lastAudioAt > 350) {
+  if (lastAudioAt && Date.now() - lastAudioAt > 350) {
     latestWave = new Float32Array(0);
     lastPeak = 0;
   }
@@ -1292,7 +915,7 @@ function drawBarWaveform() {
   const centerY = canvas.height / 2;
   const barStride = waveformBarWidth + waveformBarGap;
   const barCount = Math.max(1, Math.floor((canvas.width + waveformBarGap) / barStride));
-  const channels = (currentMode === 'opus' && activeCompressedKind === 'media') || currentMode === 'compatible' || currentMode === 'opus-live' ? 1 : config.channels;
+  const channels = currentMode === 'opus-live' ? 1 : config.channels;
   const frames = channels ? Math.floor(latestWave.length / channels) : 0;
   const totalWidth = barCount * waveformBarWidth + (barCount - 1) * waveformBarGap;
   let x = Math.max(0, (canvas.width - totalWidth) / 2);
@@ -1352,27 +975,9 @@ function updateBuffered() {
     return;
   }
   updateBrowserBandwidth();
-  if (currentMode === 'opus-live' || ((currentMode === 'raw' || activeCompressedKind === 'adpcm') && opusRealtimeWorkletNode && !pcmWorkletFailed)) {
-    const diagnostics = opusRealtimeWorkletDiagnostics;
-    const inputSampleRate = diagnostics?.inputSampleRate || 48000;
-    const bufferedFrames = diagnostics?.bufferedFrames || 0;
-    bufferedEl.textContent = `${inputSampleRate ? Math.round(bufferedFrames / inputSampleRate * 1000) : 0} ms`;
-    return;
-  }
-  if (currentMode === 'compatible') {
-    bufferedEl.textContent = `${getOpusBufferedMs()} ms`;
-    return;
-  }
-  if (currentMode === 'opus' && activeCompressedKind !== 'adpcm') {
-    syncOpusLivePlayback();
-    bufferedEl.textContent = `${getOpusBufferedMs()} ms`;
-    return;
-  }
-  if (audioContext) {
-    queuedFrames = Math.max(0, Math.round((nextPlayTime - audioContext.currentTime) * config.sampleRate));
-  }
-  const bufferedMs = config.sampleRate ? Math.round(queuedFrames / config.sampleRate * 1000) : 0;
-  bufferedEl.textContent = `${bufferedMs} ms`;
+  const diagnostics = opusRealtimeWorkletDiagnostics;
+  const rate = diagnostics?.inputSampleRate || config.sampleRate;
+  bufferedEl.textContent = String(rate ? Math.round((diagnostics?.bufferedFrames || 0) / rate * 1000) : 0) + ' ms';
 }
 
 function updateBrowserBandwidth() {
@@ -1380,10 +985,7 @@ function updateBrowserBandwidth() {
     browserBandwidthEl.textContent = 'Idle';
     return;
   }
-  if (currentMode === 'compatible') {
-    if (!compatibleBandwidthReady) browserBandwidthEl.textContent = 'Loading';
-    return;
-  }
+
   const now = Date.now();
   const elapsedSeconds = Math.max(0.001, (now - lastBandwidthAt) / 1000);
   if (elapsedSeconds < 1) return;
@@ -1391,33 +993,6 @@ function updateBrowserBandwidth() {
   lastBandwidthBytes = receivedBytes;
   lastBandwidthAt = now;
   browserBandwidthEl.textContent = formatBandwidth(bitsPerSecond);
-}
-
-function updateServerMeasuredBandwidth(bitsPerSecond) {
-  if (currentMode === 'compatible') {
-    if (!compatibleBandwidthReady && bitsPerSecond <= 0) {
-      browserBandwidthEl.textContent = 'Loading';
-      return;
-    }
-    compatibleBandwidthReady = true;
-  }
-  browserBandwidthEl.textContent = formatBandwidth(bitsPerSecond);
-}
-
-function getOpusBufferedMs() {
-  if (currentMode === 'opus-live') {
-    const diagnostics = opusRealtimeWorkletDiagnostics;
-    const inputSampleRate = diagnostics?.inputSampleRate || 48000;
-    return inputSampleRate ? Math.round((diagnostics?.bufferedFrames || 0) / inputSampleRate * 1000) : 0;
-  }
-  if (currentMode === 'compatible' && compatibleAudio) return getAudioBufferedMs(compatibleAudio);
-  return getAudioBufferedMs(opusAudio);
-}
-
-function getAudioBufferedMs(audioElement) {
-  if (!audioElement || audioElement.buffered.length === 0) return 0;
-  const liveEdge = audioElement.buffered.end(audioElement.buffered.length - 1);
-  return Math.max(0, Math.round((liveEdge - audioElement.currentTime) * 1000));
 }
 
 function updateClocks() {
@@ -1467,29 +1042,24 @@ function localizeLastHeard(label) {
   return label;
 }
 
-function isCompressedAvailable() {
-  return Boolean(getCompressedTransport());
-}
-
 function isOpusRealtimeAvailable() {
   return Boolean(opusRealtimeServerAvailable && opusRealtimeSupported);
 }
 
 function getAvailableModes() {
-  const modes = ['raw'];
-  if (isCompressedAvailable()) modes.push('opus');
+  const modes = ['raw', 'adpcm'];
   if (isOpusRealtimeAvailable()) modes.push('opus-live');
   return modes;
 }
 
 function modeLabel(mode) {
   if (mode === 'opus-live') return t('opusLive');
-  if (mode === 'opus') return t('compressed');
+  if (mode === 'adpcm') return t('compressed');
   return t('uncompressed');
 }
 
 function selectMode(mode) {
-  if (!['raw', 'opus', 'opus-live'].includes(mode) || !getAvailableModes().includes(mode)) return;
+  if (!['raw', 'adpcm', 'opus-live'].includes(mode) || !getAvailableModes().includes(mode)) return;
   closeModeMenu();
   if (mode === preferredMode && (!audioStarted || currentMode === mode)) return;
   applySelectedMode(mode);
@@ -1524,29 +1094,6 @@ function closeModeMenu() {
   if (!modeMenu) return;
   modeMenu.hidden = true;
   modeButton.setAttribute('aria-expanded', 'false');
-}
-
-function getCompressedTransport() {
-  if (!compressedAvailable) return null;
-  return { endpoint: 'adpcm', adpcm: true };
-}
-
-function getMediaSourceConstructor() {
-  return window.MediaSource || window.ManagedMediaSource;
-}
-
-function isMediaSourceTypeSupported(mimeType) {
-  const MediaSourceCtor = getMediaSourceConstructor();
-  return Boolean(MediaSourceCtor && MediaSourceCtor.isTypeSupported(mimeType));
-}
-
-function isAppleMobileDevice() {
-  return /iPhone|iPad|iPod/i.test(navigator.userAgent)
-    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-}
-
-function isMobileDevice() {
-  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 }
 
 function getClientId() {

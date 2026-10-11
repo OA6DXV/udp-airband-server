@@ -8,7 +8,7 @@ const http = require('http');
 const net = require('net');
 const os = require('os');
 const path = require('path');
-const { DEFAULT_SERVER_CONFIG_TEMPLATE } = require('../lib/config');
+const { DEFAULT_SERVER_CONFIG_TEMPLATE, ensureServerConfigFromTemplateWithTemp } = require('../lib/config');
 
 async function freeTcpPort() {
   const server = net.createServer();
@@ -51,11 +51,16 @@ async function main() {
   const udpPort = await freeUdpPort();
   const configPath = path.join(directory, 'server.conf');
   const streamsPath = path.join(directory, 'streams.json');
+  const generatedPath = path.join(directory, 'generated.conf');
+  const generated = ensureServerConfigFromTemplateWithTemp(generatedPath, path.join(directory, 'generated.tmp'), fs, path);
+  assert(generated.created);
+  const generatedText = fs.readFileSync(generatedPath, 'utf8');
+  assert(!generatedText.includes('[audio]') && !generatedText.includes('[compressed]'), 'startup must not generate audio configuration');
   const config = DEFAULT_SERVER_CONFIG_TEMPLATE
     .replace('port = 8585', `port = ${httpPort}`)
     .replace(/(\[admin\][\s\S]*?enabled = )true/, '$1false')
     .replace(/(\[geo\][\s\S]*?enabled = )true/, '$1false')
-    .replace('ffmpeg = ffmpeg', 'ffmpeg = /nonexistent/ffmpeg');
+    + '\n[compressed]\nenabled = false\ncodec = aac\nffmpeg = /nonexistent/ffmpeg\nopus_realtime_bitrate_8k = 6k\nadpcm_frame_ms = 100\n[audio]\nopus_worklet_target_latency_ms = 500\n';
   fs.writeFileSync(configPath, config);
   fs.writeFileSync(streamsPath, JSON.stringify({ streams: [{ name: 'test', label: 'Test', udpHost: '127.0.0.1', udpPort, sampleRate: 8000, channels: 1 }] }));
   const child = spawn(process.execPath, [
@@ -68,43 +73,74 @@ async function main() {
   let output = '';
   child.stdout.on('data', (chunk) => { output += chunk; });
   child.stderr.on('data', (chunk) => { output += chunk; });
-  let socket;
-  let udp;
-  try {
-    await waitForHttp(httpPort, child);
-    for (const endpoint of ['/multi/native.aac?streams=test', '/multi/native-gain?stream=test&gain=0.5']) {
-      const response = await fetch(`http://127.0.0.1:${httpPort}${endpoint}`);
-      assert.strictEqual(response.status, 404, 'Legacy multistream AAC and gain routes must be removed');
-      await response.text();
-    }
-    const frames = [];
-    socket = new WebSocket(`ws://127.0.0.1:${httpPort}/test/opus-live?clientId=integration`);
+  const sockets = [];
+  async function connect(endpoint, frames) {
+    const socket = new WebSocket(`ws://127.0.0.1:${httpPort}/test/${endpoint}?clientId=${endpoint}-${sockets.length}`);
+    sockets.push(socket);
     socket.binaryType = 'arraybuffer';
-    socket.addEventListener('message', (event) => frames.push(Buffer.from(event.data)));
+    socket.addEventListener('message', (event) => frames.push(typeof event.data === 'string' ? JSON.parse(event.data) : Buffer.from(event.data)));
     await new Promise((resolve, reject) => {
       socket.addEventListener('open', resolve, { once: true });
       socket.addEventListener('error', reject, { once: true });
     });
+    return socket;
+  }
+  let udp;
+  try {
+    await waitForHttp(httpPort, child);
+    assert.strictEqual(fs.readFileSync(configPath, 'utf8'), config, 'existing codec settings must not be modified');
+    for (const endpoint of ['/multi/native.aac?streams=test', '/multi/native-gain?stream=test&gain=0.5', '/test/hls/integration/playlist.m3u8', '/test/opus']) {
+      const response = await fetch(`http://127.0.0.1:${httpPort}${endpoint}`);
+      assert.strictEqual(response.status, 404, 'Legacy audio routes must be removed');
+      await response.text();
+    }
+    const rejected = new WebSocket(`ws://127.0.0.1:${httpPort}/test/aac`);
+    sockets.push(rejected);
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('AAC route did not reject the connection')), 2000);
+      rejected.addEventListener('open', () => { clearTimeout(timeout); reject(new Error('AAC route is still available')); }, { once: true });
+      rejected.addEventListener('error', () => { clearTimeout(timeout); resolve(); }, { once: true });
+    });
+    const frames = [], raw = [], normal = [], secondNormal = [], configs = [];
+    await connect('control', configs);
+    await Promise.all([connect('opus-live', frames), connect('audio', raw), connect('adpcm', normal), connect('adpcm', secondNormal)]);
+    const configMessage = configs.find(message => message.type === 'config');
+    assert(configMessage, 'control must announce the fixed profiles');
+    assert.strictEqual(configMessage.adpcmAvailable, true, 'old enabled=false must not disable Normal');
+    assert.strictEqual(configMessage.opusRealtimeAvailable, true, 'old codec=aac must not disable Opus');
+    assert.strictEqual(configMessage.adpcmFrameMs, 40);
+    assert.strictEqual(configMessage.opusRealtimeBitrate, '20k');
+    assert.strictEqual(configMessage.opusRealtimeFrameMs, 20);
+    assert.strictEqual(configMessage.opusWorkletTargetLatencyMs, 100);
+    for (const field of ['compressedCodec', 'compressedEnabled', 'aacAvailable', 'hlsAvailable']) {
+      assert(!(field in configMessage), 'obsolete capability fields must be removed: ' + field);
+    }
     udp = dgram.createSocket('udp4');
-    const pcm = Buffer.alloc(8000 / 50 * 4);
-    for (let sample = 0; sample < 8000 / 50; sample += 1) {
+    const pcm = Buffer.alloc(320 * 4);
+    for (let sample = 0; sample < 320; sample += 1) {
       pcm.writeFloatLE(Math.sin(sample * Math.PI * 2 * 440 / 8000) * 0.5, sample * 4);
     }
     await new Promise((resolve, reject) => udp.send(pcm, udpPort, '127.0.0.1', (error) => error ? reject(error) : resolve()));
     const deadline = Date.now() + 3000;
-    while (Date.now() < deadline && !frames.some((frame) => frame.subarray(0, 4).toString() === 'OPU1' && frame.length > 18)) {
+    while (Date.now() < deadline && (!raw.length || !normal.length || !secondNormal.length || !frames.some((frame) => frame.subarray(0, 4).toString() === 'OPU1' && frame.length > 18))) {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     assert(frames.some((frame) => frame.subarray(0, 4).toString() === 'OPC1'), 'Opus config frame was not delivered');
     assert(frames.some((frame) => frame.subarray(0, 4).toString() === 'OPU1' && frame.length > 18), 'UDP input was not encoded to Opus');
-    assert(output.includes('1.9-preview'), 'Server did not report the preview version');
+    assert.deepStrictEqual(raw[0], pcm, 'RAW must deliver the original UDP payload');
+    assert.deepStrictEqual(normal[0], secondNormal[0], 'Normal listeners must receive identical shared frames');
+    const { decodeAdpcmFrame } = await import('../assets/adpcm-decoder.mjs');
+    const decoded = decodeAdpcmFrame(Uint8Array.from(normal[0]).buffer);
+    assert(decoded && decoded.frames === 320, 'Normal must preserve the full input frame count');
+    assert(decoded.samples.some(value => Math.abs(value) > .1), 'Normal must contain decoded audio');
+    assert(output.includes('2.0-preview'), 'Server did not report the preview version');
     assert(!output.includes('ffmpeg_start'), 'Opus playback must not spawn FFmpeg');
-    console.log('Realtime Opus server integration test passed');
+    console.log('Fixed RAW, Normal and low data server integration tests passed');
   } catch (error) {
     error.message += `\nServer output: ${output.slice(-2500)}`;
     throw error;
   } finally {
-    if (socket) socket.close();
+    for (const socket of sockets) socket.close();
     if (udp) udp.close();
     if (child.exitCode === null && child.signalCode === null) {
       child.kill('SIGTERM');

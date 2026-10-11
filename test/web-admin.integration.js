@@ -71,9 +71,6 @@ async function run() {
     `port = ${configuredAdminPort}`,
     'enabled = false',
     '',
-    '[compressed]',
-    'enabled = false',
-    '',
   ].join('\n'));
   ensureServerConfigFromTemplateWithTemp(serverConfigPath, path.join(temporaryDir, 'server.conf.tmp'), fs, path);
   fs.writeFileSync(configPath, JSON.stringify({
@@ -96,7 +93,6 @@ async function run() {
     '--http-host', '127.0.0.1',
     '--http-port', String(publicPort),
     '--webserver', String(adminPort),
-    '--compressed-enabled', 'false',
   ], {
     cwd: projectDir,
     env: { ...process.env, ...TEST_AUTH_ENV },
@@ -557,9 +553,6 @@ async function testConfigEnabledStartup() {
     'host = 127.0.0.1',
     `port = ${adminPort}`,
     'enabled = true',
-    '',
-    '[compressed]',
-    'enabled = false',
     '',
     '[storage]',
     'sqlite_file = runtime.sqlite',

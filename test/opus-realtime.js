@@ -1,39 +1,12 @@
 'use strict';
 
 const assert = require('assert');
-const { createOggOpusPacketParser, encodeOpusConfigFrame, encodeOpusPacketFrame } = require('../lib/compressed/ogg-opus');
+const { encodeOpusConfigFrame, encodeOpusPacketFrame } = require('../lib/compressed/opus-transport');
 const { createSharedOpus } = require('../lib/compressed/shared-opus');
 const opusNative = require('../lib/opus-native');
 const { createFramePacer } = require('../lib/frame-pacer');
 const { createRawPcmFramer } = require('../lib/raw-pcm');
 const { renderMultiStreamPage, renderStreamList } = require('../lib/streams');
-
-function makeOggPage(sequence, granulePosition, packets, flags = 0) {
-  const lacing = [];
-  const bodyParts = [];
-  for (const packet of packets) {
-    let offset = 0;
-    while (packet.length - offset >= 255) {
-      lacing.push(255);
-      bodyParts.push(packet.subarray(offset, offset + 255));
-      offset += 255;
-    }
-    lacing.push(packet.length - offset);
-    bodyParts.push(packet.subarray(offset));
-  }
-  assert(lacing.length <= 255);
-  const body = Buffer.concat(bodyParts);
-  const header = Buffer.alloc(27 + lacing.length);
-  header.write('OggS', 0, 4, 'ascii');
-  header.writeUInt8(0, 4);
-  header.writeUInt8(flags, 5);
-  header.writeBigUInt64LE(BigInt(granulePosition), 6);
-  header.writeUInt32LE(0x12345678, 14);
-  header.writeUInt32LE(sequence, 18);
-  header.writeUInt8(lacing.length, 26);
-  Buffer.from(lacing).copy(header, 27);
-  return Buffer.concat([header, body]);
-}
 
 function makeOpusHead(sampleRate = 8000) {
   const head = Buffer.alloc(19);
@@ -56,25 +29,12 @@ async function main() {
   const prefixedMulti = renderMultiStreamPage(testStreams, { basePath: '/opus/' });
   assert(prefixedMulti.includes('<script src="assets/multi.js"></script>'));
   assert(prefixedMulti.includes('href="assets/style.css"'));
-  assert(prefixedMulti.includes('data-mode="raw">RAW Audio</button>'));
-  assert(prefixedMulti.includes('data-mode="opus">Normal Mode</button>'));
+  assert(prefixedMulti.includes('data-mode="raw">RAW</button>'));
+  assert(prefixedMulti.includes('data-mode="adpcm">Normal</button>'));
+  assert(prefixedMulti.includes('data-mode="opus">low data</button>'));
 
-  const parser = createOggOpusPacketParser({ frameDurationMs: 20 });
   const head = makeOpusHead();
-  const tags = Buffer.from('OpusTags\x00\x00\x00\x00\x00\x00\x00\x00', 'binary');
   const packet = Buffer.from([0xf8, 0xff, 0xfe]);
-  const headerPage = makeOggPage(0, 0, [head, tags]);
-  const mediaPage = makeOggPage(1, 1272, [packet]);
-  const firstChunk = Buffer.concat([headerPage, mediaPage.subarray(0, 9)]);
-  const first = parser.push(firstChunk);
-  assert.strictEqual(first.length, 1);
-  assert.strictEqual(first[0].type, 'config');
-  assert(first[0].description.subarray(0, 8).equals(Buffer.from('OpusHead')));
-  const second = parser.push(mediaPage.subarray(9));
-  assert.strictEqual(second.length, 1);
-  assert.strictEqual(second[0].type, 'packet');
-  assert.deepStrictEqual(second[0].data, packet);
-  assert.strictEqual(second[0].timestampUs, 0);
 
   const configFrame = encodeOpusConfigFrame({
     inputSampleRate: 8000,
