@@ -1,5 +1,6 @@
 const streamData = JSON.parse(document.getElementById('streamData').textContent);
-const appBasePath = new URL(document.baseURI).pathname;
+const configuredBasePath = document.querySelector('base')?.getAttribute('href') || '/';
+const appBasePath = new URL(configuredBasePath, location.origin).pathname.replace(/\/?$/, '/');
 function appPath(path) {
   return `${appBasePath}${String(path).replace(/^\/+/, '')}`;
 }
