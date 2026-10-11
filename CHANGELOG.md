@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.9-preview - 2026-10-10
+## 1.9 - 2026-10-11
 
 ### English
 
