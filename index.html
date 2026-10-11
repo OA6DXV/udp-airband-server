@@ -3,14 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="__APP_BASE_PATH__">
   <title>UDP Airband Monitor</title>
-  <link rel="icon" href="/assets/favicon.ico" sizes="any">
-  <link rel="stylesheet" href="/assets/style.css">
+  <link rel="icon" href="assets/favicon.ico" sizes="any">
+  <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
   <main>
     <header>
-      <h1><a id="title" class="stream-title-link" href="/" title="Click to return home">UDP Airband Monitor</a><span id="titleStatusDot" class="title-status-dot" aria-hidden="true"></span></h1>
+      <h1><a id="title" class="stream-title-link" href="./" title="Click to return home">UDP Airband Monitor</a><span id="titleStatusDot" class="title-status-dot" aria-hidden="true"></span></h1>
       <div class="header-status">
         <div class="active-users"><span data-i18n="users">Users</span><strong id="activeUsers">0</strong></div>
         <button id="status" class="status" type="button"><span class="dot"></span><span id="statusText">Disconnected</span></button>
@@ -32,11 +33,11 @@
       <div class="meter"><span data-i18n="lastHeardTime">Last Heard Time</span><strong id="lastHeard">never</strong></div>
       <div class="meter mode-meter">
         <span data-i18n="mode">Mode</span>
-        <button id="mode" class="mode-button" type="button" aria-haspopup="true" aria-expanded="false">Uncompressed</button>
+        <button id="mode" class="mode-button" type="button" aria-haspopup="true" aria-expanded="false">RAW Original</button>
         <div id="modeMenu" class="mode-menu" hidden>
-          <button class="mode-option" type="button" data-mode-option="raw">Uncompressed</button>
-          <button class="mode-option" type="button" data-mode-option="opus">Compressed</button>
-          <button class="mode-option" type="button" data-mode-option="compatible">Compatible</button>
+          <button class="mode-option" type="button" data-mode-option="raw">RAW Original</button>
+          <button class="mode-option" type="button" data-mode-option="opus">RAW Compressed</button>
+          <button class="mode-option" type="button" data-mode-option="opus-live">Opus Realtime</button>
         </div>
       </div>
     </section>
@@ -67,12 +68,12 @@
 
   <div id="modeNoticeOverlay" class="multi-start-overlay" hidden>
     <section class="multi-mode-notice" role="dialog" aria-modal="true" aria-labelledby="modeNoticeTitle">
-      <h2 id="modeNoticeTitle">Compatible Mode</h2>
+      <h2 id="modeNoticeTitle">Opus Realtime</h2>
       <p id="modeNoticeBody"></p>
       <button id="modeNoticeAccept" class="multi-start-button" type="button">Accept</button>
     </section>
   </div>
 
-  <script src="/assets/app.js"></script>
+  <script src="assets/app.js"></script>
 </body>
 </html>

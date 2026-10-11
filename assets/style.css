@@ -394,7 +394,7 @@ button.audio-muted {
   margin-top: 2px;
 }
 
-.mode-button.compatible-mode {
+.mode-button.opus-live-mode {
   border-color: var(--wave);
 }
 
@@ -439,8 +439,8 @@ button.audio-muted {
   border-color: var(--accent);
 }
 
-.mode-option.compatible-option:hover,
-.mode-option.compatible-option:focus-visible {
+.mode-option.opus-live-option:hover,
+.mode-option.opus-live-option:focus-visible {
   border-color: var(--wave);
 }
 
@@ -449,7 +449,7 @@ button.audio-muted {
   color: #06100b;
 }
 
-.mode-option.compatible-option.active {
+.mode-option.opus-live-option.active {
   border-color: var(--wave);
   background: var(--wave);
   color: #160500;
@@ -557,30 +557,41 @@ canvas {
 }
 
 .multi-mode-controls {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-.multi-mode-button {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
-  color: var(--text);
   padding: 12px 14px;
-  font-size: 15px;
+  margin-bottom: 16px;
+}
+
+.multi-mode-controls h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 10px;
+}
+
+.multi-mode-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.multi-mode-button {
+  width: auto;
+  border: 1px solid var(--wave);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  padding: 7px 12px;
+  font-size: 13px;
   font-weight: 750;
 }
 
-.multi-mode-button:not(.active) {
+.multi-mode-button:hover,
+.multi-mode-button:active,
+.multi-mode-button:focus-visible {
   border-color: var(--wave);
-}
-
-.multi-mode-button.active {
-  border-color: var(--wave);
-  background: var(--wave);
-  color: #160500;
+  background: transparent;
 }
 
 .multi-stream-card {
@@ -589,81 +600,6 @@ canvas {
   border-radius: 8px;
   background: var(--panel);
   padding: 16px;
-}
-
-.native-mute-button {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 34px;
-  height: 34px;
-  min-width: 0;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #202733;
-  color: var(--text);
-  padding: 0;
-}
-
-.native-mute-button svg {
-  width: 19px;
-  height: 19px;
-  fill: currentColor;
-}
-
-.native-mute-button path {
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.native-mute-button .speaker-wave,
-.native-mute-button .mute-slash {
-  fill: none;
-}
-
-.native-mute-button .mute-slash {
-  display: none;
-}
-
-.native-mute-button.muted .speaker-wave {
-  display: none;
-}
-
-.native-mute-button.muted .mute-slash {
-  display: block;
-}
-
-.multi-stream-card.compressed-mode .native-mute-button {
-  display: inline-flex;
-}
-
-.multi-stream-card.compressed-mode .compact-stream-header {
-  display: block;
-  margin-bottom: 16px;
-  padding-right: 44px;
-}
-
-.multi-stream-card.compressed-mode .multi-meters {
-  display: none;
-}
-
-.multi-stream-card.compressed-mode .gain-level {
-  grid-template-columns: minmax(220px, 2fr) auto;
-  margin-top: 0;
-}
-
-.multi-stream-card.compressed-mode .level-label {
-  display: none;
-}
-
-.multi-stream-card.compressed-mode .gain-level-track,
-.multi-stream-card.compressed-mode [data-role="level-db"] {
-  grid-column: auto;
 }
 
 .multi-meters {
@@ -720,10 +656,6 @@ canvas {
 
 .multi-stream-card.expanded .compact-chevron {
   transform: translateY(0.1em) rotate(225deg);
-}
-
-.multi-stream-card.compressed-mode .compact-chevron {
-  display: none;
 }
 
 .gain-level-track {
@@ -970,21 +902,14 @@ canvas {
     margin-bottom: 16px;
   }
 
-  .multi-stream-card.raw-mode .multi-meters {
+  .multi-stream-card .multi-meters {
     display: none;
   }
 
-  .multi-stream-card.raw-mode.expanded .multi-meters {
+  .multi-stream-card.expanded .multi-meters {
     display: grid;
   }
 
-  .multi-stream-card.compressed-mode .multi-meters {
-    display: none;
-  }
-
-  .multi-stream-card.compressed-mode .gain-level {
-    grid-template-columns: 1fr;
-  }
 
   .multi-stream-card .gain-level-track,
   .multi-stream-card [data-role="level-db"] {

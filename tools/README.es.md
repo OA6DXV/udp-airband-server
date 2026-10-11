@@ -39,6 +39,7 @@ El script aplica:
 - volumen configurable
 - formato de salida: PCM float de 32 bits little-endian
 - temporizacion en tiempo real basada en sample rate, canales y bytes por muestra
+- bloques de 20 ms por defecto, temporizados con reloj monotonico para evitar deriva acumulada
 
 Ejemplo basico:
 
@@ -77,6 +78,7 @@ Argumentos disponibles:
 - `--port`: puerto UDP de destino. Default: `8690`.
 - `--rate`: sample rate de salida. Default: `8000`.
 - `--channels`: cantidad de canales de salida. Default: `1`.
+- `--chunk-ms`: duracion del bloque UDP, de 5 a 1000 ms (respetando el limite de UDP). Default: `20`. Usa `--chunk-ms 100` para simular bloques mayores del receptor.
 - `--volume`: multiplicador de volumen de ffmpeg. Default: `0.35`.
 - `--loop`: reinicia el archivo cuando llega al final.
 

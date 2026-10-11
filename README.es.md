@@ -27,6 +27,12 @@ La utilidad de este enfoque es la baja latencia y la simplicidad. RTLSDR-Airband
 
 Clona el repositorio e instala las dependencias de Node.js:
 
+Para la preview 1.9 en Debian/Ubuntu, instala primero libopus y las herramientas de compilacion nativa:
+
+```bash
+sudo apt install build-essential python3 node-gyp libopus0
+```
+
 ```bash
 git clone https://github.com/OA6DXV/udp-airband-server.git
 cd udp-airband-server
@@ -62,6 +68,9 @@ cert =
 [streams]
 file = streams.json
 
+[audio]
+opus_worklet_target_latency_ms = 100
+
 [storage]
 sqlite_file = localdb.sqlite
 
@@ -89,7 +98,8 @@ enabled = true
 codec = adpcm
 adpcm_frame_ms = 40
 ffmpeg = ffmpeg
-opus_bitrate = 24k
+opus_realtime_bitrate_8k = 12k
+opus_realtime_bitrate_16k = 32k
 aac_bitrate = 32k
 keepalive_ms = 1000
 ```
@@ -113,7 +123,7 @@ Campos importantes:
 - `[logging].colors`: usa `true` para colorear logs en terminal. Mantenlo en `false` para logs normales de servicio con `systemd`.
 - `[ssl]`: modo HTTPS opcional para el mismo host y puerto de `[web]`. Activalo y define rutas validas `key` y `cert` cuando quieras que Node.js sirva TLS directamente. Si SSL esta activado pero faltan las rutas del certificado o son invalidas, el servidor muestra un warning y cae a HTTP en el mismo puerto.
 - `[compressed].enabled`: usa `false` para desactivar todos los modos comprimidos y su logica de transcoding/framing.
-- `[compressed].codec`: backend del modo comprimido. `adpcm` es la opcion predeterminada de baja latencia y no requiere `ffmpeg`.
+- `[compressed].codec`: ajuste de codec heredado del servidor. El reproductor individual ofrece ADPCM y Opus directo independientemente de este valor.
 
 Las metricas de ejecucion, los valores Last Heard, la geolocalizacion y la autenticacion de Web Admin se guardan exclusivamente en SQLite, de forma predeterminada en `data/localdb.sqlite`. En Node.js 22.13+ (incluido Node 24), el modulo integrado `node:sqlite` se usa automaticamente sin warnings ni paquetes adicionales. Las instalaciones antiguas de Node.js deben instalar el driver de compatibilidad con `npm install better-sqlite3`.
 
@@ -276,7 +286,7 @@ Usa `debug` en la configuracion solo si realmente quieres logs debug persistente
 node server.js -D --server-config server.conf --config streams.json
 ```
 
-Cuando `-D` esta activo, los encoders basados en ffmpeg como Opus, AAC y HLS se inician con logging debug de ffmpeg y su salida `stderr` se imprime. `-D` tambien activa timestamps y colores automaticamente para ejecuciones manuales en terminal. Sin `-D`, ffmpeg queda en nivel de errores y el comportamiento de timestamps/colores viene desde `server.conf`, para que los logs del servicio no se inunden.
+Con `-D`, el servidor registra el ciclo de vida de los encoders Opus nativos y diagnosticos detallados. Tambien se imprime la salida de FFmpeg si se usan las rutas AAC/HLS heredadas. `-D` activa timestamps y colores para pruebas manuales.
 
 ## Administracion Web
 
@@ -452,10 +462,19 @@ Los navegadores mostraran una advertencia con certificados autogenerados porque 
 
 ## Modos Uncompressed Y Compressed
 
-El navegador puede reproducir:
+El reproductor de streams individuales ofrece tres perfiles:
 
 - `Uncompressed`: PCM float32 original sobre WebSocket. Es el modo predeterminado en navegadores de escritorio.
-- `Compressed`: IMA ADPCM de baja latencia sobre WebSocket por defecto. Es el modo predeterminado en navegadores moviles.
+- `Compressed`: IMA ADPCM de baja latencia sobre WebSocket.
+- `Opus Realtime`: paquetes Opus mono de 20 ms sobre WebSocket, codificados directamente con libopus. Apunta a 12 kb/s en 8 kHz y 32 kb/s en 16 kHz, y se prefiere en moviles compatibles.
+
+Cada perfil entrega el PCM decodificado a un AudioWorklet cuando el navegador lo soporta. Opus Realtime tambien requiere decodificacion WebCodecs Opus y un contexto seguro (HTTPS o localhost). La reproduccion en segundo plano depende del navegador y del dispositivo; se debe verificar en el iPhone objetivo.
+
+Todos los oyentes de un stream comparten un solo encoder Opus. Cuando se va el ultimo oyente, se conserva durante 10 segundos para reutilizarlo en una reconexion rapida.
+
+Los frames completos de 20 ms se codifican y envian inmediatamente al llegar por UDP, incluso si el receptor agrupa varios en un datagrama. El servidor solo conserva un frame incompleto; el AudioWorklet controla el ritmo de reproduccion. El prebuffer existente del navegador no cambia.
+
+Para diagnosticar, ejecuta `server.js -D`: `opus_audio_diagnostics` muestra muestras recibidas y codificadas, muestras pendientes, silencio insertado, tiempo de codificacion y paquetes descartados para clientes. `unaccountedInputSamples` debe ser cero. Estos contadores tambien se registran cuando se cierra un encoder. En la consola del navegador, `getAudioDiagnostics()` muestra perdida de paquetes en el decoder, muestras decodificadas, descartes al entregar audio y underruns/overflows del AudioWorklet. Son diagnosticos locales, no una garantia de background en iOS.
 
 ADPCM esta pensado para audio de radio intermitente. El servidor solo envia frames comprimidos cuando llega audio UDP, asi que los periodos con squelch cerrado no consumen ancho de banda de audio. Cada frame ADPCM incluye suficiente estado de decodificacion para que nuevos clientes, o clientes luego de un silencio, puedan resincronizarse rapidamente.
 
@@ -468,14 +487,11 @@ codec = adpcm
 adpcm_frame_ms = 40
 ```
 
-Codecs comprimidos soportados:
+El reproductor individual usa ADPCM para `Compressed` y libopus directo para `Opus Realtime`. El ajuste antiguo `compressed.codec` se conserva para rutas AAC/HLS heredadas.
 
-- `adpcm`: predeterminado, baja latencia, no requiere `ffmpeg`.
-- `opus`: Opus/WebM sobre WebSocket o fallback HTTP, requiere `ffmpeg`.
-- `aac`: AAC sobre WebSocket/MediaSource, requiere `ffmpeg`.
-- `hls`: ruta HLS/AAC experimental, requiere `ffmpeg`. Esta ruta se conserva en el codigo pero actualmente queda en espera mientras se prueba ADPCM como modo comprimido amigable para moviles.
+El perfil Opus no requiere FFmpeg. Las rutas AAC/HLS heredadas y AAC nativo de multistream aun lo requieren.
 
-Instala `ffmpeg` solo si quieres usar `opus`, `aac` o `hls`:
+Instala `ffmpeg` solo si usas esas rutas AAC/HLS:
 
 ```bash
 sudo apt install ffmpeg

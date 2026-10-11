@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.9-preview - 2026-10-10
+
+### English
+
+- Removed server-side realtime Opus pacing and its 200 ms discard queue; complete input frames are encoded and sent on arrival, with incomplete samples preserved across UDP gaps.
+- Anchored idle Opus silence to absolute deadlines so timer rounding does not starve the AudioWorklet between transmissions; catch-up is limited to two synthetic frames.
+- Added server and browser audio accounting to distinguish source encoding, client packet drops, decoder queue losses, and AudioWorklet underruns/overflows.
+- Added configurable UDP test chunk duration (20 ms by default) and monotonic pacing without accumulated sleep drift.
+- Added direct libopus encoding of 20 ms float PCM frames for 8 kHz and 16 kHz single streams, with no FFmpeg dependency for Opus.
+- Shared one Opus encoder among listeners of a stream and retained it for 10 seconds after the last listener disconnects.
+- Added WebCodecs Opus decoding and AudioWorklet PCM playback for the single-stream browser profiles: raw, ADPCM, and Opus Realtime.
+- Replaced the single-stream Compatible AAC choice with Opus Realtime. Legacy AAC/HLS and multi-stream native AAC still use FFmpeg.
+- Added native build and UDP-to-WebSocket integration tests. iPhone locked-screen playback remains a device validation step.
+
+### Espanol
+
+- Se elimino la temporizacion Opus del servidor y su cola de descarte de 200 ms; los frames completos se codifican y envian al llegar y las muestras incompletas se conservan entre pausas UDP.
+- Se anclo el silencio Opus a plazos absolutos para que el redondeo de temporizadores no deje vacio el AudioWorklet entre transmisiones; la recuperacion se limita a dos frames sinteticos.
+- Se agregaron contadores de audio en servidor y navegador para distinguir codificacion, descartes para clientes, perdida en la cola del decoder y underruns/overflows del AudioWorklet.
+- Se agrego duracion configurable de bloques UDP de prueba (20 ms por defecto) y temporizacion monotonica sin deriva acumulada entre esperas.
+- Se agrego codificacion directa con libopus de frames PCM float de 20 ms para streams individuales de 8 kHz y 16 kHz, sin depender de FFmpeg para Opus.
+- Se comparte un encoder Opus entre los oyentes de cada stream y se conserva durante 10 segundos tras desconectarse el ultimo.
+- Se agrego decodificacion Opus con WebCodecs y reproduccion PCM con AudioWorklet para raw, ADPCM y Opus Realtime en el reproductor individual.
+- Se reemplazo la opcion Compatible AAC individual por Opus Realtime. AAC/HLS heredados y AAC nativo multistream siguen usando FFmpeg.
+- Se agregaron pruebas de compilacion nativa y de UDP a WebSocket. La reproduccion con la pantalla del iPhone bloqueada queda pendiente de validar en el dispositivo.
+
 ## 1.8 - 2026-07-29
 
 ### English
