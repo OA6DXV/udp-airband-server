@@ -43,7 +43,7 @@ assert.equal(resolveRoutes(null, '/testing').control, 'wss://liveatc.example/tes
 const multiSource = fs.readFileSync(path.join(__dirname, '../assets/multi.js'), 'utf8');
 const multiTranslations = vm.runInNewContext(multiSource.match(/const translations = [\s\S]*?\n};/)[0] + '\ntranslations');
 for (const language of ['en', 'es']) {
-  assert.equal(multiTranslations[language].realTimeMode, 'RAW Audio');
+  assert.equal(multiTranslations[language].realTimeMode, 'RAW Original');
   assert.equal(multiTranslations[language].compatibleMode, 'Normal Mode');
 }
 const multiRouteSetup = multiSource.match(/const configuredBasePath = [\s\S]*?(?=const allStreams =)/)?.[0];

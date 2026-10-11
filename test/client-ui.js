@@ -19,6 +19,7 @@ assert(!html.includes('multiPlayButton'));
 assert(html.includes('id="multiStartOverlay" class="multi-start-overlay">'));
 assert(html.includes('id="multiStartButton" class="multi-start-button" type="button">Start Audio'));
 assert(html.includes('data-i18n="globalModeTitle"'));
+assert(html.includes('data-mode="adpcm">RAW Compressed</button>'));
 assert(!multi.includes("button.classList.toggle('active'"));
 assert(multi.includes("if (player.mode !== mode)"));
 const globalModeSetup = multi.match(/function setGlobalMode\(mode, options = \{\}\) \{[\s\S]*?\n\}/)[0];

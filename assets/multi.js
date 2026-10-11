@@ -35,9 +35,9 @@ const translations = {
   en: {
     users: 'Users', localTime: 'Local Time', disconnected: 'Disconnected', waitingUdp: 'Waiting for UDP',
     connected: 'Connected', idle: 'Push to Reconnect', pushDisconnect: 'Push to disconnect', stopStream: 'Stop stream', lastHeard: 'Last Heard',
-    mode: 'Mode', audio: 'Audio', startAudio: 'Start', mute: 'Mute', unmute: 'Unmute', compressed: 'Compressed',
-    uncompressed: 'Uncompressed', streamName: 'Stream', level: 'Level', never: 'never', now: 'Now',
-    realTimeMode: 'RAW Audio', compatibleMode: 'Normal Mode', accept: 'Accept',
+    mode: 'Mode', audio: 'Audio', startAudio: 'Start', mute: 'Mute', unmute: 'Unmute', compressed: 'RAW Compressed',
+    uncompressed: 'RAW Original', streamName: 'Stream', level: 'Level', never: 'never', now: 'Now',
+    realTimeMode: 'RAW Original', compatibleMode: 'Normal Mode', accept: 'Accept',
     globalModeTitle: 'Change mode for all streams:',
     welcomeTitle: 'Welcome to multistream mode',
     welcomeBody: 'Normal Mode is used by default. You can change the audio mode for all streams using the global buttons, or choose it independently for each stream. Press Start Audio to begin playback.',
@@ -52,9 +52,9 @@ const translations = {
   es: {
     users: 'Usuarios', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP',
     connected: 'Conectado', idle: 'Presiona para reconectar', pushDisconnect: 'Presiona para desconectar', stopStream: 'Detener stream', lastHeard: 'Ultima transmision',
-    mode: 'Modo', audio: 'Audio', startAudio: 'Iniciar', mute: 'Silenciar', unmute: 'Activar', compressed: 'Comprimido',
-    uncompressed: 'Sin comprimir', streamName: 'Stream', level: 'Nivel', never: 'nunca', now: 'Ahora',
-    realTimeMode: 'RAW Audio', compatibleMode: 'Normal Mode', accept: 'Aceptar',
+    mode: 'Modo', audio: 'Audio', startAudio: 'Iniciar', mute: 'Silenciar', unmute: 'Activar', compressed: 'RAW Compressed',
+    uncompressed: 'RAW Original', streamName: 'Stream', level: 'Nivel', never: 'nunca', now: 'Ahora',
+    realTimeMode: 'RAW Original', compatibleMode: 'Normal Mode', accept: 'Aceptar',
     globalModeTitle: 'Cambiar modo a todos los streams:',
     welcomeTitle: 'Bienvenido al modo multistream',
     welcomeBody: 'Por defecto se utilizará Normal Mode. Puedes cambiar el modo de audio con los botones globales o configurarlo de forma independiente para cada stream. Pulsa Iniciar audio para comenzar la reproducción.',
@@ -78,6 +78,7 @@ let multiPlaybackRequested = false;
 let globalMode = 'opus';
 let workletModulePromise;
 let opusModulePromise;
+let adpcmModulePromise;
 let serverInstanceId = '';
 let serverNoticeEl;
 let serverNoticeKind = '';
@@ -240,6 +241,14 @@ async function loadWorkletModule() {
   return workletModulePromise;
 }
 
+function loadAdpcmModule() {
+  if (!adpcmModulePromise) {
+    adpcmModulePromise = import(appPath('assets/adpcm-decoder.mjs'))
+      .catch((error) => { adpcmModulePromise = null; throw error; });
+  }
+  return adpcmModulePromise;
+}
+
 function loadOpusModule() {
   if (!opusModulePromise) {
     opusModulePromise = import(appPath('assets/opus-webcodecs.mjs'))
@@ -270,7 +279,7 @@ function updateMediaSessionMetadata() {
 }
 
 function setGlobalMode(mode, options = {}) {
-  if (!['raw', 'opus'].includes(mode)) return;
+  if (!['raw', 'adpcm', 'opus'].includes(mode)) return;
   globalMode = mode;
   players.forEach((player) => {
     if (player.mode !== mode) {
@@ -288,7 +297,7 @@ function setGlobalMode(mode, options = {}) {
 
 function updateModeControls() {
   modeButtons.forEach((button) => {
-    button.textContent = t(button.dataset.mode === 'opus' ? 'compatibleMode' : 'realTimeMode');
+    button.textContent = t(button.dataset.mode === 'opus' ? 'compatibleMode' : button.dataset.mode === 'adpcm' ? 'compressed' : 'realTimeMode');
   });
 }
 
@@ -477,7 +486,8 @@ class MultiStreamPlayer {
       this.compactToggle.setAttribute('aria-expanded', String(this.card.classList.contains('expanded')));
     });
     this.modeButton.addEventListener('click', () => {
-      this.mode = this.mode === 'raw' ? 'opus' : 'raw';
+      const modes = ['opus', 'raw', 'adpcm'];
+      this.mode = modes[(modes.indexOf(this.mode) + 1) % modes.length];
       if (multiPlaybackRequested && !this.paused && !globalPaused) this.startAudio().catch((error) => this.handlePlaybackError(error));
       this.updateLabels();
     });
@@ -577,10 +587,15 @@ class MultiStreamPlayer {
       if (context.state !== 'running') await context.resume();
       await loadWorkletModule();
       let module;
+      let adpcmModule;
+      if (this.mode === 'adpcm') {
+        if (!this.config.adpcmAvailable) throw new Error('RAW Compressed unavailable for this stream');
+        adpcmModule = await loadAdpcmModule();
+      }
       if (this.mode === 'opus') {
         module = await loadOpusModule();
         if (!this.config.opusRealtimeAvailable || !await module.supportsOpusAudioDecoder(window.AudioDecoder)) {
-          throw new Error('Opus unavailable for this stream or browser; select RAW Audio');
+          throw new Error('Opus unavailable for this stream or browser; select RAW Original');
         }
       }
       if (generation !== this.socketGeneration || globalPaused || streamsUnavailable) return;
@@ -616,7 +631,7 @@ class MultiStreamPlayer {
         });
       }
       this.applyGain();
-      const endpoint = this.mode === 'opus' ? 'opus-live' : 'audio';
+      const endpoint = this.mode === 'opus' ? 'opus-live' : this.mode === 'adpcm' ? 'adpcm' : 'audio';
       const socket = new WebSocket(`${appWebSocketUrl(`${encodeURIComponent(this.stream.name)}/${endpoint}`)}?clientId=${encodeURIComponent(this.clientId)}`);
       this.audioWs = socket;
       socket.binaryType = 'arraybuffer';
@@ -626,6 +641,10 @@ class MultiStreamPlayer {
         this.confirmed = true;
         if (this.currentMode === 'opus') {
           this.decoder?.push(event.data).catch(() => {});
+        } else if (this.currentMode === 'adpcm') {
+          const decoded = adpcmModule.decodeAdpcmFrame(event.data);
+          if (!decoded) { this.handlePlaybackError(new Error('Invalid ADPCM frame')); return; }
+          this.deliverPcm(decoded.samples, decoded.frames, decoded.sampleRate, decoded.channels);
         } else {
           const samples = new Float32Array(event.data);
           const frames = samples.length / this.config.channels;
@@ -742,7 +761,7 @@ class MultiStreamPlayer {
   updateLabels() {
     this.lastEl.textContent = localizeLastHeard(this.lastHeardLabel);
     this.updateCompactLabel();
-    this.modeButton.textContent = this.mode === 'opus' ? t('compatibleMode') : t('realTimeMode');
+    this.modeButton.textContent = this.mode === 'opus' ? t('compatibleMode') : this.mode === 'adpcm' ? t('compressed') : t('realTimeMode');
     this.startButton.textContent = this.started ? (this.muted ? t('unmute') : t('mute')) : t('startAudio');
     this.startButton.classList.toggle('audio-start-prompt', !this.started);
     this.startButton.title = this.playbackError;

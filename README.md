@@ -98,7 +98,7 @@ enabled = true
 codec = adpcm
 adpcm_frame_ms = 40
 ffmpeg = ffmpeg
-opus_realtime_bitrate_8k = 12k
+opus_realtime_bitrate_8k = 20k
 opus_realtime_bitrate_16k = 32k
 aac_bitrate = 32k
 keepalive_ms = 1000
@@ -487,7 +487,7 @@ codec = adpcm
 adpcm_frame_ms = 40
 ```
 
-The single-stream player uses ADPCM for its `Compressed` profile and direct libopus for `Opus Realtime`. The older `compressed.codec` setting remains for legacy AAC/HLS routes.
+The single-stream player uses ADPCM for its `RAW Compressed` profile, float PCM for `RAW Original`, and direct libopus for `Opus Realtime`. Multistream offers the same transports as `RAW Compressed`, `RAW Original`, and `Normal Mode`, independently or through global action buttons. Realtime Opus targets 20 kb/s for 8 kHz inputs and 32 kb/s for 16 kHz inputs. The older `compressed.codec` setting remains for legacy AAC/HLS routes.
 
 The Opus profile does not require FFmpeg. Multistream uses independent RAW or native Opus WebSockets, AudioWorklet playback, and local volume/mute controls for each stream. Both modes use the same interface; there is no server-side AAC mix or volume-command endpoint. Native Opus encoders are shared between listeners of the same stream and remain alive for 10 seconds after the last listener leaves. Background playback still depends on the browser and device. Only the legacy single-stream AAC/HLS routes require FFmpeg.
 

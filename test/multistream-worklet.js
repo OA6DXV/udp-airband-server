@@ -40,6 +40,8 @@ class Decoder {
 }
 
 async function main() {
+  const adpcmModule = await import('../assets/adpcm-decoder.mjs');
+  const { encodeAdpcmFrames } = require('../lib/compressed/adpcm');
   let testNow = 1000;
   const timers = new Map();
   let timerId = 0;
@@ -56,6 +58,7 @@ async function main() {
     getClientId: () => 'test-client', ensureAudioContext: () => context,
     loadWorkletModule: async () => {},
     loadOpusModule: async () => ({ supportsOpusAudioDecoder: async () => true, OpusWebCodecsDecoder: Decoder }),
+    loadAdpcmModule: async () => adpcmModule,
     appWebSocketUrl: endpoint => `wss://example/${endpoint}`,
     peakOf: samples => Math.max(...samples.map(Math.abs)),
     setTimeout: fn => { timers.set(++timerId, fn); return timerId; },
@@ -129,6 +132,27 @@ async function main() {
   first.resume();
   await new Promise(resolve => setImmediate(resolve));
   assert(first.started, 'resume starts the current codec again');
+  first.mode = 'adpcm';
+  first.config.adpcmAvailable = true;
+  await first.startAudio();
+  assert.equal(first.audioWs.url, 'wss://example/testing/adpcm?clientId=test-client');
+  assert.equal(first.decoder, null, 'ADPCM must not allocate an Opus decoder');
+  const pcm = Buffer.alloc(160 * 4);
+  for (let i = 0; i < 160; i++) pcm.writeFloatLE(Math.sin(i * .3) * .2, i * 4);
+  const frame = encodeAdpcmFrames({ sampleRate: 8000, channels: 1, adpcmSequence: 0 }, pcm, 20)[0];
+  const packet = Uint8Array.from(frame).buffer;
+  first.audioWs.receive(packet);
+  assert.equal(first.worklet.messages[0].inputSampleRate, 8000);
+  assert.equal(first.worklet.messages[1].frames, 160);
+  assert.equal(first.gain, .42);
+  assert.equal(adpcmModule.decodeAdpcmFrame(packet).samples.length, 160);
+  assert.equal(adpcmModule.decodeAdpcmFrame(packet.slice(0, -1)), null);
+  const invalid = packet.slice(0);
+  new DataView(invalid).setUint8(22, 255);
+  assert.equal(adpcmModule.decodeAdpcmFrame(invalid), null);
+  first.config.adpcmAvailable = false;
+  await assert.rejects(first.startAudio(), /RAW Compressed unavailable/);
+  assert.equal(first.audioWs, null);
   first.pause();
 
   let release;

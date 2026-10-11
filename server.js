@@ -108,7 +108,7 @@ const geoIpv6Anonymize = String(getSetting(serverConfig, 'geo.ipv6Anonymize', '/
 const compressedEnabled = parseBoolean(args.compressedEnabled !== undefined ? args.compressedEnabled : getSetting(serverConfig, 'compressed.enabled', true));
 const compressedCodec = String(args.compressedCodec || args.codec || getSetting(serverConfig, 'compressed.codec', 'adpcm')).trim().toLowerCase();
 const adpcmFrameMs = Number(args.adpcmFrameMs || getSetting(serverConfig, 'compressed.adpcmFrameMs', 40));
-const opusRealtimeBitrate8k = args.opusRealtimeBitrate8k || getSetting(serverConfig, 'compressed.opusRealtimeBitrate8k', '12k');
+const opusRealtimeBitrate8k = args.opusRealtimeBitrate8k || getSetting(serverConfig, 'compressed.opusRealtimeBitrate8k', '20k');
 const opusRealtimeBitrate16k = args.opusRealtimeBitrate16k || getSetting(serverConfig, 'compressed.opusRealtimeBitrate16k', '32k');
 const opusRealtimeFrameMs = Number(args.opusRealtimeFrameMs || getSetting(serverConfig, 'compressed.opusRealtimeFrameMs', 20));
 const opusWorkletTargetLatencyMs = Number(args.opusWorkletTargetLatencyMs || getSetting(serverConfig, 'audio.opusWorkletTargetLatencyMs', 100));
@@ -267,6 +267,7 @@ const publicDir = __dirname;
 const indexHtml = fs.readFileSync(path.join(publicDir, 'index.html'));
 const appJs = fs.readFileSync(path.join(publicDir, 'assets', 'app.js'));
 const opusWebCodecsJs = fs.readFileSync(path.join(publicDir, 'assets', 'opus-webcodecs.mjs'));
+const adpcmDecoderJs = fs.readFileSync(path.join(publicDir, 'assets', 'adpcm-decoder.mjs'));
 const opusAudioRingBufferJs = fs.readFileSync(path.join(publicDir, 'assets', 'audio-ring-buffer.mjs'));
 const opusAudioWorkletJs = fs.readFileSync(path.join(publicDir, 'assets', 'audio-worklet.mjs'));
 const styleCss = fs.readFileSync(path.join(publicDir, 'assets', 'style.css'));
@@ -453,6 +454,10 @@ function handleHttpRequest(req, res) {
   }
   if (pathname === '/assets/opus-webcodecs.mjs') {
     sendAsset(res, opusWebCodecsJs, 'application/javascript; charset=utf-8');
+    return;
+  }
+  if (pathname === '/assets/adpcm-decoder.mjs') {
+    sendAsset(res, adpcmDecoderJs, 'application/javascript; charset=utf-8');
     return;
   }
   if (pathname === '/assets/audio-ring-buffer.mjs') {
@@ -1608,7 +1613,7 @@ Compressed audio:
   --adpcm-frame-ms MS           ADPCM frame duration, 10-100 ms. Default: 40.
   --ffmpeg PATH                 ffmpeg executable path.
   --opus-realtime-bitrate-8k RATE
-                                Realtime Opus target bitrate for 8 kHz streams. Default: 12k.
+                                Realtime Opus target bitrate for 8 kHz streams. Default: 20k.
   --opus-realtime-bitrate-16k RATE
                                 Realtime Opus target bitrate for 16 kHz streams. Default: 32k.
   --opus-realtime-frame-ms MS   Realtime Opus packet duration. Fixed to 20 ms.
