@@ -56,6 +56,8 @@ async function main() {
   const prefixedMulti = renderMultiStreamPage(testStreams, { basePath: '/opus/' });
   assert(prefixedMulti.includes('<script src="assets/multi.js"></script>'));
   assert(prefixedMulti.includes('href="assets/style.css"'));
+  assert(prefixedMulti.includes('data-mode="raw">RAW Audio</button>'));
+  assert(prefixedMulti.includes('data-mode="opus">Normal Mode</button>'));
 
   const parser = createOggOpusPacketParser({ frameDurationMs: 20 });
   const head = makeOpusHead();

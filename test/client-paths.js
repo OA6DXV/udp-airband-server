@@ -41,6 +41,13 @@ assert.equal(resolveRoutes('/opus', '/opus/testing').audio, 'wss://liveatc.examp
 assert.equal(resolveRoutes(null, '/testing').control, 'wss://liveatc.example/testing/control');
 
 const multiSource = fs.readFileSync(path.join(__dirname, '../assets/multi.js'), 'utf8');
+const multiTranslations = vm.runInNewContext(multiSource.match(/const translations = [\s\S]*?\n};/)[0] + '\ntranslations');
+for (const language of ['en', 'es']) {
+  assert.equal(multiTranslations[language].realTimeMode, 'RAW Audio');
+  assert.equal(multiTranslations[language].compatibleMode, 'Normal Mode');
+  assert.equal(multiTranslations[language].realTimeNoticeTitle, 'RAW Audio');
+  assert.equal(multiTranslations[language].compatibleNoticeTitle, 'Normal Mode');
+}
 const multiRouteSetup = multiSource.match(/const configuredBasePath = [\s\S]*?(?=const allStreams =)/)?.[0];
 assert.ok(multiRouteSetup, 'multistream route setup must exist');
 const multiWsProtocol = multiSource.match(/function wsProtocol\(\) \{[^}]+\}/)?.[0];
