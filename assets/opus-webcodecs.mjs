@@ -72,6 +72,35 @@ export class OpusWebCodecsDecoder {
     this.lastSequence = null;
     this.expectedTimestampUs = null;
     this.closed = false;
+    this.resetDiagnostics();
+  }
+
+  resetDiagnostics() {
+    this.receivedPackets = 0;
+    this.missingPackets = 0;
+    this.duplicatePackets = 0;
+    this.droppedPackets = 0;
+    this.submittedPackets = 0;
+    this.decodedBlocks = 0;
+    this.decodedSamples = 0;
+    this.concealedSamples = 0;
+    this.outputSampleRate = 0;
+  }
+
+  diagnostics() {
+    return {
+      receivedPackets: this.receivedPackets,
+      missingPackets: this.missingPackets,
+      duplicatePackets: this.duplicatePackets,
+      droppedPackets: this.droppedPackets,
+      submittedPackets: this.submittedPackets,
+      pendingPackets: this.pendingPackets.length,
+      decodeQueueSize: this.decoder?.decodeQueueSize || 0,
+      decodedBlocks: this.decodedBlocks,
+      decodedSamples: this.decodedSamples,
+      concealedSamples: this.concealedSamples,
+      outputSampleRate: this.outputSampleRate,
+    };
   }
 
   push(input) {
@@ -96,6 +125,7 @@ export class OpusWebCodecsDecoder {
     this.lastSequence = null;
     this.expectedTimestampUs = null;
     this.closed = false;
+    this.resetDiagnostics();
     const decoderConfig = {
       codec: 'opus',
       sampleRate: DECODER_SAMPLE_RATE,
@@ -137,15 +167,25 @@ export class OpusWebCodecsDecoder {
   }
 
   queuePacket(packet) {
+    this.receivedPackets += 1;
     if (this.lastSequence !== null) {
       const expected = (this.lastSequence + 1) >>> 0;
       const missing = (packet.sequence - expected) >>> 0;
-      if (missing > 0 && missing < 0x80000000) this.onSequenceGap(missing);
-      if (missing >= 0x80000000) return;
+      if (missing > 0 && missing < 0x80000000) {
+        this.missingPackets += missing;
+        this.onSequenceGap(missing);
+      }
+      if (missing >= 0x80000000) {
+        this.duplicatePackets += 1;
+        return;
+      }
     }
     this.lastSequence = packet.sequence;
     this.pendingPackets.push(packet);
-    while (this.pendingPackets.length > MAX_PENDING_PACKETS) this.pendingPackets.shift();
+    while (this.pendingPackets.length > MAX_PENDING_PACKETS) {
+      this.pendingPackets.shift();
+      this.droppedPackets += 1;
+    }
   }
 
   decodePending() {
@@ -153,6 +193,7 @@ export class OpusWebCodecsDecoder {
     while (this.pendingPackets.length && this.decoder.decodeQueueSize < MAX_PENDING_PACKETS) {
       const packet = this.pendingPackets.shift();
       try {
+        this.submittedPackets += 1;
         this.decoder.decode(new this.EncodedAudioChunkCtor({
           type: 'key',
           timestamp: packet.timestampUs,
@@ -177,11 +218,17 @@ export class OpusWebCodecsDecoder {
       const sampleRate = audioData.sampleRate;
       const timestampUs = Number.isFinite(audioData.timestamp) ? audioData.timestamp : null;
       const samples = copyAudioDataToInterleavedFloat32(audioData);
+      this.decodedBlocks += 1;
+      this.decodedSamples += frames;
+      this.outputSampleRate = sampleRate;
       if (timestampUs !== null && this.expectedTimestampUs !== null) {
         const gapUs = timestampUs - this.expectedTimestampUs;
         if (gapUs > 2000 && gapUs <= 200000) {
           const silenceFrames = Math.round(gapUs * sampleRate / 1000000);
-          if (silenceFrames > 0) this.onPcm(new Float32Array(silenceFrames * channels), silenceFrames, sampleRate, channels);
+          if (silenceFrames > 0) {
+            this.concealedSamples += silenceFrames;
+            this.onPcm(new Float32Array(silenceFrames * channels), silenceFrames, sampleRate, channels);
+          }
         }
       }
       this.onPcm(samples, frames, sampleRate, channels);

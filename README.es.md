@@ -472,6 +472,10 @@ Cada perfil entrega el PCM decodificado a un AudioWorklet cuando el navegador lo
 
 Todos los oyentes de un stream comparten un solo encoder Opus. Cuando se va el ultimo oyente, se conserva durante 10 segundos para reutilizarlo en una reconexion rapida.
 
+Los frames completos de 20 ms se codifican y envian inmediatamente al llegar por UDP, incluso si el receptor agrupa varios en un datagrama. El servidor solo conserva un frame incompleto; el AudioWorklet controla el ritmo de reproduccion. El prebuffer existente del navegador no cambia.
+
+Para diagnosticar, ejecuta `server.js -D`: `opus_audio_diagnostics` muestra muestras recibidas y codificadas, muestras pendientes, silencio insertado, tiempo de codificacion y paquetes descartados para clientes. `unaccountedInputSamples` debe ser cero. Estos contadores tambien se registran cuando se cierra un encoder. En la consola del navegador, `getAudioDiagnostics()` muestra perdida de paquetes en el decoder, muestras decodificadas, descartes al entregar audio y underruns/overflows del AudioWorklet. Son diagnosticos locales, no una garantia de background en iOS.
+
 ADPCM esta pensado para audio de radio intermitente. El servidor solo envia frames comprimidos cuando llega audio UDP, asi que los periodos con squelch cerrado no consumen ancho de banda de audio. Cada frame ADPCM incluye suficiente estado de decodificacion para que nuevos clientes, o clientes luego de un silencio, puedan resincronizarse rapidamente.
 
 El modo comprimido predeterminado es:

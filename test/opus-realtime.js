@@ -139,7 +139,39 @@ async function main() {
   assert.strictEqual(pcm[0][2], 48000);
   assert.strictEqual(pcm[0][3], 1);
   assert.strictEqual(pcm[0][0][0], 0.25);
+  assert.strictEqual(decoder.diagnostics().decodedSamples, 960);
+  assert.strictEqual(decoder.diagnostics().droppedPackets, 0);
   decoder.close();
+
+  // Configuration can be asynchronous. Any bounded-queue loss must be visible,
+  // even when the incoming wire sequence has no missing packets.
+  let resolveSupport;
+  class DelayedAudioDecoder extends FakeAudioDecoder {
+    static isConfigSupported() {
+      return new Promise((resolve) => { resolveSupport = resolve; });
+    }
+  }
+  const delayedDecoder = new decoderModule.OpusWebCodecsDecoder({
+    AudioDecoderCtor: DelayedAudioDecoder,
+    EncodedAudioChunkCtor: FakeEncodedAudioChunk,
+  });
+  const configuring = delayedDecoder.push(configFrame);
+  for (let sequence = 0; sequence < 20; sequence += 1) {
+    delayedDecoder.push(encodeOpusPacketFrame({ sequence, data: packet }));
+  }
+  assert.strictEqual(delayedDecoder.diagnostics().receivedPackets, 20);
+  assert.strictEqual(delayedDecoder.diagnostics().droppedPackets, 4);
+  assert.strictEqual(delayedDecoder.diagnostics().missingPackets, 0);
+  resolveSupport({ supported: true });
+  await configuring;
+  assert.strictEqual(delayedDecoder.diagnostics().submittedPackets, 16);
+  assert.strictEqual(delayedDecoder.diagnostics().decodedSamples, 16 * 960);
+  await delayedDecoder.push(encodeOpusPacketFrame({ sequence: 19, data: packet }));
+  assert.strictEqual(delayedDecoder.diagnostics().duplicatePackets, 1);
+  await delayedDecoder.push(encodeOpusPacketFrame({ sequence: 21, data: packet }));
+  assert.strictEqual(delayedDecoder.diagnostics().missingPackets, 1);
+  assert.strictEqual(delayedDecoder.diagnostics().concealedSamples, 960);
+  delayedDecoder.close();
 
   assert(opusNative.isAvailable(), 'native libopus addon must be built before running the tests');
   for (const sampleRate of [8000, 16000]) {
@@ -231,7 +263,7 @@ async function main() {
   pacer.reset(pacedStream);
 
   // Feed 100 ms UDP batches while the server checks for silence every 20 ms.
-  // Timer callbacks deliberately run 1 ms late to exercise clock drift too.
+  // Input delivery must not schedule any additional media timers.
   for (const [sampleRate, channels] of [[8000, 1], [16000, 2]]) {
     let time = 1000;
     const pending = [];
@@ -265,12 +297,58 @@ async function main() {
       if (time > 1000 && time % 20 === 0) transport.writeSilence([testStream]);
       if (time % 100 === 0) transport.writeInput(testStream, input);
     }
-    assert.strictEqual(dropped, 0, 'regular UDP batches must not overflow the queue');
-    assert.strictEqual(encoded.filter((value) => value === 0.25).length, 500, 'timer jitter must not accumulate media-clock drift');
-    assert(encoded.slice(1).every((value) => value === 0.25), 'silence must not interrupt queued real audio');
+    assert.strictEqual(pending.length, 0, 'only the browser should pace media playback');
+    assert.strictEqual(dropped, 0, 'regular UDP batches must not lose source frames');
+    assert.strictEqual(encoded.filter((value) => value === 0.25).length, 500);
+    assert(encoded.every((value) => value === 0.25), 'silence must not interrupt real audio');
+    assert.strictEqual(transport.getDiagnostics(testStream).unaccountedInputSamples, 0);
     time = 11140;
     transport.writeSilence([testStream]);
     assert.strictEqual(encoded.at(-1), 0, 'silence must resume when UDP really stops');
+    transport.closeStream(testStream);
+  }
+
+  // Reproduce an event-loop stall / burst larger than the former 200 ms queue.
+  // All frames must be encoded before writeInput returns, in original order.
+  for (const [sampleRate, channels] of [[8000, 1], [16000, 2]]) {
+    let time = 1000;
+    const encoded = [];
+    const testStream = { name: 'burst', sampleRate, channels };
+    const transport = createSharedOpus({
+      now: () => time,
+      setTimer: () => { throw new Error('input must not be paced with timers'); },
+      createEncoder: () => ({
+        encode: (frame) => { encoded.push(frame.readFloatLE(0)); return packet; },
+        close: () => {},
+      }),
+      sendWsBinary: () => true,
+    });
+    transport.attach(testStream, client('burst'));
+    const frameBytes = sampleRate / 50 * channels * 4;
+    const batch = Buffer.alloc(25 * frameBytes);
+    for (let frame = 0; frame < 25; frame += 1) {
+      for (let offset = 0; offset < frameBytes; offset += 4) batch.writeFloatLE(frame / 32, frame * frameBytes + offset);
+    }
+    transport.writeInput(testStream, batch);
+    assert.deepStrictEqual(encoded, Array.from({ length: 25 }, (_, i) => i / 32));
+    time += 300;
+    transport.writeInput(testStream, batch);
+    assert.strictEqual(encoded.length, 50, 'an input burst after a stall must not lose any frames');
+    let diagnostics = transport.getDiagnostics(testStream);
+    assert.strictEqual(diagnostics.inputSamples, sampleRate);
+    assert.strictEqual(diagnostics.encodedInputSamples, sampleRate);
+    assert.strictEqual(diagnostics.unaccountedInputSamples, 0);
+    assert.strictEqual(diagnostics.silenceFrames, 0);
+    // Retain an incomplete frame across a long input gap instead of losing it.
+    transport.writeInput(testStream, batch.subarray(0, frameBytes / 2));
+    time += 1000;
+    transport.writeSilence([testStream]);
+    transport.writeInput(testStream, batch.subarray(frameBytes / 2, frameBytes));
+    diagnostics = transport.getDiagnostics(testStream);
+    assert.strictEqual(diagnostics.pendingInputSamples, 0);
+    assert.strictEqual(diagnostics.encodedInputSamples, sampleRate + sampleRate / 50);
+    assert.strictEqual(diagnostics.unaccountedInputSamples, 0);
+    assert.strictEqual(diagnostics.silenceFrames, 1);
     transport.closeStream(testStream);
   }
 
@@ -290,6 +368,14 @@ async function main() {
   assert(ring.readFrame > firstReadFrame, 'resampler phase must persist across process blocks');
   assert(Math.abs(ring.lastCorrection) <= 0.004, 'drift correction must remain bounded');
   assert(output.every((sample) => Math.abs(sample) < 0.00001), 'stereo downmix must preserve channel alignment');
+  assert.strictEqual(ring.diagnostics().receivedFrames, 160);
+  assert.strictEqual(ring.diagnostics().renderedFrames, 256);
+  assert(ring.diagnostics().consumedFrames > 0);
+  assert.strictEqual(ring.diagnostics().droppedFrames, 0);
+  const overflowing = new MonoPcmRingBuffer({ inputSampleRate: 8000, targetLatencyMs: 20, highWaterMs: 100 });
+  overflowing.appendInterleaved(new Float32Array(1000), 1000);
+  assert.strictEqual(overflowing.diagnostics().receivedFrames, 1000);
+  assert.strictEqual(overflowing.diagnostics().droppedFrames, 840, 'worklet backlog trimming must be measurable');
 
   console.log('Realtime Opus transport tests passed');
 }

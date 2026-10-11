@@ -39,6 +39,7 @@ The script applies:
 - configurable volume
 - output format: 32-bit little-endian float PCM
 - real-time pacing based on sample rate, channels, and bytes per sample
+- 20 ms chunks by default, scheduled against a monotonic clock to avoid cumulative drift
 
 Basic example:
 
@@ -77,6 +78,7 @@ Available arguments:
 - `--port`: destination UDP port. Default: `8690`.
 - `--rate`: output sample rate. Default: `8000`.
 - `--channels`: output channel count. Default: `1`.
+- `--chunk-ms`: UDP chunk duration, from 5 to 1000 ms (subject to the UDP size limit). Default: `20`. Use `--chunk-ms 100` to simulate larger receiver batches.
 - `--volume`: ffmpeg volume multiplier. Default: `0.35`.
 - `--loop`: restart the file when it reaches the end.
 

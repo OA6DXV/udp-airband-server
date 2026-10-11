@@ -10,6 +10,10 @@ export class MonoPcmRingBuffer {
     this.droppedFrames = 0;
     this.maxBufferedFrames = 0;
     this.lastCorrection = 0;
+    this.receivedFrames = 0;
+    this.consumedFrames = 0;
+    this.renderedFrames = 0;
+    this.underrunDroppedFrames = 0;
     this.configured = false;
     if (options.inputSampleRate !== undefined) this.configure(options);
   }
@@ -64,6 +68,7 @@ export class MonoPcmRingBuffer {
       this.buffer[this.writeFrame % this.capacityFrames] = Number.isFinite(mono) ? clamp(mono, -1, 1) : 0;
       this.writeFrame += 1;
     }
+    this.receivedFrames += frames;
 
     const buffered = this.availableFrames();
     this.maxBufferedFrames = Math.max(this.maxBufferedFrames, Math.min(this.capacityFrames, Math.ceil(buffered)));
@@ -91,6 +96,7 @@ export class MonoPcmRingBuffer {
     const step = this.inputSampleRate / outputSampleRate * (1 + this.lastCorrection);
     for (let index = 0; index < output.length; index += 1) {
       if (this.writeFrame - this.readFrame < 2) {
+        this.underrunDroppedFrames += Math.max(0, this.writeFrame - this.readFrame);
         this.readFrame = this.writeFrame;
         this.started = false;
         this.lastCorrection = 0;
@@ -103,6 +109,8 @@ export class MonoPcmRingBuffer {
       const second = this.buffer[(baseFrame + 1) % this.capacityFrames];
       output[index] = first + (second - first) * fraction;
       this.readFrame += step;
+      this.consumedFrames += step;
+      this.renderedFrames += 1;
     }
   }
 
@@ -121,6 +129,10 @@ export class MonoPcmRingBuffer {
       underruns: this.underruns,
       overflows: this.overflows,
       droppedFrames: this.droppedFrames,
+      receivedFrames: this.receivedFrames,
+      consumedFrames: this.consumedFrames,
+      renderedFrames: this.renderedFrames,
+      underrunDroppedFrames: this.underrunDroppedFrames,
       correction: this.lastCorrection,
       started: Boolean(this.started),
     };

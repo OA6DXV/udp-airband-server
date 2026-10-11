@@ -133,6 +133,17 @@ let opusRealtimeWorkletDiagnostics = null;
 let opusRealtimeGeneration = 0;
 let opusRealtimeReconnectTimer;
 let opusRealtimeErrorReported = false;
+let opusRealtimeDeliveredFrames = 0;
+let opusRealtimeDeliveryDroppedFrames = 0;
+
+// Read-only local diagnostics: no listener IDs or telemetry leave the browser.
+window.getAudioDiagnostics = () => ({
+  mode: currentMode,
+  audioContextState: audioContext?.state || 'uninitialized',
+  decoder: opusRealtimeDecoder?.diagnostics() || null,
+  delivery: { deliveredFrames: opusRealtimeDeliveredFrames, droppedFrames: opusRealtimeDeliveryDroppedFrames },
+  playback: opusRealtimeWorkletDiagnostics ? { ...opusRealtimeWorkletDiagnostics } : null,
+});
 let audioStarted = false;
 let muted = false;
 let streamPaused = false;
@@ -677,6 +688,8 @@ function startOpusRealtime() {
   currentMode = 'opus-live';
   activeCompressedKind = 'opus-worklet';
   opusRealtimeErrorReported = false;
+  opusRealtimeDeliveredFrames = 0;
+  opusRealtimeDeliveryDroppedFrames = 0;
   const generation = ++opusRealtimeGeneration;
 
   Promise.all([ensureOpusRealtimeWorklet(), loadOpusRealtimeModule()])
@@ -764,8 +777,14 @@ async function ensurePcmWorkletConnected() {
 
 function deliverOpusRealtimePcm(samples, frames, sampleRate, channels) {
   const node = opusRealtimeWorkletNode;
-  if (!node || currentMode !== 'opus-live' || !audioContext || audioContext.state !== 'running') return;
-  if (!configureOpusRealtimeWorklet(sampleRate, channels)) return;
+  if (!node || currentMode !== 'opus-live' || !audioContext || audioContext.state !== 'running') {
+    opusRealtimeDeliveryDroppedFrames += frames;
+    return;
+  }
+  if (!configureOpusRealtimeWorklet(sampleRate, channels)) {
+    opusRealtimeDeliveryDroppedFrames += frames;
+    return;
+  }
   if (samples.length > 0) {
     latestWave = samples.slice(Math.max(0, samples.length - 4096));
     lastPeak = Math.max(lastPeak * 0.92, peakOf(samples));
@@ -773,7 +792,9 @@ function deliverOpusRealtimePcm(samples, frames, sampleRate, channels) {
   }
   try {
     node.port.postMessage({ type: 'samples', buffer: samples.buffer, frames, channels }, [samples.buffer]);
+    opusRealtimeDeliveredFrames += frames;
   } catch (error) {
+    opusRealtimeDeliveryDroppedFrames += frames;
     handleOpusRealtimeError(error, opusRealtimeGeneration);
   }
 }
