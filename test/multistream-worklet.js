@@ -118,6 +118,14 @@ async function main() {
   assert.equal(second.worklet, null, 'cancelled initialization must not revive playback');
   assert.equal(second.audioWs, null);
   assert.equal(second.started, false);
+  let rejectOldModule;
+  sandbox.loadWorkletModule = () => new Promise((resolve, reject) => { rejectOldModule = reject; });
+  second.paused = false;
+  const cancelledFailure = second.startAudio();
+  second.pause();
+  rejectOldModule(new Error('Old initialization failed after cancellation'));
+  await cancelledFailure;
+  assert.equal(second.playbackError, '', 'cancelled initialization errors must be ignored');
   sandbox.loadWorkletModule = async () => {};
   second.paused = false;
   second.config.opusRealtimeAvailable = false;

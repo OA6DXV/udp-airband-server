@@ -682,7 +682,9 @@ class MultiStreamPlayer {
       });
       this.updateLabels();
     } catch (error) {
-      if (generation === this.socketGeneration) this.handlePlaybackError(error);
+      // A cancelled codec switch must not report an old failure into the new player.
+      if (generation !== this.socketGeneration) return;
+      this.handlePlaybackError(error);
       throw error;
     } finally {
       if (generation === this.socketGeneration) this.starting = false;
