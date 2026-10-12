@@ -257,6 +257,12 @@ main {
   gap: 2px;
 }
 
+.order-controls {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+}
+
 .drag-handle {
   cursor: grab;
   touch-action: none;
@@ -271,8 +277,20 @@ main {
   font-size: 16px;
 }
 
+.order-heading,
 .order-cell {
-  width: 118px;
+  width: 64px;
+}
+
+.order-heading {
+  padding-left: 8px;
+  padding-right: 8px;
+  text-align: left;
+}
+
+.order-cell {
+  padding-left: 8px;
+  padding-right: 8px;
   text-align: center;
 }
 
@@ -478,6 +496,12 @@ td {
 th:first-child,
 td:first-child {
   padding-left: 20px;
+}
+
+th.order-heading,
+td.order-cell {
+  padding-left: 8px;
+  padding-right: 8px;
 }
 
 th:last-child,
@@ -803,6 +827,10 @@ dialog::backdrop {
     gap: 10px;
     padding: 5px 0;
     border: 0;
+  }
+
+  td.order-cell {
+    width: auto;
   }
 
   td::before {
