@@ -4,6 +4,7 @@
 
 ### English
 
+- Excluded direct loopback RAW test relays from global and per-stream listener metrics, including legacy opus-mirror clients, while preserving their audio delivery.
 - Fixed phantom connected users by acknowledging WebSocket close frames, cleaning up each connection once, and checking protocol pings every 15 seconds with a 45-second response timeout.
 - Fixed user history sampling during continuous activity so every minute retains its own sample, and record zero users at process startup.
 - Removed server-side realtime Opus pacing and its 200 ms discard queue; complete input frames are encoded and sent on arrival, with incomplete samples preserved across UDP gaps.
@@ -19,6 +20,7 @@
 
 ### Espanol
 
+- Se excluyeron los puentes RAW locales de prueba de los contadores globales y por stream, incluidos clientes opus-mirror heredados, manteniendo su entrega de audio.
 - Se corrigieron usuarios fantasma: se responden los cierres WebSocket, cada conexion se limpia una sola vez y se comprueba su estado con pings cada 15 segundos y 45 segundos para responder.
 - Se corrigio el muestreo del historial con actividad continua para conservar una muestra por minuto y se registra cero usuarios al iniciar el proceso.
 - Se elimino la temporizacion Opus del servidor y su cola de descarte de 200 ms; los frames completos se codifican y envian al llegar y las muestras incompletas se conservan entre pausas UDP.

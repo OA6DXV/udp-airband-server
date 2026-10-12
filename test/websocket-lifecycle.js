@@ -8,6 +8,22 @@ const path = require('path');
 const { attachWebSocketLifecycle } = require('../lib/websocket');
 const { createUserHistory } = require('../lib/user-history');
 const { createStorage } = require('../lib/storage');
+const { isInternalAudioRelay } = require('../lib/clients');
+
+// Local test bridges do not represent listeners. Public/proxied connections
+// cannot hide from the count by copying a bridge ID or query parameter.
+{
+  const local = { remoteAddress: '127.0.0.1' };
+  const url = new URL('ws://localhost/test/audio');
+  assert(isInternalAudioRelay({ headers: {} }, local, 'opus-mirror-test', url));
+  assert(!isInternalAudioRelay({ headers: {} }, local, 'browser-client', url));
+  url.searchParams.set('internal', '1');
+  assert(isInternalAudioRelay({ headers: {} }, local, 'local-relay', url));
+  assert(!isInternalAudioRelay({ headers: {} }, { remoteAddress: '192.0.2.10' }, 'opus-mirror-test', url));
+  for (const header of ['forwarded', 'x-forwarded-for', 'x-real-ip', 'cf-connecting-ip', 'x-forwarded-host', 'x-forwarded-proto']) {
+    assert(!isInternalAudioRelay({ headers: { [header]: '127.0.0.1' } }, local, 'opus-mirror-test', url));
+  }
+}
 
 function clientFrame(opcode, payload = Buffer.alloc(0)) {
   const mask = Buffer.from([17, 34, 51, 68]);

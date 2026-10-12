@@ -11,7 +11,7 @@ const { spawnSync } = require('child_process');
 
 const { ensureAdminSecrets } = require('./lib/admin-secrets');
 const { createProxyTrust, resolveRequestContext } = require('./lib/proxy-trust');
-const { normalizeClientId } = require('./lib/clients');
+const { normalizeClientId, isInternalAudioRelay } = require('./lib/clients');
 const {
   ensureServerConfigFromTemplateWithTemp,
   getSetting,
@@ -372,7 +372,7 @@ function handleUdpMessage(stream, msg) {
       continue;
     }
     sendWsBinary(client, msg);
-    addListenerBytes(stream, clientId, 'raw', msg.length);
+    if (!client.internalAudioRelay) addListenerBytes(stream, clientId, 'raw', msg.length);
   }
 
   compressed.writeStreamInput(stream, msg);
@@ -480,6 +480,7 @@ function attachUpgradeHandler(server) {
     }
 
     const clientId = normalizeClientId(requestUrl.searchParams.get('clientId'), crypto);
+    socket.internalAudioRelay = socketType === 'audio' && isInternalAudioRelay(req, socket, clientId, requestUrl);
     let connectionLogMode = socketType === 'audio' ? 'raw' : socketType;
     if (socketType === 'control') {
       const monitorOnly = requestUrl.searchParams.get('monitor') === '1';
@@ -494,8 +495,10 @@ function attachUpgradeHandler(server) {
       recordClientActivity('connected', stream.name, socketType, clientId, remoteAddress);
     } else {
       stream.rawClients.set(socket, clientId);
-      addListenerMode(stream, clientId, 'raw');
-      recordClientActivity('connected', stream.name, 'raw', clientId, remoteAddress);
+      if (!socket.internalAudioRelay) {
+        addListenerMode(stream, clientId, 'raw');
+        recordClientActivity('connected', stream.name, 'raw', clientId, remoteAddress);
+      }
     }
 
     socket.on('error', (err) => {
@@ -510,7 +513,7 @@ function attachUpgradeHandler(server) {
     attachWebSocketLifecycle(socket, {
       head,
       onDisconnect: () => {
-        recordClientActivity('disconnected', stream.name, connectionLogMode, clientId, remoteAddress);
+        if (!socket.internalAudioRelay) recordClientActivity('disconnected', stream.name, connectionLogMode, clientId, remoteAddress);
         removeWsClient(stream, socket);
       },
     });

@@ -74,8 +74,8 @@ async function main() {
   child.stdout.on('data', (chunk) => { output += chunk; });
   child.stderr.on('data', (chunk) => { output += chunk; });
   const sockets = [];
-  async function connect(endpoint, frames) {
-    const socket = new WebSocket(`ws://127.0.0.1:${httpPort}/test/${endpoint}?clientId=${endpoint}-${sockets.length}`);
+  async function connect(endpoint, frames, clientId = `${endpoint}-${sockets.length}`) {
+    const socket = new WebSocket(`ws://127.0.0.1:${httpPort}/test/${endpoint}?clientId=${clientId}`);
     sockets.push(socket);
     socket.binaryType = 'arraybuffer';
     socket.addEventListener('message', (event) => frames.push(typeof event.data === 'string' ? JSON.parse(event.data) : Buffer.from(event.data)));
@@ -101,7 +101,8 @@ async function main() {
       rejected.addEventListener('open', () => { clearTimeout(timeout); reject(new Error('AAC route is still available')); }, { once: true });
       rejected.addEventListener('error', () => { clearTimeout(timeout); resolve(); }, { once: true });
     });
-    const frames = [], raw = [], normal = [], secondNormal = [], configs = [];
+    const frames = [], raw = [], normal = [], secondNormal = [], configs = [], mirrorFrames = [];
+    const mirror = await connect('audio', mirrorFrames, 'opus-mirror-test');
     await connect('control', configs);
     await Promise.all([connect('opus-live', frames), connect('audio', raw), connect('adpcm', normal), connect('adpcm', secondNormal)]);
     const configMessage = configs.find(message => message.type === 'config');
@@ -122,12 +123,15 @@ async function main() {
     }
     await new Promise((resolve, reject) => udp.send(pcm, udpPort, '127.0.0.1', (error) => error ? reject(error) : resolve()));
     const deadline = Date.now() + 3000;
-    while (Date.now() < deadline && (!raw.length || !normal.length || !secondNormal.length || !frames.some((frame) => frame.subarray(0, 4).toString() === 'OPU1' && frame.length > 18))) {
+    while (Date.now() < deadline && (!mirrorFrames.length || !raw.length || !normal.length || !secondNormal.length || !frames.some((frame) => frame.subarray(0, 4).toString() === 'OPU1' && frame.length > 18))) {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     assert(frames.some((frame) => frame.subarray(0, 4).toString() === 'OPC1'), 'Opus config frame was not delivered');
     assert(frames.some((frame) => frame.subarray(0, 4).toString() === 'OPU1' && frame.length > 18), 'UDP input was not encoded to Opus');
     assert.deepStrictEqual(raw[0], pcm, 'RAW must deliver the original UDP payload');
+    assert.deepStrictEqual(mirrorFrames[0], pcm, 'internal mirrors must still receive unchanged real stream audio');
+    assert(!/client_connected client=opus-mirror-test/.test(output), 'internal mirrors must not inflate the global user count');
+    assert.strictEqual(Math.max(...Array.from(output.matchAll(/activeClients=(\d+)/g), match => Number(match[1]))), 5, 'only the five real browser clients must be counted');
     assert.deepStrictEqual(normal[0], secondNormal[0], 'Normal listeners must receive identical shared frames');
     const { decodeAdpcmFrame } = await import('../assets/adpcm-decoder.mjs');
     const decoded = decodeAdpcmFrame(Uint8Array.from(normal[0]).buffer);
@@ -135,13 +139,14 @@ async function main() {
     assert(decoded.samples.some(value => Math.abs(value) > .1), 'Normal must contain decoded audio');
     assert(output.includes('2.0-preview'), 'Server did not report the preview version');
     assert(!output.includes('ffmpeg_start'), 'Opus playback must not spawn FFmpeg');
-    for (const socket of sockets) if (socket.readyState === WebSocket.OPEN) socket.close();
+    for (const socket of sockets) if (socket !== mirror && socket.readyState === WebSocket.OPEN) socket.close();
     const closeDeadline = Date.now() + 5000;
     while (Date.now() < closeDeadline && !/client_disconnected[^\n]*activeClients=0/.test(output)) {
       await new Promise(resolve => setTimeout(resolve, 25));
     }
     assert(/client_disconnected[^\n]*activeClients=0/.test(output), 'all browser close handshakes must release the global user count');
-    assert(sockets.every(socket => socket.readyState === WebSocket.CLOSED), 'browser close must complete without waiting for a TCP timeout');
+    assert(sockets.filter(socket => socket !== mirror).every(socket => socket.readyState === WebSocket.CLOSED), 'browser close must complete without waiting for a TCP timeout');
+    assert.strictEqual(mirror.readyState, WebSocket.OPEN, 'an internal relay may remain connected while user count is zero');
     const { DatabaseSync } = require('node:sqlite');
     const database = new DatabaseSync(path.join(directory, 'data', 'localdb.sqlite'), { readOnly: true });
     try {

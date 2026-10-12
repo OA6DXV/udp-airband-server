@@ -460,6 +460,8 @@ All profiles require AudioWorklet and HTTPS or localhost. low data also requires
 
 Audio requires no server.conf or command-line settings. Old [compressed] and [audio] sections are ignored; startup does not add or modify their parameters. AAC, HLS, Ogg, and their playback fallbacks have been removed. The server requires the native module and libopus to provide all three profiles.
 
+Local RAW relays connected directly over loopback with `?internal=1` are excluded from global user counts, per-stream listener counts, and user history. Legacy local `opus-mirror-*` client IDs receive the same treatment. Public or reverse-proxied requests are always counted, even if they use those identifiers. Relays continue receiving the original audio.
+
 One Opus encoder is shared by all listeners of a frequency and remains alive for 10 seconds after the last listener leaves. Complete 20 ms frames are encoded and sent immediately on UDP arrival; the AudioWorklet controls playback timing. The startup buffer remains 100 ms.
 
 Normal broadcasts identical ADPCM frames to its listeners and sends no audio during UDP gaps. Each frame includes decoder state so playback can resume after silence.
