@@ -32,7 +32,7 @@ const {
 } = require('./lib/listeners');
 const { createLogger } = require('./lib/logger');
 const { DEFAULT_STREAMS, loadStreams, loadStreamsFromConfig, renderMultiStreamPage, renderStreamList, validateStreams } = require('./lib/streams');
-const { acceptWebSocket, sendWsBinary, sendWsJson } = require('./lib/websocket');
+const { acceptWebSocket, attachWebSocketLifecycle, sendWsBinary, sendWsJson } = require('./lib/websocket');
 const { createCompressedManager } = require('./lib/compressed');
 const { ADPCM_FRAME_MS, OPUS_FRAME_MS, OPUS_BITRATE_8K, OPUS_BITRATE_16K, WORKLET_TARGET_LATENCY_MS } = require('./lib/audio-profiles');
 const { createGeoService } = require('./lib/geo-service');
@@ -213,6 +213,7 @@ const clientLifecycleLog = createClientLifecycleLog(
   (remote) => geoService.observe(remote),
   (remote) => geoService.safeAddress(remote),
 );
+userHistory.record(0);
 
 if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) {
   fatal('--http-port must be a valid port');
@@ -446,7 +447,7 @@ function handleHttpRequest(req, res) {
 }
 
 function attachUpgradeHandler(server) {
-  server.on('upgrade', (req, socket) => {
+  server.on('upgrade', (req, socket, head) => {
     const remoteAddress = getRemoteAddress(req, socket);
     if (typeof socket.setNoDelay === 'function') socket.setNoDelay(true);
     const requestUrl = new URL(req.url, `${socket.encrypted ? 'https' : 'http'}://${req.headers.host || 'localhost'}`);
@@ -506,11 +507,13 @@ function attachUpgradeHandler(server) {
       }
       removeWsClient(stream, socket);
     });
-    socket.on('close', () => {
-      recordClientActivity('disconnected', stream.name, connectionLogMode, clientId, remoteAddress);
-      removeWsClient(stream, socket);
+    attachWebSocketLifecycle(socket, {
+      head,
+      onDisconnect: () => {
+        recordClientActivity('disconnected', stream.name, connectionLogMode, clientId, remoteAddress);
+        removeWsClient(stream, socket);
+      },
     });
-    socket.on('data', () => {});
   });
 }
 

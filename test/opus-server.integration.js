@@ -135,6 +135,20 @@ async function main() {
     assert(decoded.samples.some(value => Math.abs(value) > .1), 'Normal must contain decoded audio');
     assert(output.includes('2.0-preview'), 'Server did not report the preview version');
     assert(!output.includes('ffmpeg_start'), 'Opus playback must not spawn FFmpeg');
+    for (const socket of sockets) if (socket.readyState === WebSocket.OPEN) socket.close();
+    const closeDeadline = Date.now() + 5000;
+    while (Date.now() < closeDeadline && !/client_disconnected[^\n]*activeClients=0/.test(output)) {
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    assert(/client_disconnected[^\n]*activeClients=0/.test(output), 'all browser close handshakes must release the global user count');
+    assert(sockets.every(socket => socket.readyState === WebSocket.CLOSED), 'browser close must complete without waiting for a TCP timeout');
+    const { DatabaseSync } = require('node:sqlite');
+    const database = new DatabaseSync(path.join(directory, 'data', 'localdb.sqlite'), { readOnly: true });
+    try {
+      assert.strictEqual(database.prepare('SELECT count FROM user_history ORDER BY at DESC LIMIT 1').get().count, 0, 'history must return to zero after the last listener leaves');
+    } finally {
+      database.close();
+    }
     console.log('Fixed RAW, Normal and low data server integration tests passed');
   } catch (error) {
     error.message += `\nServer output: ${output.slice(-2500)}`;
