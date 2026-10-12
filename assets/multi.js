@@ -796,6 +796,10 @@ function localizeLastHeard(label) {
   if (language === 'es') {
     const seconds = label.match(/^(\d+)s ago$/);
     if (seconds) return `hace ${seconds[1]} s`;
+    const hours = label.match(/^(\d+)h ago$/);
+    if (hours) return `hace ${hours[1]} h`;
+    const days = label.match(/^(\d+)d ago$/);
+    if (days) return `hace ${days[1]} d`;
   }
   return label;
 }
