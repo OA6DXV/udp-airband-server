@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const { renderMultiStreamPage } = require('../lib/streams');
+const { renderMultiStreamPage, renderStreamList } = require('../lib/streams');
 const single = fs.readFileSync(path.join(__dirname, '../assets/app.js'), 'utf8');
 const multi = fs.readFileSync(path.join(__dirname, '../assets/multi.js'), 'utf8');
 for (const source of [single, multi]) {
@@ -39,6 +39,33 @@ assert.equal(mixedPlayers[0].mode, 'opus');
 assert.equal(mixedPlayers[0].stops, 1, 'global Normal must update independently changed streams even when the last global choice was Normal');
 assert.equal(mixedPlayers[1].stops, 0, 'unchanged streams must not restart');
 assert.equal(starts, 1);
+const sectionedList = renderStreamList([
+  { name: 'cuz-twr', label: 'Cusco TWR', sampleRate: 8000, channels: 1, sectionId: 'cusco' },
+  { name: 'cuz-gnd', label: 'Cusco GND', sampleRate: 8000, channels: 1, sectionId: 'cusco' },
+], { basePath: '/development/', sections: [{ id: 'cusco', name: 'Cusco' }] });
+assert(sectionedList.includes('<legend><button class="section-multistream"'), 'section title should be a multistream button');
+assert(sectionedList.includes('data-section-streams="[&quot;cuz-twr&quot;,&quot;cuz-gnd&quot;]"'), 'section button should include all its streams in display order');
+assert(sectionedList.includes('<svg class="section-play-icon" aria-hidden="true"'), 'section play icon should be decorative for accessibility');
+assert(sectionedList.includes("location.href = new URL('multi?streams=' + query, document.baseURI).href"), 'section button should use the base path when opening multistream');
+assert(sectionedList.includes("startSectionMulti: 'Iniciar multistream con todos los streams de esta sección'"), 'section button accessible label should be localized');
+const sectionClickSetup = sectionedList.match(/sectionMultiButtons\.forEach\(\(button\) => \{[\s\S]*?\n    \}\);/)?.[0];
+assert.ok(sectionClickSetup, 'section multistream click handler should exist');
+let sectionClickHandler;
+const sectionButton = {
+  dataset: { sectionStreams: '["cuz-twr","cuz-gnd"]' },
+  addEventListener: (event, handler) => { if (event === 'click') sectionClickHandler = handler; },
+};
+const sectionContext = vm.createContext({
+  button: sectionButton,
+  sectionMultiButtons: [sectionButton],
+  location: { href: '' },
+  document: { baseURI: 'https://liveatc.example/development/' },
+  URL,
+  encodeURIComponent,
+});
+vm.runInContext(sectionClickSetup, sectionContext);
+sectionClickHandler();
+assert.equal(sectionContext.location.href, 'https://liveatc.example/development/multi?streams=cuz-twr,cuz-gnd');
 const setup = single.match(/function updateBrowserBandwidth\(\) \{[\s\S]*?\n\}/)[0];
 let now = 1000;
 const context = vm.createContext({
