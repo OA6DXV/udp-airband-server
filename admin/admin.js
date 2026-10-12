@@ -61,8 +61,6 @@ const translations = {
     noSection: 'No section',
     order: 'Order',
     dragToReorder: 'Drag to reorder',
-    moveUp: 'Move up',
-    moveDown: 'Move down',
     moveSectionUp: 'Move section up',
     moveSectionDown: 'Move section down',
     removeSection: 'Remove section',
@@ -148,8 +146,6 @@ const translations = {
     noSection: 'Sin sección',
     order: 'Orden',
     dragToReorder: 'Arrastrar para reordenar',
-    moveUp: 'Subir',
-    moveDown: 'Bajar',
     moveSectionUp: 'Subir sección',
     moveSectionDown: 'Bajar sección',
     removeSection: 'Eliminar sección',
@@ -255,7 +251,6 @@ addSectionButton.addEventListener('click', () => {
   row.querySelector('[name="sectionName"]').focus();
   markDirty();
 });
-rowsEl.addEventListener('click', handleStreamOrderClick);
 rowsEl.addEventListener('dragstart', handleStreamDragStart);
 rowsEl.addEventListener('dragover', handleStreamDragOver);
 rowsEl.addEventListener('drop', (event) => {
@@ -369,7 +364,6 @@ function appendRow(stream, options = {}) {
   applyTranslations(row);
   if (options.position === 'start') rowsEl.prepend(row);
   else rowsEl.appendChild(row);
-  updateStreamOrderControls();
   return row;
 }
 
@@ -444,18 +438,6 @@ function updateSectionOrderControls() {
   });
 }
 
-function handleStreamOrderClick(event) {
-  const button = event.target.closest('[data-move-stream]');
-  if (!button) return;
-  const row = button.closest('tr');
-  const direction = Number(button.dataset.moveStream);
-  const sibling = direction < 0 ? row.previousElementSibling : row.nextElementSibling;
-  if (!sibling) return;
-  rowsEl.insertBefore(direction < 0 ? row : sibling, direction < 0 ? sibling : row);
-  updateStreamOrderControls();
-  markDirty();
-}
-
 function handleStreamDragStart(event) {
   if (!event.target.closest('.drag-handle')) {
     event.preventDefault();
@@ -480,16 +462,7 @@ function handleStreamDragEnd() {
   if (!draggingRow) return;
   draggingRow.classList.remove('dragging');
   draggingRow = null;
-  updateStreamOrderControls();
   markDirty();
-}
-
-function updateStreamOrderControls() {
-  const rows = Array.from(rowsEl.children);
-  rows.forEach((row, index) => {
-    row.querySelector('[data-move-stream="-1"]').disabled = index === 0;
-    row.querySelector('[data-move-stream="1"]').disabled = index === rows.length - 1;
-  });
 }
 
 function removePendingStream(event) {
