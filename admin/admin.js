@@ -26,7 +26,6 @@ const serverStatusEl = document.getElementById('serverStatus');
 const versionEl = document.getElementById('version');
 const languageSelect = document.getElementById('languageSelect');
 const chart = document.getElementById('historyChart');
-const chartEmpty = document.getElementById('chartEmpty');
 const logoutButton = document.getElementById('logoutButton');
 
 const ONLINE_REFRESH_MS = 15000;
@@ -47,8 +46,8 @@ const translations = {
     connectedUsers: 'Connected users',
     historyDescription: 'Unique clients during the last 12 hours',
     historyAria: 'Connected user history',
-    openUsersDetails: 'Open connected users details',
-    collectingHistory: 'Collecting history...',
+    openGeo: 'Open listener geography map',
+    geo: 'Geo',
     twelveHoursAgo: '12 hours ago',
     now: 'Now',
     streams: 'Streams',
@@ -132,8 +131,8 @@ const translations = {
     connectedUsers: 'Usuarios conectados',
     historyDescription: 'Clientes únicos durante las últimas 12 horas',
     historyAria: 'Historial de usuarios conectados',
-    openUsersDetails: 'Abrir detalle de usuarios conectados',
-    collectingHistory: 'Recopilando historial...',
+    openGeo: 'Abrir mapa geográfico de oyentes',
+    geo: 'Geo',
     twelveHoursAgo: 'Hace 12 horas',
     now: 'Ahora',
     streams: 'Streams',
@@ -870,7 +869,6 @@ function renderChart(points) {
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   context.clearRect(0, 0, rect.width, rect.height);
 
-  chartEmpty.hidden = points.length > 0;
   const peak = points.reduce((max, point) => Math.max(max, point.count), 0);
 
   const padding = { top: 12, right: 12, bottom: 12, left: 32 };

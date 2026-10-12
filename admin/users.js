@@ -135,6 +135,9 @@ function drawChart() {
     country.listeners,
     buildTooltip(country),
   ]));
+  geoStats.countries.forEach((country, index) => {
+    data.setFormattedValue(index, 0, `${country.country} | ${country.listeners}`);
+  });
 
   chart = new google.visualization.GeoChart(geoChartElement);
   google.visualization.events.addListener(chart, 'select', handleSelection);
@@ -212,11 +215,10 @@ function scheduleLayoutRedraw() {
 }
 
 function buildTooltip(country) {
-  const lines = [
-    `<strong>${escapeHtml(translate('listeners'))}: ${country.listeners}</strong>`,
-    ...country.topCities.map((city) => `${escapeHtml(city.city)}: ${city.listeners}`),
-  ];
-  return `<div class="geo-tooltip">${lines.join('')}</div>`;
+  const cities = country.topCities
+    .map((city) => `<div>${escapeHtml(city.city)}: ${city.listeners}</div>`)
+    .join('');
+  return `<div class="geo-tooltip">${cities}</div>`;
 }
 
 function applyLanguage() {

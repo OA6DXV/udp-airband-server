@@ -53,11 +53,10 @@
           <h2 data-i18n="connectedUsers">Connected users</h2>
           <p data-i18n="historyDescription">Unique clients during the last 12 hours</p>
         </div>
-        <a class="panel-nav" href="/users" aria-label="Open connected users details" data-i18n-aria="openUsersDetails">&gt;</a>
+        <a class="panel-nav geo-nav" href="/users" aria-label="Open listener geography map" data-i18n-aria="openGeo"><span data-i18n="geo">Geo</span><span class="geo-nav-icon" aria-hidden="true">🌐</span></a>
       </div>
       <div class="chart-wrap">
         <canvas id="historyChart" aria-label="Connected user history" data-i18n-aria="historyAria"></canvas>
-        <div id="chartEmpty" class="chart-empty" data-i18n="collectingHistory">Collecting history...</div>
       </div>
       <div class="chart-axis"><span data-i18n="twelveHoursAgo">12 hours ago</span><span data-i18n="now">Now</span></div>
     </section>
