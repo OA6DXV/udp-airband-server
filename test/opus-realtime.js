@@ -31,7 +31,7 @@ async function main() {
   assert(prefixedMulti.includes('href="assets/style.css"'));
   assert(prefixedMulti.includes('data-mode="raw">RAW</button>'));
   assert(prefixedMulti.includes('data-mode="adpcm">Normal</button>'));
-  assert(prefixedMulti.includes('data-mode="opus">low data</button>'));
+  assert(prefixedMulti.includes('data-mode="opus">Low Data</button>'));
 
   const head = makeOpusHead();
   const packet = Buffer.from([0xf8, 0xff, 0xfe]);

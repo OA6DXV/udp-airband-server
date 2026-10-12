@@ -31,7 +31,8 @@ const {
   removeListenerMode,
 } = require('./lib/listeners');
 const { createLogger } = require('./lib/logger');
-const { DEFAULT_STREAMS, loadStreams, loadStreamsFromConfig, renderMultiStreamPage, renderStreamList, validateStreams } = require('./lib/streams');
+const { DEFAULT_STREAMS, loadStreamConfig, loadStreamsFromConfig, renderMultiStreamPage, renderStreamList, validateStreams } = require('./lib/streams');
+const { normalizeSections } = require('./lib/stream-layout-store');
 const { acceptWebSocket, attachWebSocketLifecycle, sendWsBinary, sendWsJson } = require('./lib/websocket');
 const { createCompressedManager } = require('./lib/compressed');
 const { ADPCM_FRAME_MS, OPUS_FRAME_MS, OPUS_BITRATE_8K, OPUS_BITRATE_16K, WORKLET_TARGET_LATENCY_MS } = require('./lib/audio-profiles');
@@ -199,7 +200,7 @@ if (webAdminEnabled) {
 }
 const userHistory = storage.createUserHistory();
 const geoCache = storage.createGeoCache();
-const streamLayoutStore = storage.createStreamLayoutStore();
+let streamSections = [];
 const geoService = createGeoService({
   cache: geoCache,
   enabled: geoEnabled,
@@ -297,7 +298,9 @@ if (!streamsConfigExists) {
 
 let streams;
 try {
-  streams = loadStreams({ configPath, defaultUdpHost, fs, path });
+  const configuration = loadStreamConfig({ configPath, defaultUdpHost, fs, path });
+  streams = configuration.streams;
+  streamSections = configuration.sections;
   validateStreams(streams);
 } catch (err) {
   fatal(err.message);
@@ -387,7 +390,7 @@ function handleHttpRequest(req, res) {
   }
 
   if (pathname === '/') {
-    const layout = streamLayoutStore.apply(streams);
+    const layout = { sections: streamSections, streams };
     sendHtml(res, renderStreamList(layout.streams, {
       basePath: appBasePath,
       sections: layout.sections,
@@ -396,7 +399,7 @@ function handleHttpRequest(req, res) {
     return;
   }
   if (pathname === '/multi') {
-    const layout = streamLayoutStore.apply(streams);
+    const layout = { sections: streamSections, streams };
     sendHtml(res, renderMultiStreamPage(layout.streams, { softwareVersion: SOFTWARE_VERSION, basePath: appBasePath }));
     return;
   }
@@ -636,7 +639,7 @@ async function startWebServers() {
       getGeoStats: () => aggregateGeoStats(geoCache.entries()),
       getState: getWebAdminState,
       getStreamConfigSnapshot: () => ({
-        sections: streamLayoutStore.snapshot().sections,
+        sections: streamSections,
         streams: getAdminStreams().map((stream) => ({ ...streamFileEntry(stream), sectionId: stream.sectionId })),
       }),
       host: webAdminHost,
@@ -664,7 +667,7 @@ async function startWebServers() {
   const adminStart = webAdmin ? webAdmin.start() : Promise.resolve();
 
   Promise.all([publicStart, adminStart]).then(() => {
-    logger.plain('info', 'Audio profiles: RAW / Normal (ADPCM) / low data (Opus), via AudioWorklet');
+    logger.plain('info', 'Audio profiles: RAW / Normal (ADPCM) / Low Data (Opus), via AudioWorklet');
     if (webAdmin) {
       if (webAdminConfigOverridden) {
         logger.info('webadmin_config_override', {
@@ -716,7 +719,7 @@ async function startWebServers() {
 let streamUpdateQueue = Promise.resolve();
 
 function replaceStreamsFromAdmin(payload) {
-  const operation = streamUpdateQueue.then(() => applyStreamReplacement(payload, { persistLayout: true }));
+  const operation = streamUpdateQueue.then(() => applyStreamReplacement(payload));
   streamUpdateQueue = operation.catch(() => {});
   return operation;
 }
@@ -737,9 +740,11 @@ function reloadStreamsFromDisk() {
   return operation;
 }
 
-async function applyStreamReplacement(payload, options = {}) {
+async function applyStreamReplacement(payload) {
   let candidateStreams;
+  let candidateSections;
   try {
+    candidateSections = normalizeSections(payload.sections === undefined ? [] : payload.sections);
     candidateStreams = loadStreamsFromConfig(payload, {
       configPath,
       defaultUdpHost,
@@ -751,63 +756,15 @@ async function applyStreamReplacement(payload, options = {}) {
     throw validationError;
   }
 
-  let previousLayout = null;
-  if (options.persistLayout) {
-    previousLayout = streamLayoutStore.snapshot();
-    const rawStreams = Array.isArray(payload && payload.streams) ? payload.streams : [];
-    const requestedByName = new Map(rawStreams.map((stream) => [String(stream && stream.name || '').trim(), stream]));
-    const previousByName = new Map(previousLayout.streams.map((stream) => [stream.streamName, stream]));
-    const sections = Array.isArray(payload && payload.sections) ? payload.sections : previousLayout.sections;
-    const layout = candidateStreams.map((stream) => {
-      const requested = requestedByName.get(stream.name);
-      const previous = previousByName.get(stream.name);
-      return {
-        streamName: stream.name,
-        sectionId: requested && requested.sectionId !== undefined
-          ? requested.sectionId
-          : previous ? previous.sectionId : '',
-      };
-    });
-    try {
-      streamLayoutStore.replace(sections, layout);
-    } catch (err) {
-      const validationError = new Error(err.message);
-      validationError.statusCode = 400;
-      throw validationError;
-    }
-  }
-
-  try {
-    return await applyValidatedStreamReplacement(candidateStreams);
-  } catch (err) {
-    if (previousLayout) {
-      try {
-        streamLayoutStore.restore(previousLayout);
-      } catch (rollbackError) {
-        logger.error('stream_layout_rollback_failed', { error: rollbackError.message });
-      }
-    }
-    throw err;
-  }
+  return applyValidatedStreamReplacement(candidateStreams, candidateSections);
 }
 
-async function applyValidatedStreamReplacement(candidateStreams) {
+async function applyValidatedStreamReplacement(candidateStreams, candidateSections) {
   const changeScope = classifyStreamChanges(streams, candidateStreams);
-  if (changeScope === 'none') {
-    const layout = streamLayoutStore.apply(streams);
-    return {
-      ok: true,
-      changeScope,
-      message: 'Stream order and sections saved.',
-      streams: layout.streams.map(adminStreamState),
-      sections: layout.sections,
-    };
-  }
 
   const resolvedConfigPath = path.resolve(configPath);
   const temporaryConfigPath = `${resolvedConfigPath}.${process.pid}.tmp`;
-  const serializedStreams = preserveConfigOrder(candidateStreams, streams);
-  const serializedConfig = `${JSON.stringify({ streams: serializedStreams.map(streamFileEntry) }, null, 2)}\n`;
+  const serializedConfig = `${JSON.stringify({ sections: candidateSections, streams: candidateStreams.map(streamFileEntry) }, null, 2)}\n`;
   try {
     fs.mkdirSync(path.dirname(resolvedConfigPath), { recursive: true });
     fs.writeFileSync(temporaryConfigPath, serializedConfig, { mode: 0o600 });
@@ -831,11 +788,14 @@ async function applyValidatedStreamReplacement(candidateStreams) {
     for (const candidate of candidateStreams) {
       const current = currentByName.get(candidate.name);
       current.label = candidate.label;
+      current.sectionId = candidate.sectionId;
       broadcastControlEvent(current, {
         type: 'streamUpdated',
         stream: publicStreamState(current),
       });
     }
+    streams = candidateStreams.map((candidate) => currentByName.get(candidate.name));
+    streamSections = candidateSections;
     logger.info('streams_reloaded', {
       count: streams.length,
       names: streams.map((stream) => stream.name).join(','),
@@ -846,7 +806,7 @@ async function applyValidatedStreamReplacement(candidateStreams) {
       changeScope,
       message: `${streams.length} stream${streams.length === 1 ? '' : 's'} updated without interrupting listeners.`,
       streams: getAdminStreams(),
-      sections: streamLayoutStore.snapshot().sections,
+      sections: streamSections,
     };
   }
 
@@ -881,6 +841,7 @@ async function applyValidatedStreamReplacement(candidateStreams) {
   notifyStructuralStreamChanges(previousStreams, candidateStreams);
   lastHeardStore.apply(candidateStreams);
   streams = candidateStreams;
+  streamSections = candidateSections;
   streamsByName.clear();
   for (const stream of streams) streamsByName.set(stream.name, stream);
 
@@ -895,7 +856,7 @@ async function applyValidatedStreamReplacement(candidateStreams) {
     changeScope,
     message: `${streams.length} stream${streams.length === 1 ? '' : 's'} applied without restarting the server.`,
     streams: getAdminStreams(),
-    sections: streamLayoutStore.snapshot().sections,
+    sections: streamSections,
   };
 }
 
@@ -909,17 +870,6 @@ function classifyStreamChanges(currentStreams, candidateStreams) {
     if (current.label !== candidate.label) labelsChanged = true;
   }
   return labelsChanged ? 'label' : 'none';
-}
-
-function preserveConfigOrder(candidateStreams, currentStreams) {
-  const currentOrder = new Map(currentStreams.map((stream, index) => [stream.name, index]));
-  return candidateStreams.map((stream, index) => ({ stream, index }))
-    .sort((left, right) => {
-      const leftOrder = currentOrder.has(left.stream.name) ? currentOrder.get(left.stream.name) : Number.MAX_SAFE_INTEGER;
-      const rightOrder = currentOrder.has(right.stream.name) ? currentOrder.get(right.stream.name) : Number.MAX_SAFE_INTEGER;
-      return leftOrder - rightOrder || left.index - right.index;
-    })
-    .map((entry) => entry.stream);
 }
 
 function closeUdpServers(items) {
@@ -1012,6 +962,7 @@ function streamFileEntry(stream) {
     name: stream.name,
     label: stream.label,
     udpHost: stream.udpHost,
+    ...(stream.sectionId ? { sectionId: stream.sectionId } : {}),
     udpPort: stream.udpPort,
     sampleRate: stream.sampleRate,
     channels: stream.channels,
@@ -1029,11 +980,11 @@ function adminStreamState(stream) {
 }
 
 function getAdminStreams() {
-  return streamLayoutStore.apply(streams).streams.map(adminStreamState);
+  return streams.map(adminStreamState);
 }
 
 function getWebAdminState() {
-  const layout = streamLayoutStore.apply(streams);
+  const layout = { sections: streamSections, streams };
   return {
     version: SOFTWARE_VERSION,
     uptimeSeconds: Math.floor(process.uptime()),
@@ -1619,7 +1570,7 @@ TLS / HTTPS:
 Audio profiles:
   RAW                          Original float32 PCM.
   Normal                       IMA ADPCM (default), 40 ms frames.
-  low data                     Native Opus, 20 ms frames, 20/32 kb/s at 8/16 kHz.
+  Low Data                     Native Opus, 20 ms frames, 20/32 kb/s at 8/16 kHz.
   All profiles use AudioWorklet. Audio settings are fixed; no configuration is required.
 
 Logging:

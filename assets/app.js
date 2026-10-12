@@ -31,7 +31,7 @@ const ctx = canvas.getContext('2d');
 const translations = {
   en: {
     users: 'Users', gain: 'Gain', startAudio: 'Start Audio', mute: 'Mute', unmute: 'Unmute', buffered: 'Buffered', bandwidth: 'Bandwidth', lastHeardTime: 'Last Heard Time', mode: 'Mode', level: 'Level', localTime: 'Local Time', disconnected: 'Disconnected', waitingUdp: 'Waiting for UDP', connected: 'Connected', idle: 'Push to Reconnect', pushDisconnect: 'Push to disconnect', stopStream: 'Stop stream', returnHome: 'Click to return home', normalUnavailable: 'Normal unavailable', compressed: 'Normal', uncompressed: 'RAW', switchMode: 'Switch audio mode', never: 'never', now: 'Now',
-    audioUnavailable: 'Audio unavailable. Use HTTPS and a browser with AudioWorklet support.', opusLive: 'low data', opusLiveUnavailable: 'low data unavailable', modeUnavailable: 'Mode unavailable',
+    audioUnavailable: 'Audio unavailable. Use HTTPS and a browser with AudioWorklet support.', opusLive: 'Low Data', opusLiveUnavailable: 'Low Data unavailable', modeUnavailable: 'Mode unavailable',
     serverDisconnected: 'Connection to the server was lost. Reconnecting...',
     serverRestarted: 'The server restarted. This page reconnected; refresh if audio does not resume.',
     streamUnavailableTitle: 'Stream updated',
@@ -42,7 +42,7 @@ const translations = {
   },
   es: {
     users: 'Usuarios', gain: 'Ganancia', startAudio: 'Iniciar audio', mute: 'Silenciar', unmute: 'Activar audio', buffered: 'Buffer', bandwidth: 'Ancho de banda', lastHeardTime: 'Ultima transmision', mode: 'Modo', level: 'Nivel', localTime: 'Hora local', disconnected: 'Desconectado', waitingUdp: 'Esperando UDP', connected: 'Conectado', idle: 'Presiona para reconectar', pushDisconnect: 'Presiona para desconectar', stopStream: 'Detener stream', returnHome: 'Click para volver a la pagina principal', normalUnavailable: 'Normal no disponible', compressed: 'Normal', uncompressed: 'RAW', switchMode: 'Cambiar modo de audio', never: 'nunca', now: 'Ahora',
-    audioUnavailable: 'Audio no disponible. Usa HTTPS y un navegador compatible con AudioWorklet.', opusLive: 'low data', opusLiveUnavailable: 'low data no disponible', modeUnavailable: 'Modo no disponible',
+    audioUnavailable: 'Audio no disponible. Usa HTTPS y un navegador compatible con AudioWorklet.', opusLive: 'Internet lento', opusLiveUnavailable: 'Internet lento no disponible', modeUnavailable: 'Modo no disponible',
     serverDisconnected: 'Se perdio la conexion con el servidor. Reconectando...',
     serverRestarted: 'El servidor se reinicio. Esta pagina se reconecto; actualiza si el audio no vuelve.',
     streamUnavailableTitle: 'Stream actualizado',
@@ -309,7 +309,7 @@ function connectControlWebSocket() {
             opusRealtimeSupported = supported;
             updateModeButton();
             if (supported && audioStarted && currentMode !== preferredMode) startSelectedMode(preferredMode);
-            if (!supported && currentMode === 'opus-live') handlePlaybackError(new Error('low data unavailable'));
+            if (!supported && currentMode === 'opus-live') handlePlaybackError(new Error('Low Data unavailable'));
           });
         }
       } else if (message.type === 'streamUpdated') {
@@ -445,7 +445,7 @@ function startSelectedMode(mode = preferredMode) {
   browserBandwidthEl.textContent = 'Idle';
   if (mode === 'opus-live') {
     if (!isOpusRealtimeAvailable()) {
-      handlePlaybackError(new Error('low data unavailable'));
+      handlePlaybackError(new Error('Low Data unavailable'));
       return;
     }
     startOpusRealtime();

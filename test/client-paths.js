@@ -45,7 +45,7 @@ const multiTranslations = vm.runInNewContext(multiSource.match(/const translatio
 for (const language of ['en', 'es']) {
   assert.equal(multiTranslations[language].realTimeMode, 'RAW');
   assert.equal(multiTranslations[language].compressed, 'Normal');
-  assert.equal(multiTranslations[language].compatibleMode, 'low data');
+  assert.equal(multiTranslations[language].compatibleMode, language === 'es' ? 'Internet lento' : 'Low Data');
 }
 const multiRouteSetup = multiSource.match(/const configuredBasePath = [\s\S]*?(?=const allStreams =)/)?.[0];
 assert.ok(multiRouteSetup, 'multistream route setup must exist');

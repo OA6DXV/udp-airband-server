@@ -37,7 +37,7 @@ const translations = {
     connected: 'Connected', idle: 'Push to Reconnect', pushDisconnect: 'Push to disconnect', stopStream: 'Stop stream', lastHeard: 'Last Heard',
     mode: 'Mode', audio: 'Audio', startAudio: 'Start', mute: 'Mute', unmute: 'Unmute', compressed: 'Normal',
     uncompressed: 'RAW', streamName: 'Stream', level: 'Level', never: 'never', now: 'Now',
-    realTimeMode: 'RAW', compatibleMode: 'low data', accept: 'Accept',
+    realTimeMode: 'RAW', compatibleMode: 'Low Data', accept: 'Accept',
     globalModeTitle: 'Change mode for all streams:',
     welcomeTitle: 'Welcome to multistream mode',
     welcomeBody: 'Normal is used by default. You can change the audio mode for all streams using the global buttons, or choose it independently for each stream. Press Start Audio to begin playback.',
@@ -54,7 +54,7 @@ const translations = {
     connected: 'Conectado', idle: 'Presiona para reconectar', pushDisconnect: 'Presiona para desconectar', stopStream: 'Detener stream', lastHeard: 'Ultima transmision',
     mode: 'Modo', audio: 'Audio', startAudio: 'Iniciar', mute: 'Silenciar', unmute: 'Activar', compressed: 'Normal',
     uncompressed: 'RAW', streamName: 'Stream', level: 'Nivel', never: 'nunca', now: 'Ahora',
-    realTimeMode: 'RAW', compatibleMode: 'low data', accept: 'Aceptar',
+    realTimeMode: 'RAW', compatibleMode: 'Internet lento', accept: 'Aceptar',
     globalModeTitle: 'Cambiar modo a todos los streams:',
     welcomeTitle: 'Bienvenido al modo multistream',
     welcomeBody: 'Por defecto se utilizará Normal. Puedes cambiar el modo de audio con los botones globales o configurarlo de forma independiente para cada stream. Pulsa Iniciar audio para comenzar la reproducción.',
@@ -594,7 +594,7 @@ class MultiStreamPlayer {
       if (this.mode === 'opus') {
         module = await loadOpusModule();
         if (!this.config.opusRealtimeAvailable || !await module.supportsOpusAudioDecoder(window.AudioDecoder)) {
-          throw new Error('low data unavailable for this stream or browser; select RAW');
+          throw new Error('Low Data unavailable for this stream or browser; select RAW');
         }
       }
       if (generation !== this.socketGeneration || globalPaused || streamsUnavailable) return;

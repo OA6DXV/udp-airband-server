@@ -175,7 +175,7 @@ async function main() {
   sandbox.loadWorkletModule = async () => {};
   second.paused = false;
   second.config.opusRealtimeAvailable = false;
-  await assert.rejects(second.startAudio(), /low data unavailable/);
+  await assert.rejects(second.startAudio(), /Low Data unavailable/);
   assert.equal(second.audioWs, null, 'unsupported Opus must not fall back to AAC');
   console.log('Multistream AudioWorklet tests passed');
 }

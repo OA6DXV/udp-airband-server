@@ -381,7 +381,11 @@ ssh -L 8584:127.0.0.1:8584 usuario@IP_DEL_SERVIDOR
 
 Luego abre `http://127.0.0.1:8584/` en el navegador local. No expongas este puerto directamente a internet: la pagina puede agregar, editar y eliminar feeds, cambiar hosts y puertos UDP, sample rates, canales y solicitar el reinicio del servidor.
 
-Al aplicar cambios se valida la configuracion completa, se actualiza `streams.json` y se vuelven a enlazar las entradas UDP sin reiniciar Node. El boton amarillo **Reload streams** vuelve a leer los cambios hechos directamente en `streams.json` y los aplica con la misma validacion y restauracion ante errores. Los cambios que solo modifican nombres visibles conservan los listeners actuales. Los cambios de rutas o entradas de audio reconectan las sesiones de audio del navegador. Si no se puede abrir un puerto UDP nuevo, se restauran tanto la configuracion anterior en ejecucion como el archivo.
+Las secciones, asignaciones y orden se guardan en `streams.json`, no en SQLite. El orden de `sections` determina el orden de las secciones; el orden de `streams` determina el orden de los streams, y `sectionId` asigna cada stream a una seccion. Sin `sectionId`, queda sin agrupar. Web Admin edita el mismo archivo que puedes modificar manualmente. Los archivos sin `sections` siguen funcionando como listas sin agrupacion.
+
+Para actualizar desde una version que guardaba la organizacion en SQLite, exportala una sola vez antes de iniciar la nueva version: `node tools/export-stream-layout.js /ruta/streams.json /ruta/localdb.sqlite`. La herramienta crea un respaldo, conserva el orden y las asignaciones actuales y rechaza archivos que ya tienen `sections`. El servidor ignora la organizacion antigua de la DB.
+
+Al aplicar cambios se valida la configuracion completa y se actualiza `streams.json` de forma atomica. El boton amarillo **Reload streams** vuelve a leer los cambios hechos directamente en el archivo y los aplica con la misma validacion y restauracion ante errores. Los cambios de orden, secciones o nombres visibles conservan los listeners y encoders actuales. Los cambios de rutas o entradas de audio reconectan las sesiones de audio del navegador. Si no se puede abrir un puerto UDP nuevo, se restaura la configuracion anterior en ejecucion sin reemplazar el archivo con la propuesta fallida.
 
 La grafica de usuarios conectados utiliza el contador interno de clientes unicos del servidor en lugar de analizar logs. Las muestras de un minuto se conservan durante 12 horas en SQLite.
 
@@ -454,9 +458,9 @@ Los reproductores individual y multistream ofrecen tres perfiles permanentes:
 | --- | --- | --- |
 | RAW | PCM float32 original | Sample rate y canales de la entrada UDP |
 | Normal (predeterminado) | IMA ADPCM | Frames de hasta 40 ms; solo envia audio cuando llega UDP |
-| low data | Opus mono con libopus directo | 20 ms; 20 kb/s a 8 kHz y 32 kb/s a 16 kHz |
+| Internet lento | Opus mono con libopus directo | 20 ms; 20 kb/s a 8 kHz y 32 kb/s a 16 kHz |
 
-Los tres perfiles usan AudioWorklet y requieren HTTPS o localhost. low data tambien requiere WebCodecs con decodificacion Opus compatible. Si falta soporte del navegador, el reproductor muestra el error sin cambiar automaticamente de codec. Los controles de volumen y silencio son locales y conservan la misma interfaz al cambiar de perfil.
+Los tres perfiles usan AudioWorklet y requieren HTTPS o localhost. Internet lento tambien requiere WebCodecs con decodificacion Opus compatible. Si falta soporte del navegador, el reproductor muestra el error sin cambiar automaticamente de codec. Los controles de volumen y silencio son locales y conservan la misma interfaz al cambiar de perfil.
 
 No hay opciones de audio que configurar en server.conf ni en la linea de comandos. Las secciones antiguas [compressed] y [audio] se ignoran; el servidor no agrega ni modifica sus parametros. AAC, HLS, Ogg y sus fallbacks fueron retirados. El servidor requiere el modulo nativo y libopus para ofrecer los tres perfiles.
 

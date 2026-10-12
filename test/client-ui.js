@@ -3,7 +3,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const { renderMultiStreamPage, renderStreamList } = require('../lib/streams');
+const { loadStreamsFromConfig, renderMultiStreamPage, renderStreamList } = require('../lib/streams');
+const streamConfig = { name: 'test', udpPort: 9000, sampleRate: 8000, channels: 1 };
+assert.equal(loadStreamsFromConfig({ streams: [streamConfig] }, { defaultUdpHost: '0.0.0.0' })[0].sectionId, '');
+assert.equal(loadStreamsFromConfig({ sections: [{ id: 'receiver', name: 'Receiver' }], streams: [{ ...streamConfig, sectionId: 'receiver' }] }, {})[0].sectionId, 'receiver');
+assert.throws(() => loadStreamsFromConfig({ sections: [], streams: [{ ...streamConfig, sectionId: 'missing' }] }, {}), /Unknown section/);
+assert.throws(() => loadStreamsFromConfig({ sections: [{ id: 'a', name: 'Receiver' }, { id: 'a', name: 'Other' }], streams: [streamConfig] }, {}), /Duplicate section ID/);
 const single = fs.readFileSync(path.join(__dirname, '../assets/app.js'), 'utf8');
 const multi = fs.readFileSync(path.join(__dirname, '../assets/multi.js'), 'utf8');
 for (const source of [single, multi]) {
@@ -20,7 +25,7 @@ assert(html.includes('id="multiStartButton" class="multi-start-button" type="but
 assert(html.includes('data-i18n="globalModeTitle"'));
 assert(html.includes('data-mode="raw">RAW</button>'));
 assert(html.includes('data-mode="adpcm">Normal</button>'));
-assert(html.includes('data-mode="opus">low data</button>'));
+assert(html.includes('data-mode="opus">Low Data</button>'));
 assert(multi.includes("let globalMode = 'adpcm';"), 'multistream should default to Normal/ADPCM');
 assert(fs.readFileSync(path.join(__dirname, '../assets/app.js'), 'utf8').includes("let preferredMode = 'adpcm';"), 'single stream should default to Normal/ADPCM');
 assert(!multi.includes("button.classList.toggle('active'"));

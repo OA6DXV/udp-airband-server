@@ -111,7 +111,7 @@ Important fields:
 - `[logging].colors`: set to `true` to color terminal logs. Keep it `false` for normal `systemd` service logs.
 - `[ssl]`: optional HTTPS mode for the same `[web]` host and port. Enable it and provide valid `key` and `cert` paths when you want Node.js to serve TLS directly. If SSL is enabled but the certificate paths are missing or invalid, the server logs a warning and falls back to HTTP on the same port.
 
-Runtime metrics, Last Heard values, geolocation data, Web Admin authentication, and the stream-list order/section layout are stored in SQLite at `data/localdb.sqlite` by default. Feed definitions remain in `streams.json`. On Node.js 22.13+ (including Node 24), the built-in `node:sqlite` module is used automatically with no warning or extra package. Older Node.js installations must install the compatibility driver with `npm install better-sqlite3`.
+Runtime metrics, Last Heard values, geolocation data, and Web Admin authentication are stored in SQLite at `data/localdb.sqlite` by default. Feed definitions, order, and sections are stored in `streams.json`. On Node.js 22.13+ (including Node 24), the built-in `node:sqlite` module is used automatically with no warning or extra package. Older Node.js installations must install the compatibility driver with `npm install better-sqlite3`.
 
 If an upgrade detects legacy `data/user-history.json`, `data/last-heard.json`, or `data/geo-cache.json` files, startup prints a migration warning. Stop the server and run:
 
@@ -381,7 +381,9 @@ ssh -L 8584:127.0.0.1:8584 user@SERVER_IP
 
 Then open `http://127.0.0.1:8584/` in the local browser. Do not expose this port directly to the internet: the page can add, edit, and remove feeds, change UDP hosts, ports, sample rates, and channel counts, and request a server restart.
 
-The stream editor lets you drag streams to reorder them, assign them to named receiver sections, and change the section order. These layout preferences are saved in SQLite and appear on the public stream list; feed definitions remain in `streams.json`. Layout-only changes do not reload streams. Applying feed changes validates the complete configuration and updates `streams.json` without restarting Node. The yellow **Reload streams** button rereads direct edits to `streams.json` through the same validation and rollback path. Display-name-only changes preserve current listeners. Changes to routes or audio inputs reconnect affected browser audio sessions. If a new UDP port cannot be bound, the previous runtime configuration and file are restored.
+The stream editor lets you drag streams to reorder them, assign them to named receiver sections, and change the section order. The `sections` array defines section order, and the `streams` array defines stream order; optional `sectionId` assigns each stream to a section. Web Admin saves the same `streams.json` file that you can edit manually. Layout-only changes preserve listeners. Applying feed changes validates the complete configuration and updates `streams.json` without restarting Node. The yellow **Reload streams** button rereads direct edits to `streams.json` through the same validation and rollback path. Display-name-only changes preserve current listeners. Changes to routes or audio inputs reconnect affected browser audio sessions. If a new UDP port cannot be bound, the previous runtime configuration and file are restored.
+
+When upgrading from a release that stored layout in SQLite, export it once before starting the new release: `node tools/export-stream-layout.js /path/streams.json /path/localdb.sqlite`. The tool backs up the original file, preserves the existing order and assignments, and refuses to overwrite a file that already has `sections`. Old database layout rows are ignored by the server.
 
 The connected-user chart uses the server's internal unique client counter instead of parsing logs. One-minute samples are retained for 12 hours in SQLite.
 
@@ -454,9 +456,9 @@ Single-stream and multistream players offer three permanent profiles:
 | --- | --- | --- |
 | RAW | Original float32 PCM | UDP input sample rate and channel count |
 | Normal (default) | IMA ADPCM | Frames up to 40 ms; audio sent only when UDP arrives |
-| low data | Mono Opus encoded directly with libopus | 20 ms; 20 kb/s at 8 kHz and 32 kb/s at 16 kHz |
+| Low Data | Mono Opus encoded directly with libopus | 20 ms; 20 kb/s at 8 kHz and 32 kb/s at 16 kHz |
 
-All profiles require AudioWorklet and HTTPS or localhost. low data also requires compatible WebCodecs Opus decoding. Missing browser support is reported without automatically switching codecs. Volume and mute controls are local, with the same interface for every profile.
+All profiles require AudioWorklet and HTTPS or localhost. Low Data also requires compatible WebCodecs Opus decoding. Missing browser support is reported without automatically switching codecs. Volume and mute controls are local, with the same interface for every profile.
 
 Audio requires no server.conf or command-line settings. Old [compressed] and [audio] sections are ignored; startup does not add or modify their parameters. AAC, HLS, Ogg, and their playback fallbacks have been removed. The server requires the native module and libopus to provide all three profiles.
 

@@ -19,6 +19,7 @@ const { openSqliteDatabase } = require('../lib/sqlite-database');
 const { createStorage } = require('../lib/storage');
 const { findLegacyJsonFiles, migrateStorage } = require('../lib/storage-migration');
 const { createUserHistory } = require('../lib/user-history');
+const { exportStreamLayout } = require('../tools/export-stream-layout');
 
 const projectDir = path.resolve(__dirname, '..');
 const TEST_AUTH_ENV = {
@@ -40,6 +41,7 @@ async function run() {
   testUserHistoryWindow();
   testGeoStatsAggregation();
   testStorageMigration();
+  testLayoutExport();
   await testGeoPrivacyAndCache();
   const temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-admin-test-'));
   const publicPort = await reserveTcpPort();
@@ -213,6 +215,54 @@ async function run() {
     const liveUpdateMessage = await updatedPlayer.waitForMessage('streamUpdated');
     assert.strictEqual(liveUpdateMessage.stream.label, 'Reloaded from disk');
     assert.strictEqual(updatedPlayer.socket.destroyed, false);
+
+    const section = { id: 'receiver', name: 'Receiver' };
+    const layoutOnly = {
+      sections: [section],
+      streams: [{ ...updated.streams[0], label: 'Reloaded from disk', sectionId: section.id }],
+    };
+    const layoutResponse = await requestJson(adminPort, '/api/streams', {
+      method: 'PUT',
+      body: JSON.stringify(layoutOnly),
+    });
+    assert.strictEqual(layoutResponse.changeScope, 'none');
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(configPath, 'utf8')), layoutOnly);
+    assert.strictEqual(updatedPlayer.socket.destroyed, false);
+    assert.match((await request(publicPort, '/')).body, /Receiver/);
+    const invalidLayout = await request(adminPort, '/api/streams', {
+      method: 'PUT',
+      body: JSON.stringify({ ...layoutOnly, sections: [] }),
+    });
+    assert.strictEqual(invalidLayout.statusCode, 400);
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(configPath, 'utf8')), layoutOnly);
+
+    const secondStream = { ...updated.streams[0], name: 'second', udpPort: await reserveUdpPort() };
+    await requestJson(adminPort, '/api/streams', {
+      method: 'PUT',
+      body: JSON.stringify({ sections: [section], streams: [...layoutOnly.streams, secondStream] }),
+    });
+    const reorderPlayer = await openControlWebSocket(publicPort, '/test/control?clientId=reorder-player');
+    await reorderPlayer.waitForMessage('config');
+    const reordered = { sections: [section], streams: [secondStream, ...layoutOnly.streams] };
+    const reorderResponse = await requestJson(adminPort, '/api/streams', {
+      method: 'PUT', body: JSON.stringify(reordered),
+    });
+    assert.strictEqual(reorderResponse.changeScope, 'none');
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(configPath, 'utf8')), reordered);
+    assert.deepStrictEqual(reorderResponse.streams.map((stream) => stream.name), ['second', 'test']);
+    assert.strictEqual(reorderPlayer.socket.destroyed, false);
+    fs.writeFileSync(configPath, JSON.stringify({ sections: [{ ...section, name: 'Manual receiver' }], streams: [...layoutOnly.streams, secondStream] }));
+    const manualLayout = await requestJson(adminPort, '/api/streams/reload', { method: 'POST' });
+    assert.deepStrictEqual(manualLayout.streams.map((stream) => stream.name), ['test', 'second']);
+    assert.strictEqual(manualLayout.sections[0].name, 'Manual receiver');
+    assert.match((await request(publicPort, '/')).body, /Manual receiver/);
+    assert.strictEqual(reorderPlayer.socket.destroyed, false);
+    reorderPlayer.close();
+    await requestJson(adminPort, '/api/streams', { method: 'PUT', body: JSON.stringify(layoutOnly) });
+    const layoutDatabase = openSqliteDatabase({ filePath: runtimeDatabasePath, fs, path });
+    assert.strictEqual(layoutDatabase.db.prepare('SELECT COUNT(*) AS count FROM stream_layout').get().count, 0);
+    assert.strictEqual(layoutDatabase.db.prepare('SELECT COUNT(*) AS count FROM stream_sections').get().count, 0);
+    layoutDatabase.close();
     updatedPlayer.close();
 
     await bindUdp(occupiedSocket, occupiedUdpPort);
@@ -248,6 +298,30 @@ async function run() {
   }
 
   await testConfigEnabledStartup();
+}
+
+function testLayoutExport() {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'udp-airband-layout-export-'));
+  const configPath = path.join(directory, 'streams.json');
+  const databasePath = path.join(directory, 'localdb.sqlite');
+  try {
+    const first = { name: 'first', udpPort: 9001, sampleRate: 8000, channels: 1 };
+    const second = { ...first, name: 'second', udpPort: 9002 };
+    const original = JSON.stringify({ streams: [first, second] });
+    fs.writeFileSync(configPath, original);
+    const database = openSqliteDatabase({ filePath: databasePath, fs, path });
+    database.db.prepare('INSERT INTO stream_sections (id, name, sort_order) VALUES (?, ?, ?)').run('old-id', 'CuscoFeeder', 0);
+    database.db.prepare('INSERT INTO stream_layout (stream_name, sort_order, section_id) VALUES (?, ?, ?)').run('second', 0, 'old-id');
+    database.close();
+    const result = exportStreamLayout(configPath, databasePath);
+    assert.strictEqual(fs.readFileSync(result.backupPath, 'utf8'), original);
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(configPath, 'utf8')), {
+      sections: [{ id: 'cusco', name: 'CuscoFeeder' }], streams: [{ ...second, sectionId: 'cusco' }, first],
+    });
+    assert.throws(() => exportStreamLayout(configPath, databasePath), /already defines sections/);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 function testServerConfigSettingUpdate() {
@@ -535,8 +609,10 @@ async function testConfigEnabledStartup() {
   const serverConfigPath = path.join(temporaryDir, 'server.conf');
   const dataDir = path.join(temporaryDir, 'data');
   fs.writeFileSync(configPath, JSON.stringify({
+    sections: [{ id: 'file-section', name: 'Section from file' }],
     streams: [{
       name: 'config-test',
+      sectionId: 'file-section',
       label: 'Config enabled',
       udpHost: '127.0.0.1',
       udpPort,
@@ -562,6 +638,10 @@ async function testConfigEnabledStartup() {
 
   fs.mkdirSync(dataDir, { recursive: true });
   await createTestAdministrator(path.join(dataDir, 'runtime.sqlite'));
+  const staleLayoutDatabase = openSqliteDatabase({ filePath: path.join(dataDir, 'runtime.sqlite'), fs, path });
+  staleLayoutDatabase.db.prepare('INSERT INTO stream_sections (id, name, sort_order) VALUES (?, ?, ?)').run('stale', 'Stale DB section', 0);
+  staleLayoutDatabase.db.prepare('INSERT INTO stream_layout (stream_name, sort_order, section_id) VALUES (?, ?, ?)').run('config-test', 0, 'stale');
+  staleLayoutDatabase.close();
 
   const child = childProcess.spawn(process.execPath, [
     'server.js',
@@ -582,6 +662,11 @@ async function testConfigEnabledStartup() {
     await loginTestAdmin(adminPort);
     const state = await waitFor(() => requestJson(adminPort, '/api/state'));
     assert.strictEqual(state.streams[0].name, 'config-test');
+    assert.deepStrictEqual(state.sections, [{ id: 'file-section', name: 'Section from file' }]);
+    assert.strictEqual(state.streams[0].sectionId, 'file-section');
+    const publicPage = await request(publicPort, '/');
+    assert.match(publicPage.body, /Section from file/);
+    assert.doesNotMatch(publicPage.body, /Stale DB section/);
     await waitFor(() => output.includes('webAdminEnabled=true') && output.includes('storageBackend=sqlite'));
     assert.doesNotMatch(output, /webadmin_config_override/);
   } catch (err) {
