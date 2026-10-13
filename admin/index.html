@@ -159,13 +159,12 @@
 
   <template id="sectionRowTemplate">
     <div class="managed-section">
+      <button class="icon-button drag-handle section-drag-handle" type="button" title="Drag to reorder" aria-label="Drag to reorder" data-i18n-title="dragToReorder" data-i18n-aria="dragToReorder">⠿</button>
       <label class="section-name-control">
         <span data-i18n="sectionName">Section name</span>
         <input name="sectionName" required maxlength="80" autocomplete="off">
       </label>
       <div class="section-actions">
-        <button class="icon-button move-section" data-move-section="-1" type="button" title="Move section up" aria-label="Move section up" data-i18n-title="moveSectionUp" data-i18n-aria="moveSectionUp">↑</button>
-        <button class="icon-button move-section" data-move-section="1" type="button" title="Move section down" aria-label="Move section down" data-i18n-title="moveSectionDown" data-i18n-aria="moveSectionDown">↓</button>
         <button class="icon-button remove-section" type="button" title="Remove section" aria-label="Remove section" data-i18n-title="removeSection" data-i18n-aria="removeSection">&times;</button>
       </div>
     </div>
@@ -173,6 +172,11 @@
 
   <template id="streamRowTemplate">
     <tr>
+      <td class="stream-summary-cell" colspan="9">
+        <button class="icon-button drag-handle stream-mobile-handle" type="button" title="Drag to reorder" aria-label="Drag to reorder" data-i18n-title="dragToReorder" data-i18n-aria="dragToReorder">⠿</button>
+        <span class="stream-summary-name"></span>
+        <button class="icon-button stream-expand-button" type="button" aria-expanded="false" title="Stream details" aria-label="Stream details" data-i18n-title="streamDetails" data-i18n-aria="streamDetails"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+      </td>
       <td class="order-cell" data-label="Order" data-i18n-label="order">
         <div class="order-controls">
           <button class="icon-button drag-handle" draggable="true" type="button" title="Drag to reorder" aria-label="Drag to reorder" data-i18n-title="dragToReorder" data-i18n-aria="dragToReorder">⠿</button>

@@ -241,8 +241,8 @@ main {
 
 .managed-section {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
   gap: 12px;
   padding: 10px;
   border: 1px solid var(--border);
@@ -277,15 +277,71 @@ main {
 .drag-handle {
   cursor: grab;
   touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.stream-summary-cell,
+.stream-summary-cell *,
+.drag-preview,
+.drag-preview *,
+.section-name-control > span {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+body.admin-reordering,
+body.admin-reordering * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  -webkit-touch-callout: none !important;
+  cursor: grabbing;
 }
 
 .dragging {
-  opacity: 0.45;
+  opacity: 0.3;
+  outline: 1px dashed #688093;
+  outline-offset: -2px;
 }
 
-.move-section,
+.drag-preview {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 10000;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 16px 8px;
+  box-sizing: border-box;
+  background: #202832;
+  border: 1px solid #688093;
+  box-shadow: 0 12px 28px #0008;
+  border-radius: 3px;
+  pointer-events: none;
+  user-select: none;
+  will-change: transform;
+}
+
+.drag-preview-grip {
+  text-align: center;
+  color: var(--muted);
+  font-size: 24px;
+}
+
+#streamRows > tr.section-end > td {
+  border-bottom: 1px solid #536271;
+}
+
 .remove-section {
   font-size: 16px;
+}
+
+.managed-section.dragging .drag-handle {
+  cursor: grabbing;
 }
 
 .order-heading,
@@ -359,13 +415,55 @@ main {
   font-size: 22px;
 }
 
-.geo-heading {
-  justify-content: center;
+.geo-panel .geo-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
   text-align: center;
 }
 
 .geo-heading h2 {
+  grid-column: 1;
   margin-bottom: 0;
+}
+
+.geo-live-button {
+  grid-column: 2;
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.geo-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ed5252;
+  flex-shrink: 0;
+}
+
+.geo-live-button:hover,
+.geo-live-button[aria-pressed="true"] {
+  border-color: #ed5252;
+}
+
+.geo-live-button[aria-pressed="true"] {
+  background: rgb(237 82 82 / 10%);
+}
+
+.geo-live-button:focus-visible {
+  outline: 2px solid #ed5252;
+  outline-offset: 3px;
 }
 
 .geo-layout {
@@ -552,6 +650,33 @@ input:invalid {
 
 .remove-label {
   display: none;
+}
+
+.stream-summary-cell {
+  display: none;
+}
+
+.stream-summary-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stream-expand-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stream-expand-button[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.icon-button.stream-expand-button:hover,
+.icon-button.stream-mobile-handle:hover {
+  background: rgb(154 168 183 / 12%);
+  color: var(--text);
 }
 
 .icon-button {
@@ -793,7 +918,24 @@ dialog::backdrop {
 
   .managed-section {
     align-items: center;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: 34px minmax(0, 1fr) 34px;
+    gap: 8px;
+    padding: 10px 8px;
+  }
+
+  .section-name-control {
+    min-width: 0;
+  }
+
+  .section-name-control input {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .section-actions {
+    width: 34px;
+    justify-content: center;
   }
 
   .server-actions {
@@ -836,6 +978,74 @@ dialog::backdrop {
     width: auto;
   }
 
+  #streamRows {
+    display: grid;
+    gap: 8px;
+    padding: 14px;
+  }
+
+  #streamRows > tr {
+    min-width: 0;
+    padding: 10px 8px;
+    border: 1px solid var(--border);
+    background: #141920;
+    position: relative;
+  }
+
+  #streamRows > tr.section-end {
+    margin-bottom: 16px;
+  }
+
+  #streamRows > tr.section-end::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -13px;
+    height: 1px;
+    background: #536271;
+  }
+
+  #streamRows > tr.section-end > td {
+    border-bottom: 0;
+  }
+
+  #streamRows > tr > td {
+    display: none;
+  }
+
+  #streamRows > tr.stream-expanded > td {
+    display: grid;
+  }
+
+  #streamRows > tr.stream-expanded > td.order-cell {
+    display: none;
+  }
+
+  #streamRows > tr.stream-expanded > td.row-actions {
+    display: flex;
+  }
+
+  #streamRows > tr > td.stream-summary-cell {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) 34px;
+    gap: 8px;
+    width: auto;
+    padding: 0;
+  }
+
+  td.stream-summary-cell::before {
+    content: none;
+  }
+
+  .stream-mobile-handle {
+    cursor: grab;
+  }
+
+  tr.dragging .stream-mobile-handle {
+    cursor: grabbing;
+  }
+
   td::before {
     content: attr(data-label);
     color: var(--muted);
@@ -859,7 +1069,7 @@ dialog::backdrop {
     min-width: 0;
     height: auto;
     background: transparent;
-    color: var(--muted);
+    color: #c9868b;
     font-size: inherit;
     font-weight: 700;
   }

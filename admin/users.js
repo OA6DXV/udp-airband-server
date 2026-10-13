@@ -9,6 +9,9 @@ const translations = {
     listeners: 'Listeners',
     loadingMap: 'Loading map...',
     noGeoData: 'No public listener locations have been collected yet.',
+    noLiveGeoData: 'No connected listeners with a public location.',
+    liveToggle: 'Show live listeners',
+    historicalToggle: 'Return to historical locations',
     mapUnavailable: 'Google GeoChart could not be loaded.',
     requestFailed: 'Could not load listener geography.',
     mapAria: 'Listener geography map',
@@ -26,6 +29,9 @@ const translations = {
     listeners: 'Oyentes',
     loadingMap: 'Cargando mapa...',
     noGeoData: 'Todavía no se recopilaron ubicaciones públicas de oyentes.',
+    noLiveGeoData: 'No hay oyentes conectados con una ubicación pública.',
+    liveToggle: 'Mostrar oyentes en tiempo real',
+    historicalToggle: 'Volver a las ubicaciones históricas',
     mapUnavailable: 'No se pudo cargar Google GeoChart.',
     requestFailed: 'No se pudo cargar la geografía de oyentes.',
     mapAria: 'Mapa geográfico de oyentes',
@@ -45,6 +51,12 @@ const geoLayout = document.getElementById('geoLayout');
 const statusDot = document.querySelector('.status-dot');
 const countryDetail = document.getElementById('countryDetail');
 const logoutButton = document.getElementById('logoutButton');
+const liveGeoButton = document.getElementById('liveGeoButton');
+const LIVE_REFRESH_MS = 3000;
+let liveMode = false;
+let refreshTimer = null;
+let requestController = null;
+let chartsLoading = false;
 let language = localStorage.getItem(LANGUAGE_STORAGE_KEY);
 let geoStats = { countries: [], totalListeners: 0 };
 let chart = null;
@@ -71,6 +83,19 @@ window.addEventListener('resize', () => {
 });
 
 logoutButton.addEventListener('click', logout);
+liveGeoButton.addEventListener('click', () => {
+  liveMode = !liveMode;
+  liveGeoButton.setAttribute('aria-pressed', String(liveMode));
+  liveGeoButton.title = translate(liveMode ? 'historicalToggle' : 'liveToggle');
+  clearTimeout(refreshTimer);
+  if (requestController) requestController.abort();
+  selectedCode = '';
+  geoStats = { countries: [], totalListeners: 0 };
+  renderSelectedCountry();
+  if (chart) drawChart();
+  showMessage('loadingMap');
+  loadGeoStats();
+});
 bootstrap();
 
 async function bootstrap() {
@@ -101,16 +126,32 @@ async function logout() {
 }
 
 async function loadGeoStats() {
+  const controller = new AbortController();
+  requestController = controller;
   try {
-    const response = await fetch('/api/users/geo', { cache: 'no-store', credentials: 'same-origin' });
+    const response = await fetch(`/api/users/geo${liveMode ? '?mode=live' : ''}`, {
+      cache: 'no-store', credentials: 'same-origin', signal: controller.signal,
+    });
+    if (response.status === 401) {
+      window.location.replace('/');
+      return;
+    }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    geoStats = await response.json();
+    const payload = await response.json();
+    if (requestController !== controller) return;
+    geoStats = payload;
     setServerOnline(true);
     if (!Array.isArray(geoStats.countries)) geoStats.countries = [];
-    waitForGoogleCharts();
+    if (chart) drawChart();
+    else waitForGoogleCharts();
   } catch {
+    if (controller.signal.aborted || requestController !== controller) return;
     setServerOnline(false);
     showMessage('requestFailed', true);
+  } finally {
+    if (liveMode && requestController === controller && !controller.signal.aborted) {
+      refreshTimer = setTimeout(loadGeoStats, LIVE_REFRESH_MS);
+    }
   }
 }
 
@@ -119,6 +160,8 @@ function waitForGoogleCharts() {
     showMessage('mapUnavailable', true);
     return;
   }
+  if (chartsLoading) return;
+  chartsLoading = true;
   google.charts.load('current', { packages: ['geochart'] });
   google.charts.setOnLoadCallback(drawChart);
 }
@@ -139,8 +182,10 @@ function drawChart() {
     data.setFormattedValue(index, 0, `${country.country} | ${country.listeners}`);
   });
 
-  chart = new google.visualization.GeoChart(geoChartElement);
-  google.visualization.events.addListener(chart, 'select', handleSelection);
+  if (!chart) {
+    chart = new google.visualization.GeoChart(geoChartElement);
+    google.visualization.events.addListener(chart, 'select', handleSelection);
+  }
   chart.draw(data, {
     backgroundColor: '#181d24',
     colorAxis: {
@@ -160,7 +205,7 @@ function drawChart() {
   if (geoStats.countries.length) {
     hideMessage();
   } else {
-    showMessage('noGeoData');
+    showMessage(liveMode ? 'noLiveGeoData' : 'noGeoData');
   }
   renderSelectedCountry();
 }
@@ -179,7 +224,14 @@ function renderSelectedCountry() {
     return;
   }
   const country = geoStats.countries.find((entry) => entry.code === selectedCode);
-  if (!country) return;
+  if (!country) {
+    selectedCode = '';
+    countryDetail.hidden = true;
+    const layoutChanged = geoLayout.classList.contains('detail-visible');
+    geoLayout.classList.remove('detail-visible');
+    if (layoutChanged) scheduleLayoutRedraw();
+    return;
+  }
 
   document.getElementById('countryName').textContent = country.country;
   document.getElementById('countryListeners').textContent = String(country.listeners);
@@ -225,6 +277,7 @@ function applyLanguage() {
   document.documentElement.lang = language;
   languageSelect.value = language;
   languageSelect.setAttribute('aria-label', translate('language'));
+  liveGeoButton.title = translate(liveMode ? 'historicalToggle' : 'liveToggle');
   document.querySelectorAll('[data-i18n]').forEach((element) => {
     element.textContent = translate(element.dataset.i18n);
   });

@@ -60,12 +60,11 @@ const translations = {
     noSection: 'No section',
     order: 'Order',
     dragToReorder: 'Drag to reorder',
-    moveSectionUp: 'Move section up',
-    moveSectionDown: 'Move section down',
     removeSection: 'Remove section',
     addStream: '+ Add stream',
     routeName: 'Route name',
     displayName: 'Display name',
+    streamDetails: 'Stream details',
     udpHost: 'UDP host',
     udpPort: 'UDP port',
     sampleRate: 'Sample rate',
@@ -145,12 +144,11 @@ const translations = {
     noSection: 'Sin sección',
     order: 'Orden',
     dragToReorder: 'Arrastrar para reordenar',
-    moveSectionUp: 'Subir sección',
-    moveSectionDown: 'Bajar sección',
     removeSection: 'Eliminar sección',
     addStream: '+ Agregar stream',
     routeName: 'Nombre de ruta',
     displayName: 'Nombre visible',
+    streamDetails: 'Detalles del stream',
     udpHost: 'Host UDP',
     udpPort: 'Puerto UDP',
     sampleRate: 'Frecuencia de muestreo',
@@ -223,6 +221,10 @@ let reloadPending = false;
 let previousAppliedConfiguration = null;
 let pendingRemoveRow = null;
 let draggingRow = null;
+let draggingMobileStream = null;
+let draggingSection = null;
+let nativeDragPreview = null;
+const reorderAnimations = new WeakMap();
 let sectionIdSequence = 0;
 let csrfToken = '';
 let language = localStorage.getItem(LANGUAGE_STORAGE_KEY);
@@ -241,6 +243,7 @@ addButton.addEventListener('click', () => {
     sampleRate: 8000,
     channels: 1,
   });
+  setStreamExpanded(row, true);
   row.querySelector('[name="name"]').focus();
   markDirty();
 });
@@ -257,7 +260,53 @@ rowsEl.addEventListener('drop', (event) => {
   event.preventDefault();
 });
 rowsEl.addEventListener('dragend', handleStreamDragEnd);
+rowsEl.addEventListener('click', (event) => {
+  const button = event.target.closest('.stream-expand-button');
+  if (button) setStreamExpanded(button.closest('tr'), button.getAttribute('aria-expanded') !== 'true');
+});
+rowsEl.addEventListener('input', (event) => {
+  if (event.target.matches('[name="label"]')) updateStreamSummary(event.target.closest('tr'));
+});
+rowsEl.addEventListener('change', (event) => {
+  if (!event.target.matches('[name="sectionId"]')) return;
+  // A reassigned stream joins the end of its new group.
+  rowsEl.appendChild(event.target.closest('tr'));
+  organizeStreamRows();
+  markDirty();
+});
+rowsEl.addEventListener('pointerdown', handleMobileStreamDragStart);
+document.addEventListener('pointermove', handleMobileStreamDragMove);
+document.addEventListener('pointerup', handleMobileStreamDragEnd);
+document.addEventListener('pointercancel', handleMobileStreamDragEnd);
+rowsEl.addEventListener('lostpointercapture', handleMobileStreamDragEnd);
+form.addEventListener('invalid', (event) => {
+  const row = event.target.closest('#streamRows > tr');
+  if (row) setStreamExpanded(row, true);
+}, true);
 sectionsEl.addEventListener('click', handleSectionAction);
+sectionsEl.addEventListener('pointerdown', handleSectionDragStart);
+document.addEventListener('pointermove', handleSectionDragMove);
+document.addEventListener('pointerup', handleSectionDragEnd);
+document.addEventListener('pointercancel', handleSectionDragEnd);
+sectionsEl.addEventListener('lostpointercapture', handleSectionDragEnd);
+// On iOS, pointer preventDefault/touch-action alone do not block long-press selection.
+document.addEventListener('touchstart', (event) => {
+  if (event.target.closest?.('.stream-mobile-handle, .section-drag-handle') && event.cancelable) event.preventDefault();
+}, { passive: false });
+document.addEventListener('touchmove', (event) => {
+  if ((draggingMobileStream || draggingSection) && event.cancelable) event.preventDefault();
+}, { passive: false });
+document.addEventListener('contextmenu', (event) => {
+  if (draggingMobileStream || draggingSection || event.target.closest?.('.drag-handle')) event.preventDefault();
+});
+document.addEventListener('selectstart', (event) => {
+  if (draggingMobileStream || draggingSection || event.target.closest?.('.stream-summary-cell, .drag-handle')) event.preventDefault();
+});
+window.addEventListener('blur', cancelPointerReorder);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) cancelPointerReorder();
+});
+sectionsEl.addEventListener('keydown', handleSectionReorderKey);
 sectionsEl.addEventListener('input', (event) => {
   if (event.target.matches('[name="sectionName"]')) refreshSectionOptions();
 });
@@ -352,6 +401,7 @@ function appendRow(stream, options = {}) {
     sectionSelect.append(new Option(section.name, section.id));
   }
   sectionSelect.value = stream.sectionId || '';
+  updateStreamSummary(row);
   row.querySelector('.remove-stream').addEventListener('click', () => {
     if (rowsEl.children.length <= 1) {
       showMessage(translate('atLeastOneStream'), 'error');
@@ -366,6 +416,170 @@ function appendRow(stream, options = {}) {
   return row;
 }
 
+function updateStreamSummary(row) {
+  const name = row.querySelector('[name="label"]').value;
+  const summary = row.querySelector('.stream-summary-name');
+  summary.textContent = name;
+  summary.title = name;
+}
+
+function setStreamExpanded(row, expanded) {
+  row.classList.toggle('stream-expanded', expanded);
+  row.querySelector('.stream-expand-button').setAttribute('aria-expanded', String(expanded));
+}
+
+function createDragPreview(row, x, y) {
+  document.body.classList.add('admin-reordering');
+  window.getSelection()?.removeAllRanges();
+  const rect = row.getBoundingClientRect();
+  const preview = document.createElement('div');
+  preview.className = 'drag-preview';
+  preview.setAttribute('aria-hidden', 'true');
+  const grip = document.createElement('span');
+  grip.className = 'drag-preview-grip';
+  grip.textContent = '⠿';
+  const title = document.createElement('span');
+  title.className = 'stream-summary-name';
+  title.textContent = row.querySelector('[name="label"], [name="sectionName"]').value;
+  preview.append(grip, title);
+  preview.style.width = `${rect.width}px`;
+  document.body.appendChild(preview);
+  const visual = { preview, offsetX: x - rect.left, offsetY: Math.min(y - rect.top, preview.offsetHeight / 2) };
+  moveDragPreview(visual, x, y);
+  return visual;
+}
+
+function moveDragPreview(visual, x, y) {
+  visual.preview.style.transform = `translate3d(${x - visual.offsetX}px, ${y - visual.offsetY}px, 0)`;
+}
+
+function finishDragPreview(visual, row) {
+  document.body.classList.remove('admin-reordering');
+  const preview = visual.preview;
+  const rect = row.getBoundingClientRect();
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    preview.remove();
+    return;
+  }
+  const animation = preview.animate([
+    { transform: preview.style.transform, opacity: 1 },
+    { transform: `translate3d(${rect.left}px, ${rect.top}px, 0)`, opacity: 0 },
+  ], { duration: 160, easing: 'ease-out', fill: 'forwards' });
+  animation.finished.catch(() => {}).then(() => preview.remove());
+}
+
+function animateRowReorder(container, heldRow, change) {
+  const rows = Array.from(container.children);
+  const before = new Map(rows.map((row) => [row, row.getBoundingClientRect().top]));
+  rows.forEach((row) => reorderAnimations.get(row)?.cancel());
+  change();
+  if (container === rowsEl) updateStreamBoundaries();
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  for (const row of rows) {
+    if (row === heldRow) continue;
+    const offset = before.get(row) - row.getBoundingClientRect().top;
+    if (Math.abs(offset) < 1) continue;
+    reorderAnimations.set(row, row.animate([
+      { transform: `translateY(${offset}px)` }, { transform: 'translateY(0)' },
+    ], { duration: 180, easing: 'ease-out' }));
+  }
+}
+
+function updateStreamBoundaries() {
+  const rows = Array.from(rowsEl.children);
+  rows.forEach((row, index) => {
+    row.classList.toggle('section-end', index < rows.length - 1 && !sameStreamSection(row, rows[index + 1]));
+  });
+}
+
+function cancelPointerReorder() {
+  if (draggingMobileStream) handleMobileStreamDragEnd({ pointerId: draggingMobileStream.pointerId, type: 'pointercancel' });
+  if (draggingSection) handleSectionDragEnd({ pointerId: draggingSection.pointerId, type: 'pointercancel' });
+  if (draggingRow) handleStreamDragEnd();
+  document.querySelectorAll('.drag-preview').forEach((preview) => preview.remove());
+  document.body.classList.remove('admin-reordering');
+}
+
+function streamLayoutRect(row) {
+  const rect = row.getBoundingClientRect();
+  const transform = getComputedStyle(row).transform;
+  const offset = transform === 'none' ? 0 : new DOMMatrixReadOnly(transform).m42;
+  return { left: rect.left, right: rect.right, top: rect.top - offset, height: rect.height };
+}
+
+function findReorderTarget(container, heldRow, x, y) {
+  // Hit-test the final layout, not moving animation frames (which can oscillate).
+  return Array.from(container.children).find((row) => {
+    if (row === heldRow) return false;
+    const rect = streamLayoutRect(row);
+    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.top + rect.height;
+  });
+}
+
+function handleMobileStreamDragStart(event) {
+  const handle = event.target.closest('.stream-mobile-handle');
+  if (!handle || event.button !== 0 || event.isPrimary === false || operationBusy || draggingMobileStream) return;
+  event.preventDefault();
+  const row = handle.closest('tr');
+  draggingMobileStream = {
+    row, pointerId: event.pointerId, initialRows: Array.from(rowsEl.children),
+    x: event.clientX, y: event.clientY, frame: null,
+    visual: createDragPreview(row, event.clientX, event.clientY),
+  };
+  row.classList.add('dragging');
+  if (event.pointerType !== 'touch') handle.focus({ preventScroll: true });
+  rowsEl.setPointerCapture(event.pointerId);
+  draggingMobileStream.frame = requestAnimationFrame(scrollMobileStreamDrag);
+}
+
+function moveMobileStreamRow() {
+  const drag = draggingMobileStream;
+  const row = findReorderTarget(rowsEl, drag.row, drag.x, drag.y);
+  if (!row || row.parentElement !== rowsEl || row === drag.row) return;
+  if (!sameStreamSection(row, drag.row)) return;
+  const rect = streamLayoutRect(row);
+  const next = drag.y > rect.top + rect.height / 2 ? row.nextElementSibling : row;
+  if (next === drag.row || drag.row.nextElementSibling === next) return;
+  animateRowReorder(rowsEl, drag.row, () => rowsEl.insertBefore(drag.row, next));
+}
+
+function handleMobileStreamDragMove(event) {
+  if (!draggingMobileStream || event.pointerId !== draggingMobileStream.pointerId) return;
+  if (event.cancelable) event.preventDefault();
+  draggingMobileStream.x = event.clientX;
+  draggingMobileStream.y = event.clientY;
+  moveDragPreview(draggingMobileStream.visual, event.clientX, event.clientY);
+  moveMobileStreamRow();
+}
+
+function scrollMobileStreamDrag() {
+  if (!draggingMobileStream) return;
+  const y = draggingMobileStream.y;
+  const step = y < 64 ? -12 : y > window.innerHeight - 64 ? 12 : 0;
+  if (step) {
+    window.scrollBy(0, step);
+    moveMobileStreamRow();
+  }
+  draggingMobileStream.frame = requestAnimationFrame(scrollMobileStreamDrag);
+}
+
+function handleMobileStreamDragEnd(event) {
+  if (!draggingMobileStream || event.pointerId !== draggingMobileStream.pointerId) return;
+  const { row, pointerId, initialRows, frame, visual } = draggingMobileStream;
+  draggingMobileStream = null;
+  cancelAnimationFrame(frame);
+  row.classList.remove('dragging');
+  if (rowsEl.hasPointerCapture(pointerId)) rowsEl.releasePointerCapture(pointerId);
+  if (event.type === 'pointercancel' || event.type === 'lostpointercapture') {
+    initialRows.forEach((initialRow) => rowsEl.appendChild(initialRow));
+    updateStreamBoundaries();
+    finishDragPreview(visual, row);
+    return;
+  }
+  finishDragPreview(visual, row);
+  if (initialRows.some((initialRow, index) => rowsEl.children[index] !== initialRow)) markDirty();
+}
+
 function createSectionId() {
   sectionIdSequence += 1;
   return `section-${Date.now().toString(36)}-${sectionIdSequence.toString(36)}`;
@@ -377,7 +591,6 @@ function appendSection(section) {
   row.querySelector('[name="sectionName"]').value = section.name || '';
   applyTranslations(row);
   sectionsEl.appendChild(row);
-  updateSectionOrderControls();
   return row;
 }
 
@@ -402,21 +615,32 @@ function refreshSectionOptions() {
     for (const section of sections) select.append(new Option(section.name, section.id));
     select.value = sections.some((section) => section.id === selected) ? selected : '';
   }
+  organizeStreamRows();
+}
+
+function organizeStreamRows() {
+  const groups = new Map(collectFormSections().map((section) => [section.id, []]));
+  groups.set('', []);
+  const current = Array.from(rowsEl.children);
+  for (const row of current) {
+    const id = row.querySelector('[name="sectionId"]').value;
+    (groups.get(id) || groups.get('')).push(row);
+  }
+  const ordered = Array.from(groups.values()).flat();
+  if (ordered.some((row, index) => row !== current[index])) {
+    ordered.forEach((row) => rowsEl.appendChild(row));
+  }
+  updateStreamBoundaries();
+}
+
+function sameStreamSection(first, second) {
+  return first.querySelector('[name="sectionId"]').value === second.querySelector('[name="sectionId"]').value;
 }
 
 function handleSectionAction(event) {
   const button = event.target.closest('button');
   const row = button && button.closest('.managed-section');
   if (!row) return;
-  const direction = Number(button.dataset.moveSection);
-  if (Number.isInteger(direction) && direction) {
-    const sibling = direction < 0 ? row.previousElementSibling : row.nextElementSibling;
-    if (!sibling) return;
-    sectionsEl.insertBefore(direction < 0 ? row : sibling, direction < 0 ? sibling : row);
-    updateSectionOrderControls();
-    markDirty();
-    return;
-  }
   if (button.classList.contains('remove-section')) {
     const removedId = row.dataset.sectionId;
     for (const select of rowsEl.querySelectorAll('[name="sectionId"]')) {
@@ -424,17 +648,63 @@ function handleSectionAction(event) {
     }
     row.remove();
     refreshSectionOptions();
-    updateSectionOrderControls();
     markDirty();
   }
 }
 
-function updateSectionOrderControls() {
-  const rows = Array.from(sectionsEl.children);
-  rows.forEach((row, index) => {
-    row.querySelector('[data-move-section="-1"]').disabled = index === 0;
-    row.querySelector('[data-move-section="1"]').disabled = index === rows.length - 1;
-  });
+function handleSectionDragStart(event) {
+  const handle = event.target.closest('.section-drag-handle');
+  if (!handle || handle.disabled || event.button !== 0 || event.isPrimary === false || draggingSection) return;
+  event.preventDefault();
+  const row = handle.closest('.managed-section');
+  draggingSection = { row, pointerId: event.pointerId, initialRows: Array.from(sectionsEl.children), visual: createDragPreview(row, event.clientX, event.clientY) };
+  row.classList.add('dragging');
+  if (event.pointerType !== 'touch') handle.focus({ preventScroll: true });
+  sectionsEl.setPointerCapture(event.pointerId);
+}
+
+function handleSectionDragMove(event) {
+  if (!draggingSection || event.pointerId !== draggingSection.pointerId) return;
+  if (event.cancelable) event.preventDefault();
+  moveDragPreview(draggingSection.visual, event.clientX, event.clientY);
+  const row = findReorderTarget(sectionsEl, draggingSection.row, event.clientX, event.clientY);
+  if (!row || row.parentElement !== sectionsEl || row === draggingSection.row) return;
+  const rect = streamLayoutRect(row);
+  const next = event.clientY > rect.top + rect.height / 2 ? row.nextElementSibling : row;
+  if (next === draggingSection.row || draggingSection.row.nextElementSibling === next) return;
+  animateRowReorder(sectionsEl, draggingSection.row, () => sectionsEl.insertBefore(draggingSection.row, next));
+}
+
+function handleSectionDragEnd(event) {
+  if (!draggingSection || event.pointerId !== draggingSection.pointerId) return;
+  const { row, pointerId, initialRows, visual } = draggingSection;
+  draggingSection = null;
+  row.classList.remove('dragging');
+  if (sectionsEl.hasPointerCapture(pointerId)) sectionsEl.releasePointerCapture(pointerId);
+  if (event.type === 'pointercancel' || event.type === 'lostpointercapture') {
+    initialRows.forEach((initialRow) => sectionsEl.appendChild(initialRow));
+    finishDragPreview(visual, row);
+    return;
+  }
+  finishDragPreview(visual, row);
+  if (initialRows.some((initialRow, index) => sectionsEl.children[index] !== initialRow)) {
+    refreshSectionOptions();
+    markDirty();
+  }
+}
+
+function handleSectionReorderKey(event) {
+  const handle = event.target.closest('.section-drag-handle');
+  if (!handle || !['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+  event.preventDefault();
+  const row = handle.closest('.managed-section');
+  const upwards = event.key === 'ArrowUp';
+  const sibling = upwards ? row.previousElementSibling : row.nextElementSibling;
+  if (!sibling) return;
+  sectionsEl.insertBefore(upwards ? row : sibling, upwards ? sibling : row);
+  handle.focus({ preventScroll: true });
+  refreshSectionOptions();
+  markDirty();
 }
 
 function handleStreamDragStart(event) {
@@ -444,6 +714,10 @@ function handleStreamDragStart(event) {
   }
   draggingRow = event.target.closest('tr');
   draggingRow.classList.add('dragging');
+  nativeDragPreview = createDragPreview(draggingRow, event.clientX, event.clientY);
+  event.dataTransfer.setDragImage(nativeDragPreview.preview, nativeDragPreview.offsetX, nativeDragPreview.offsetY);
+  // The browser moves the native drag image; hide its original after capture.
+  requestAnimationFrame(() => { if (nativeDragPreview) nativeDragPreview.preview.style.opacity = '0'; });
   event.dataTransfer.effectAllowed = 'move';
   event.dataTransfer.setData('text/plain', draggingRow.querySelector('[name="name"]').value);
 }
@@ -452,14 +726,20 @@ function handleStreamDragOver(event) {
   if (!draggingRow) return;
   const targetRow = event.target.closest('tr');
   if (!targetRow || targetRow === draggingRow) return;
+  if (targetRow.parentElement !== rowsEl || !sameStreamSection(targetRow, draggingRow)) return;
   event.preventDefault();
   const afterTarget = event.clientY > targetRow.getBoundingClientRect().top + targetRow.offsetHeight / 2;
-  rowsEl.insertBefore(draggingRow, afterTarget ? targetRow.nextElementSibling : targetRow);
+  const next = afterTarget ? targetRow.nextElementSibling : targetRow;
+  if (next === draggingRow || draggingRow.nextElementSibling === next) return;
+  animateRowReorder(rowsEl, draggingRow, () => rowsEl.insertBefore(draggingRow, next));
 }
 
 function handleStreamDragEnd() {
   if (!draggingRow) return;
   draggingRow.classList.remove('dragging');
+  nativeDragPreview?.preview.remove();
+  nativeDragPreview = null;
+  document.body.classList.remove('admin-reordering');
   draggingRow = null;
   markDirty();
 }
@@ -683,6 +963,7 @@ async function request(url, options = {}) {
 }
 
 function markDirty() {
+  updateStreamBoundaries();
   changeScope = classifyStreamChanges(collectFormStreams(), savedStreams);
   dirty = changeScope !== 'none'
     || !streamLayoutEqual(collectFormStreams(), savedStreams)
@@ -704,6 +985,7 @@ function renderStreamsFrom(streams, sections = savedSections) {
   renderSections(sections);
   rowsEl.replaceChildren();
   streams.forEach(appendRow);
+  organizeStreamRows();
   changeScope = classifyStreamChanges(collectFormStreams(), savedStreams);
   dirty = changeScope !== 'none'
     || !streamLayoutEqual(collectFormStreams(), savedStreams)

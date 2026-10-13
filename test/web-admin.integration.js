@@ -57,7 +57,7 @@ async function run() {
   const runtimeDatabasePath = path.join(dataDir, 'localdb.sqlite');
   await createTestAdministrator(runtimeDatabasePath);
   seedGeoRecords(runtimeDatabasePath, [
-    geoRecord('203.0.113.0', 'PE', 'Peru', 'Cusco'),
+    geoRecord('8.8.8.0', 'PE', 'Peru', 'Cusco'),
     geoRecord('203.0.114.0', 'PE', 'Peru', 'Cusco'),
     geoRecord('203.0.115.0', 'PE', 'Peru', 'Lima'),
     geoRecord('198.51.100.0', 'US', 'United States', 'Miami'),
@@ -111,6 +111,7 @@ async function run() {
     assert.match(loginPage.body, /id="loginForm"/);
     assert.match(loginPage.body, /<form[^>]+novalidate/);
     assert.strictEqual((await request(adminPort, '/api/state')).statusCode, 401);
+    assert.strictEqual((await request(adminPort, '/api/users/geo?mode=live')).statusCode, 401);
     const altchaWorker = await request(adminPort, '/altcha-pbkdf2.js');
     assert.strictEqual(altchaWorker.statusCode, 200);
     assert.match(altchaWorker.body, /onmessage/);
@@ -133,6 +134,7 @@ async function run() {
     assert.strictEqual(usersPage.statusCode, 200);
     assert.match(usersPage.body, /Web Admin/);
     assert.match(usersPage.body, /id="geoChart"/);
+    assert.match(usersPage.body, /id="liveGeoButton"/);
     assert.match(usersPage.body, /\/users\.js/);
     assert.match(usersPage.headers['content-security-policy'], /https:\/\/www\.gstatic\.com/);
 
@@ -150,6 +152,37 @@ async function run() {
         { city: 'Lima', listeners: 1 },
       ],
     });
+
+    assert.deepStrictEqual(await requestJson(adminPort, '/api/users/geo?mode=live'), {
+      countries: [], totalListeners: 0, totalActiveListeners: 0, unlocatedListeners: 0,
+    });
+    const liveSockets = [];
+    try {
+      liveSockets.push(await openControlWebSocket(publicPort, '/test/control?clientId=live-client-first', { 'X-Forwarded-For': '8.8.8.42' }));
+      liveSockets.push(await openControlWebSocket(publicPort, '/test/audio?clientId=live-client-first', { 'X-Forwarded-For': '8.8.8.42' }));
+      liveSockets.push(await openControlWebSocket(publicPort, '/test/control?clientId=live-client-second', { 'X-Forwarded-For': '8.8.8.99' }));
+      liveSockets.push(await openControlWebSocket(publicPort, '/test/control?clientId=live-client-monitor&monitor=1', { 'X-Forwarded-For': '8.8.8.99' }));
+      liveSockets.push(await openControlWebSocket(publicPort, '/test/control?clientId=live-client-local'));
+      const live = await requestJson(adminPort, '/api/users/geo?mode=live');
+      assert.strictEqual(live.totalActiveListeners, 4, 'multiple sockets per client must not inflate the connected-user count');
+      assert.strictEqual(live.totalListeners, 3, 'different clients in the same anonymized subnet must each count');
+      assert.strictEqual(live.unlocatedListeners, 1);
+      assert.strictEqual(live.countries[0].listeners, 3);
+      assert.deepStrictEqual(live.countries[0].topCities, [{ city: 'Cusco', listeners: 3 }]);
+      assert.doesNotMatch(JSON.stringify(live), /8\.8\.8|127\.0\.0|live-client|anonymizedIp|connectedAt/);
+      liveSockets[0].close();
+      await waitFor(() => output.includes('client_connected'));
+      assert.strictEqual((await requestJson(adminPort, '/api/users/geo?mode=live')).totalActiveListeners, 4);
+      liveSockets[1].close();
+      await waitFor(async () => {
+        const current = await requestJson(adminPort, '/api/users/geo?mode=live');
+        return current.totalListeners === 2 && current.totalActiveListeners === 3;
+      });
+    } finally {
+      liveSockets.forEach((connection) => connection.close());
+    }
+    await waitFor(async () => (await requestJson(adminPort, '/api/users/geo?mode=live')).totalActiveListeners === 0);
+    assert.strictEqual((await requestJson(adminPort, '/api/users/geo')).totalListeners, 4, 'live disconnects must leave historical cache intact');
 
     const publicPage = await request(publicPort, '/');
     assert.strictEqual(publicPage.statusCode, 200);
@@ -236,7 +269,7 @@ async function run() {
     assert.strictEqual(invalidLayout.statusCode, 400);
     assert.deepStrictEqual(JSON.parse(fs.readFileSync(configPath, 'utf8')), layoutOnly);
 
-    const secondStream = { ...updated.streams[0], name: 'second', udpPort: await reserveUdpPort() };
+    const secondStream = { ...updated.streams[0], name: 'second', sectionId: section.id, udpPort: await reserveUdpPort() };
     await requestJson(adminPort, '/api/streams', {
       method: 'PUT',
       body: JSON.stringify({ sections: [section], streams: [...layoutOnly.streams, secondStream] }),
@@ -767,7 +800,7 @@ function request(port, pathname, options = {}) {
   });
 }
 
-function openControlWebSocket(port, pathname) {
+function openControlWebSocket(port, pathname, headers = {}) {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ host: '127.0.0.1', port });
     const messages = [];
@@ -854,6 +887,7 @@ function openControlWebSocket(port, pathname) {
         'Upgrade: websocket',
         'Sec-WebSocket-Version: 13',
         `Sec-WebSocket-Key: ${key}`,
+        ...Object.entries(headers).map(([name, value]) => `${name}: ${value}`),
         '',
         '',
       ].join('\r\n'));

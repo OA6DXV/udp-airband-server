@@ -37,7 +37,7 @@ const { acceptWebSocket, attachWebSocketLifecycle, sendWsBinary, sendWsJson } = 
 const { createCompressedManager } = require('./lib/compressed');
 const { ADPCM_FRAME_MS, OPUS_FRAME_MS, OPUS_BITRATE_8K, OPUS_BITRATE_16K, WORKLET_TARGET_LATENCY_MS } = require('./lib/audio-profiles');
 const { createGeoService } = require('./lib/geo-service');
-const { aggregateGeoStats } = require('./lib/geo-stats');
+const { aggregateGeoStats, aggregateLiveGeoStats } = require('./lib/geo-stats');
 const { detectRuntimeMode } = require('./lib/runtime');
 const { createStorage } = require('./lib/storage');
 const { archiveLegacyJsonFiles, inspectLegacyJsonRuntimeStorage, migrateStorage, verifySqliteIntegrity } = require('./lib/storage-migration');
@@ -620,6 +620,9 @@ function createClientLifecycleLog(activityLogger, onCountChanged, onClientConnec
 
   return {
     activeCount: () => clients.size,
+    activeRemotes: () => Array.from(clients.values())
+      .filter((entry) => entry.socketCount > 0)
+      .map((entry) => entry.remote),
     record,
   };
 }
@@ -636,7 +639,9 @@ async function startWebServers() {
       assets: adminAssets,
       auth: adminAuth,
       getAdminSetupRequired: () => !hasWebAdminUser(),
-      getGeoStats: () => aggregateGeoStats(geoCache.entries()),
+      getGeoStats: (mode) => mode === 'live'
+        ? aggregateLiveGeoStats(clientLifecycleLog.activeRemotes(), geoCache)
+        : aggregateGeoStats(geoCache.entries()),
       getState: getWebAdminState,
       getStreamConfigSnapshot: () => ({
         sections: streamSections,
